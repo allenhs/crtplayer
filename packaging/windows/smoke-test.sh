@@ -38,7 +38,9 @@ env PATH="$CLEAN_PATH" "$APP" --version > "$WORK/out/version.txt" 2>&1; echo "ve
 env PATH="$CLEAN_PATH" "$APP" --check-gstreamer > "$WORK/out/gstreamer.txt" 2>&1; echo "check-gstreamer rc=$?"
 cat "$WORK/out/version.txt" "$WORK/out/gstreamer.txt"
 # (MSYS2's timeout, by its full path: with the stripped PATH, "timeout" would be Windows' TIMEOUT.EXE)
-export QT_FORCE_STDERR_LOGGING=1 QT_LOGGING_RULES="qt.qpa.gl=true"
+export QT_FORCE_STDERR_LOGGING=1 QT_LOGGING_RULES="qt.qpa.gl=true" GST_DEBUG="${GST_DEBUG:-2}"
+# Mesa's plain CPU renderer: the runner's D3D12 "Basic Render Driver" path is not dependable.
+export GALLIUM_DRIVER=llvmpipe
 /usr/bin/timeout 300 env PATH="$CLEAN_PATH" QT_OPENGL=software "$APP" --automation "$(cygpath -m "$WORK/smoke.txt")" \
   --automation-log "$O/smoke.json" > "$WORK/out/app.log" 2>&1
 rc=$?
@@ -46,7 +48,7 @@ echo "automation rc=$rc"
 if [ $rc -ne 0 ] && command -v gdb >/dev/null; then
   # A crash: run it again under the debugger and keep the backtrace.
   GDB=$(command -v gdb)
-  /usr/bin/timeout 300 env PATH="$CLEAN_PATH" QT_OPENGL=software "$GDB" -batch -q -ex run -ex "bt 30" -ex "info registers rip" \
+  /usr/bin/timeout 300 env PATH="$CLEAN_PATH" QT_OPENGL=software "$GDB" -batch -q -ex "set breakpoint pending on" -ex "break ExitProcess" -ex "break TerminateProcess" -ex "break RtlExitUserProcess" -ex run -ex "bt 40" -ex "info registers rip" \
     --args "$APP" --automation "$(cygpath -m "$WORK/smoke.txt")" --automation-log "$O/smoke-gdb.json" > "$WORK/out/gdb.log" 2>&1
   echo "---- under the debugger:"
   grep -v "^\[New Thread\|^\[Thread .* exited" "$WORK/out/gdb.log" | tail -60

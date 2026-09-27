@@ -55,7 +55,7 @@ void Automation::log(const QString& cmd, const QJsonObject& data)
     m_log.append(o);
     QFile f(m_logPath);
     if (f.open(QIODevice::WriteOnly | QIODevice::Truncate)) f.write(QJsonDocument(m_log).toJson());
-    QTextStream(stdout) << "[auto] " << cmd << "\n";
+    QTextStream(stdout) << "[auto] " << cmd << Qt::endl;   // flushed: a crash still shows the last step
     fflush(stdout);
 }
 
