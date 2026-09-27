@@ -87,8 +87,30 @@ jobs:
           name: CRT_Player-${{ env.VERSION }}-windows-x64
           path: CRT_Player-*-windows-x64.zip
 
-      - name: Publish the release (version tags)
-        if: startsWith(github.ref, 'refs/tags/v')
+      # A new version number on main (or a pushed v* tag) publishes a release with the zip.
+      - name: Is this version released yet?
+        id: released
+        if: github.event_name == 'push'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "v$VERSION" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "exists=yes" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=no" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Publish the release
+        if: github.event_name == 'push' && (startsWith(github.ref, 'refs/tags/v') || (github.ref == 'refs/heads/main' && steps.released.outputs.exists == 'no'))
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: v${{ env.VERSION }}
+          target_commitish: ${{ github.sha }}
+          name: CRT Player ${{ env.VERSION }}
+          prerelease: true
+          body: |
+            **Windows 10 and 11 (preview):** download `CRT_Player-${{ env.VERSION }}-windows-x64.zip`, unzip it anywhere and run `crtplayer.exe` in the `CRT Player` folder. Nothing else to install.
+            Windows may warn about an unrecognised app the first time: choose *More info → Run anyway* (the build isn't code-signed).
+            Linux: use the AppImage. See the README for details.
           files: CRT_Player-*-windows-x64.zip
