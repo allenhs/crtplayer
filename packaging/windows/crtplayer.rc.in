@@ -1,11 +1,12 @@
 // Windows resources: the icon (Explorer, the taskbar, the window) and version details.
+// CMake fills in the version (configure_file).
 #include <winver.h>
 
-IDI_ICON1 ICON "crtplayer.ico"
+IDI_ICON1 ICON "@CRTPLAYER_ICO@"
 
 VS_VERSION_INFO VERSIONINFO
-FILEVERSION     CRTPLAYER_RC_VERSION
-PRODUCTVERSION  CRTPLAYER_RC_VERSION
+FILEVERSION     @PROJECT_VERSION_MAJOR@,@PROJECT_VERSION_MINOR@,@PROJECT_VERSION_PATCH@,0
+PRODUCTVERSION  @PROJECT_VERSION_MAJOR@,@PROJECT_VERSION_MINOR@,@PROJECT_VERSION_PATCH@,0
 FILEFLAGSMASK   0x3fL
 FILEFLAGS       0x0L
 FILEOS          VOS_NT_WINDOWS32
@@ -18,11 +19,11 @@ BEGIN
         BEGIN
             VALUE "CompanyName",      "CRT Player"
             VALUE "FileDescription",  "CRT Player"
-            VALUE "FileVersion",      CRTPLAYER_RC_VERSION_STR
+            VALUE "FileVersion",      "@PROJECT_VERSION@"
             VALUE "InternalName",     "crtplayer"
             VALUE "OriginalFilename", "crtplayer.exe"
             VALUE "ProductName",      "CRT Player"
-            VALUE "ProductVersion",   CRTPLAYER_RC_VERSION_STR
+            VALUE "ProductVersion",   "@PROJECT_VERSION@"
         END
     END
     BLOCK "VarFileInfo"

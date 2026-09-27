@@ -71,9 +71,9 @@ if(WIN32)
   # A windowed app (no console window); the icon and version details come from the resource file.
   enable_language(RC)
   set_target_properties(crtplayer PROPERTIES WIN32_EXECUTABLE ON)
-  target_sources(crtplayer PRIVATE packaging/windows/crtplayer.rc)
-  set_source_files_properties(packaging/windows/crtplayer.rc PROPERTIES COMPILE_DEFINITIONS
-    "CRTPLAYER_RC_VERSION=${PROJECT_VERSION_MAJOR},${PROJECT_VERSION_MINOR},${PROJECT_VERSION_PATCH},0;CRTPLAYER_RC_VERSION_STR=\"${PROJECT_VERSION}\"")
+  set(CRTPLAYER_ICO "${CMAKE_CURRENT_SOURCE_DIR}/packaging/windows/crtplayer.ico")
+  configure_file(packaging/windows/crtplayer.rc.in ${CMAKE_CURRENT_BINARY_DIR}/crtplayer.rc @ONLY)
+  target_sources(crtplayer PRIVATE ${CMAKE_CURRENT_BINARY_DIR}/crtplayer.rc)
 else()
   target_sources(crtplayer PRIVATE src/app/Mpris.cpp src/app/Mpris.h)
   target_link_libraries(crtplayer PRIVATE Qt6::DBus)
