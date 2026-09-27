@@ -126,6 +126,24 @@ static GstElement* fallbackAudioSink(QString* name)
 {
     // The automatic output is used when it can open a device; with no sound device at all (no
     // speakers, audio service stopped) it would stop playback with an error instead.
+#ifdef _WIN32
+    // Windows' sinks open without a device and only fail once playing starts: ask for the
+    // output devices instead, and play silently (still timed) when there are none.
+    {
+        GstDeviceMonitor* mon = gst_device_monitor_new();
+        gst_device_monitor_add_filter(mon, "Audio/Sink", nullptr);
+        GList* devs = gst_device_monitor_get_devices(mon);
+        const bool any = devs != nullptr;
+        g_list_free_full(devs, gst_object_unref);
+        gst_object_unref(mon);
+        if (!any) {
+            GstElement* f = gst_element_factory_make("fakesink", nullptr);
+            if (f) g_object_set(f, "sync", TRUE, nullptr);
+            *name = QStringLiteral("none");
+            return f;
+        }
+    }
+#endif
     if (GstElement* a = gst_element_factory_make("autoaudiosink", nullptr)) {
         const bool ok = gst_element_set_state(a, GST_STATE_READY) != GST_STATE_CHANGE_FAILURE;
         gst_element_set_state(a, GST_STATE_NULL);
