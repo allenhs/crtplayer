@@ -37,23 +37,36 @@ jobs:
 
       - name: Build
         run: |
-          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
-          cmake --build build
+          set -o pipefail
+          { cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release && cmake --build build; } 2>&1 | tee build.log \
+            || { bash packaging/windows/ci-annotate.sh error Build build.log; tail -60 build.log | bash packaging/windows/ci-annotate.sh error "Build (end of log)" - '.'; exit 1; }
 
       - name: Unit tests
-        run: ctest --test-dir build --output-on-failure
+        run: |
+          set -o pipefail
+          ctest --test-dir build --output-on-failure 2>&1 | tee ctest.log || { bash packaging/windows/ci-annotate.sh error "Unit tests" ctest.log; exit 1; }
+          bash packaging/windows/ci-annotate.sh notice "Unit tests" ctest.log 'tests passed|PASS'
 
       - name: Package
         run: |
           VERSION=$(sed -n 's/^project(CRTPlayer VERSION \([0-9.]*\).*/\1/p' CMakeLists.txt)
           echo "VERSION=$VERSION" >> "$GITHUB_ENV"
-          bash packaging/windows/package.sh build "dist/CRT Player"
+          set -o pipefail
+          bash packaging/windows/package.sh build "dist/CRT Player" 2>&1 | tee package.log \
+            || { bash packaging/windows/ci-annotate.sh error Package package.log '.'; exit 1; }
+          bash packaging/windows/ci-annotate.sh notice Package package.log 'Packaged|GStreamer plugins'
           cp README.md "dist/CRT Player/README.md"
           (cd dist && zip -qr "../CRT_Player-$VERSION-windows-x64.zip" "CRT Player")
           ls -la CRT_Player-*.zip
 
       - name: Smoke test (the packaged player on its own)
-        run: bash packaging/windows/smoke-test.sh "dist/CRT Player" smoke
+        run: |
+          set -o pipefail
+          bash packaging/windows/smoke-test.sh "dist/CRT Player" smoke 2>&1 | tee smoke.log
+          rc=$?
+          bash packaging/windows/ci-annotate.sh notice "Smoke test" smoke.log 'PASS|rc=|CRTPlayer|checks passed'
+          bash packaging/windows/ci-annotate.sh error "Smoke test" smoke.log 'FAIL|failed|rror'
+          exit $rc
 
       - name: Upload the smoke test's results
         if: always()
