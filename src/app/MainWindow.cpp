@@ -139,8 +139,8 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent)
     });
     connect(m_video, &VideoWidget::glFailed, this, [this](const QString& msg) {
         QMessageBox::critical(this, tr("OpenGL 3.3 is required"),
-                              tr("The video renderer could not start:\n%1\n\nCheck that Mesa/NVIDIA OpenGL drivers are installed.").arg(msg));
-    });
+                              tr("The video renderer could not start:\n%1\n\nCheck that your graphics card's driver is installed.").arg(msg));
+    }, Qt::QueuedConnection);
     connect(m_video, &VideoWidget::mouseActivity, this, &MainWindow::onMouseActivity);
     connect(m_video, &VideoWidget::doubleClicked, this, [this] { setFullscreen(!m_fullscreen); });
     connect(m_video, &VideoWidget::splitChanged, this, [this](double f) { m_settings.split = f; });

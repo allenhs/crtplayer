@@ -2,6 +2,8 @@
 
 #include <QDebug>
 #include <QFile>
+#include <QOpenGLContext>
+#include <QOpenGLFunctions>
 #include <cstring>
 
 #ifndef GL_CLAMP_TO_BORDER
@@ -12,6 +14,25 @@
 #endif
 
 CrtRenderer::~CrtRenderer() = default;
+
+// Refuses contexts older than OpenGL 3.3 (e.g. Windows' built-in "GDI Generic" 1.1 when no graphics
+// driver is installed): the shaders need 3.3 and calling missing entry points would crash.
+static bool glContextUsable(QString* error)
+{
+    auto* ctx = QOpenGLContext::currentContext();
+    const auto fmt = ctx ? ctx->format() : QSurfaceFormat();
+    if (ctx && !ctx->isOpenGLES() && fmt.version() >= qMakePair(3, 3)) return true;
+    QString have = QStringLiteral("none");
+    if (ctx) {
+        const auto* ren = reinterpret_cast<const char*>(ctx->functions()->glGetString(GL_RENDERER));
+        have = QStringLiteral("%1.%2 (%3)").arg(fmt.majorVersion()).arg(fmt.minorVersion())
+                   .arg(QString::fromUtf8(ren ? ren : "unknown renderer"));
+    }
+    if (error)
+        *error = QStringLiteral("CRT Player needs OpenGL 3.3 or newer, but this system offers OpenGL %1.\n"
+                                "Install or update the graphics driver for your GPU.").arg(have);
+    return false;
+}
 
 bool CrtRenderer::loadProgram(QOpenGLShaderProgram& prog, const char* frag, QString* error)
 {
@@ -26,6 +47,7 @@ bool CrtRenderer::loadProgram(QOpenGLShaderProgram& prog, const char* frag, QStr
 
 bool CrtRenderer::initialize(QString* error)
 {
+    if (!glContextUsable(error)) return false;
     initializeOpenGLFunctions();
     if (!loadProgram(m_convert, ":/shaders/convert.frag", error)) return false;
     if (!loadProgram(m_down, ":/shaders/downsample.frag", error)) return false;

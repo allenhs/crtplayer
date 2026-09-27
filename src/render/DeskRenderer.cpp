@@ -1,4 +1,5 @@
 #include "DeskRenderer.h"
+#include <QOpenGLContext>
 
 #include <QtMath>
 #include <algorithm>
@@ -56,6 +57,10 @@ QVector<QPointF> convexHull(QVector<QPointF> pts)
 
 bool DeskRenderer::initialize(QString* error)
 {
+    if (!QOpenGLContext::currentContext() || QOpenGLContext::currentContext()->format().version() < qMakePair(3, 3)) {
+        if (error) *error = QStringLiteral("CRT Player needs OpenGL 3.3 or newer.");
+        return false;
+    }
     initializeOpenGLFunctions();
     if (!m_prog.addCacheableShaderFromSourceFile(QOpenGLShader::Vertex, QStringLiteral(":/shaders/desk.vert")) ||
         !m_prog.addCacheableShaderFromSourceFile(QOpenGLShader::Fragment, QStringLiteral(":/shaders/desk.frag")) ||

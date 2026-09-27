@@ -10,10 +10,13 @@ PREFIX=${MINGW_PREFIX:-/ucrt64}
 rm -rf "$WORK"; mkdir -p "$WORK/app" "$WORK/media" "$WORK/out"
 cp -r "$PKG"/. "$WORK/app/"
 # Software OpenGL (test only; users have their graphics card's driver).
-for f in opengl32.dll libgallium_wgl.dll libglapi.dll; do [ -e "$PREFIX/bin/$f" ] && cp "$PREFIX/bin/$f" "$WORK/app/" && echo "software OpenGL: $f"; done
+# Qt always takes "opengl32" from System32 for desktop OpenGL, so Mesa goes in as Qt's software
+# renderer instead: opengl32sw.dll, picked with QT_OPENGL=software.
+for f in libgallium_wgl.dll libglapi.dll; do [ -e "$PREFIX/bin/$f" ] && cp "$PREFIX/bin/$f" "$WORK/app/" && echo "software OpenGL: $f"; done
+cp "$PREFIX/bin/opengl32.dll" "$WORK/app/opengl32sw.dll" && echo "software OpenGL: opengl32.dll as opengl32sw.dll"
 pacman -Ql mingw-w64-ucrt-x86_64-mesa 2>/dev/null | grep -i '\.dll$' | sed 's/^/mesa package: /' | head -20
 # Mesa's own libraries' dependencies (LLVM and so on), so software OpenGL loads in the test copy.
-for f in opengl32.dll libgallium_wgl.dll; do
+for f in opengl32sw.dll libgallium_wgl.dll; do
   [ -e "$WORK/app/$f" ] || continue
   ldd "$WORK/app/$f" 2>/dev/null | awk -v p="$PREFIX/bin/" 'index($3, p) == 1 { print $3 }' | while read -r d; do
     [ -e "$WORK/app/$(basename "$d")" ] || { cp "$d" "$WORK/app/"; echo "software OpenGL needs: $(basename "$d")"; }
@@ -36,14 +39,14 @@ env PATH="$CLEAN_PATH" "$APP" --check-gstreamer > "$WORK/out/gstreamer.txt" 2>&1
 cat "$WORK/out/version.txt" "$WORK/out/gstreamer.txt"
 # (MSYS2's timeout, by its full path: with the stripped PATH, "timeout" would be Windows' TIMEOUT.EXE)
 export QT_FORCE_STDERR_LOGGING=1 QT_LOGGING_RULES="qt.qpa.gl=true"
-/usr/bin/timeout 300 env PATH="$CLEAN_PATH" QT_OPENGL=desktop "$APP" --automation "$(cygpath -m "$WORK/smoke.txt")" \
+/usr/bin/timeout 300 env PATH="$CLEAN_PATH" QT_OPENGL=software "$APP" --automation "$(cygpath -m "$WORK/smoke.txt")" \
   --automation-log "$O/smoke.json" > "$WORK/out/app.log" 2>&1
 rc=$?
 echo "automation rc=$rc"
 if [ $rc -ne 0 ] && command -v gdb >/dev/null; then
   # A crash: run it again under the debugger and keep the backtrace.
   GDB=$(command -v gdb)
-  /usr/bin/timeout 300 env PATH="$CLEAN_PATH" QT_OPENGL=desktop "$GDB" -batch -q -ex run -ex "bt 30" -ex "info registers rip" \
+  /usr/bin/timeout 300 env PATH="$CLEAN_PATH" QT_OPENGL=software "$GDB" -batch -q -ex run -ex "bt 30" -ex "info registers rip" \
     --args "$APP" --automation "$(cygpath -m "$WORK/smoke.txt")" --automation-log "$O/smoke-gdb.json" > "$WORK/out/gdb.log" 2>&1
   echo "---- under the debugger:"
   grep -v "^\[New Thread\|^\[Thread .* exited" "$WORK/out/gdb.log" | tail -60
