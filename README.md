@@ -111,13 +111,17 @@ Qt and GStreamer (with all the usual codecs), so there is nothing else to instal
 - **Keeping the screen awake** while a video plays uses Windows' own setting.
 - **Game controllers** work through SDL, which ships in the folder.
 - **Settings** are stored in the registry (`HKEY_CURRENT_USER\Software\CRTPlayer`).
+- **Needs OpenGL 3.3**, which every graphics driver from the last decade provides. A PC
+  running on Windows' basic display driver (no graphics driver installed) gets a message
+  saying so instead of a picture: install the driver from the card's maker.
+- **No sound device** (no speakers, audio service stopped): the video still plays, silently.
 - **Not yet:** media keys and Windows' media overlay (the Linux version uses MPRIS). Steam
   Game Mode is Linux-only.
 
 **How it's built:** on GitHub's Windows machines with MSYS2
 (`.github/workflows/windows.yml`). The packaged folder is then run on its own, with
-software OpenGL because those machines have no graphics card: it plays a video, applies a
-look, draws a subtitle and opens desk mode (`packaging/windows/`).
+software OpenGL because those machines have no graphics card (and no sound device): it
+plays a video, applies a look, draws a subtitle and opens desk mode (`packaging/windows/`).
 
 ## Run on Bazzite
 

@@ -56,8 +56,11 @@ jobs:
             || { bash packaging/windows/ci-annotate.sh error Package package.log '.'; exit 1; }
           bash packaging/windows/ci-annotate.sh notice Package package.log 'Packaged|GStreamer plugins'
           cp README.md "dist/CRT Player/README.md"
-          (cd dist && zip -qr "../CRT_Player-$VERSION-windows-x64.zip" "CRT Player")
-          ls -la CRT_Player-*.zip
+          # The download gets a stripped player; the smoke test keeps the symbols for backtraces.
+          rm -rf zipdir && mkdir zipdir && cp -r "dist/CRT Player" zipdir/
+          strip "zipdir/CRT Player/crtplayer.exe"
+          (cd zipdir && zip -qr "../CRT_Player-$VERSION-windows-x64.zip" "CRT Player")
+          echo "::notice title=Download::$(ls -la CRT_Player-*.zip | awk '{printf "%s %.0f MB", $NF, $5/1048576}'), crtplayer.exe $(du -h "zipdir/CRT Player/crtplayer.exe" | cut -f1)"
 
       - name: Smoke test (the packaged player on its own)
         run: |
