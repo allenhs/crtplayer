@@ -1,0 +1,6 @@
+# Third launch: left in the last 30 s, so it starts from the beginning.
+open @M@/resume_clip.mp4
+waitstate playing 15000
+wait 800
+report fresh
+quit

@@ -1,0 +1,11 @@
+PASS  arch: Arch family -> sudo pacman -S --needed gst-plugins-good gst-plugins-bad gst-plugins-ugly gst-libav
+PASS  manjaro: Arch family -> sudo pacman -S --needed gst-plugins-good gst-plugins-bad gst-plugins-ugly gst-libav
+PASS  cachyos: Arch family -> sudo pacman -S --needed gst-plugins-good gst-plugins-bad gst-plugins-ugly gst-libav
+PASS  fedora: Fedora family -> sudo dnf install gstreamer1-plugins-good gstreamer1-plugins-bad-free gstreamer1-plugins-ugly-free gstreamer1-plugin-libav
+PASS  bazzite: Fedora Atomic family (rpm-ostree) -> rpm-ostree install gstreamer1-plugins-good gstreamer1-plugins-bad-free gstreamer1-plugins-ugly-free gstreamer1-plugin-libav   (then reboot)
+PASS  ubuntu: Debian/Ubuntu family -> sudo apt install gstreamer1.0-plugins-good gstreamer1.0-plugins-bad gstreamer1.0-plugins-ugly gstreamer1.0-libav
+PASS  mint: Debian/Ubuntu family -> sudo apt install gstreamer1.0-plugins-good gstreamer1.0-plugins-bad gstreamer1.0-plugins-ugly gstreamer1.0-libav
+PASS  opensuse: openSUSE family -> sudo zypper install gstreamer-plugins-good gstreamer-plugins-bad gstreamer-plugins-ugly gstreamer-plugins-libav
+PASS  unknown: other -> Install with your package manager: GStreamer good plugins, GStreamer bad plugins, GStreamer ugly plugins, GStreamer libav (FFmpeg) plugin
+
+All portability checks passed

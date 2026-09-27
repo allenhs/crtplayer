@@ -1,0 +1,44 @@
+#!/bin/sh
+# CRT Player AppImage launcher.
+#
+# Qt: the AppImage carries Qt 6.4, but a system Qt is preferred when it is suitable
+# (6.4 or newer, with every module the player needs). That is the same setup as the
+# standalone binary, and it matches the system's compositor and graphics drivers best.
+# The bundled Qt is the fallback for systems without a usable Qt; on a Wayland session
+# it then runs through XWayland.
+#   CRTPLAYER_QT=system   always use the system Qt
+#   CRTPLAYER_QT=bundled  always use the bundled Qt
+HERE="$(dirname "$(readlink -f "$0")")"
+export APPDIR="${APPDIR:-$HERE}"
+for hook in "$APPDIR"/apprun-hooks/*.sh; do
+    [ -f "$hook" ] && . "$hook"
+done
+
+SYS_BIN="$APPDIR/usr/libexec/crtplayer/crtplayer"   # cannot see the bundled Qt
+mode=bundled
+case "${CRTPLAYER_QT:-auto}" in
+    system) mode=system ;;
+    bundled) mode=bundled ;;
+    *)
+        if command -v ldd > /dev/null 2>&1 && [ -x "$SYS_BIN" ]; then
+            deps="$(ldd "$SYS_BIN" 2>/dev/null)"
+            if [ -n "$deps" ] && ! printf '%s\n' "$deps" | grep -q "not found"; then
+                core="$(printf '%s\n' "$deps" | awk '/libQt6Core\.so\.6/ {print $3; exit}')"
+                ver="$(readlink -f "$core" 2>/dev/null | sed -n 's/.*libQt6Core\.so\.\(6\.[0-9]*\).*/\1/p')"
+                minor="${ver#6.}"
+                if [ -n "$minor" ] && [ "$minor" -ge 4 ] 2>/dev/null; then mode=system; fi
+            fi
+        fi
+        ;;
+esac
+
+if [ "$mode" = system ]; then
+    export CRTPLAYER_QT_MODE=system
+    exec "$SYS_BIN" "$@"
+fi
+export CRTPLAYER_QT_MODE=bundled
+# Bundled Qt on a Wayland session: prefer XWayland (the bundled path that is tested end to end).
+if [ -n "$WAYLAND_DISPLAY" ] && [ -n "$DISPLAY" ] && [ -z "$QT_QPA_PLATFORM" ]; then
+    export QT_QPA_PLATFORM=xcb
+fi
+exec "$APPDIR/usr/bin/crtplayer" "$@"

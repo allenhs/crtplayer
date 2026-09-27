@@ -1,0 +1,89 @@
+# 2.6: the arcade cabinet.
+marqueetitle Oblivion.2013.1080p.BluRay.x264
+marqueetitle The_Matrix_(1999)_720p
+marqueetitle Some.Show.S01E02.HDTV.XviD
+marqueetitle sd_4x3_h264
+marqueetitle Street Fighter II
+marqueetitle
+open @M@/sd_4x3_h264.mp4
+waitstate playing 15000
+pause
+seek 3
+wait 1200
+preset Clean Broadcast Monitor
+rendertime 5
+fullscreen on
+wait 1500
+screenshot filtered @O@/arc_ref_full.png
+fullscreen off
+wait 600
+desk on
+wait 1500
+deskcabinet arcade
+deskpose 0 4 0.80 0.5 0.5
+wait 900
+report front
+deskgrab @O@/arc_front.png
+marqueeimage @O@/marquee_a.png
+# the fly-in still lands on the exact fullscreen frame
+deskfly in
+deskwait full 10000
+wait 500
+deskgrab @O@/arc_full.png
+deskfly out
+deskwait desk 10000
+# the four art styles
+deskpose -35 6 0.80 0.5 0.5
+wait 700
+arcadeart 0
+wait 600
+deskgrab @O@/art0.png
+arcadeart 1
+wait 600
+deskgrab @O@/art1.png
+arcadeart 2
+wait 600
+deskgrab @O@/art2.png
+arcadeart 3
+wait 600
+deskgrab @O@/art3.png
+arcadeart 1
+# standing on the floor in the room scenes
+scene wall
+wait 900
+report in-wall
+deskgrab @O@/arc_wall.png
+scene cg
+cg orbit off
+wait 900
+report in-cg
+scene desk
+wait 900
+report in-desk
+scene theater
+wait 900
+report in-theater
+scene desktop
+wait 700
+# a vertical game: the monitor turns, the cabinet stays upright
+rendertime off
+open @M@/vertical_9x16_h264.mp4
+waitstate playing 15000
+pause
+seek 2
+wait 1200
+rendertime 5
+deskpose 0 4 0.80 0.5 0.5
+wait 900
+report portrait
+deskgrab @O@/arc_portrait.png
+marqueeimage @O@/marquee_b.png
+# remembered (the set and its art)
+rendertime off
+desk off
+wait 800
+desk on
+wait 1500
+report again
+desk off
+quit

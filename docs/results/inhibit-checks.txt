@@ -1,0 +1,9 @@
+PASS  KDE: screen kept awake while playing: ScreenSaver+PowerManagement
+PASS  KDE: released on pause: UnInhibit(1001) for Inhibit -> 1001
+PASS  KDE: taken again on play, released on quit: ScreenSaver.Inhibit PowerManagement.Inhibit ScreenSaver.UnInhibit PowerManagement.UnInhibit ScreenSaver.Inhibit PowerManagement.Inhibit ScreenSaver.UnInhibit PowerManagement.UnInhibit
+PASS  KDE: automatic suspend blocked too (PowerManagement): Inhibit UnInhibit Inhibit UnInhibit
+PASS  KDE: says who and why: 'CRT Player', 'Playing a video'
+PASS  portal (GNOME and others): idle and suspend inhibited while playing: flags 12 (4 suspend + 8 idle)
+PASS  portal: released on pause and on quit (Request.Close): portal.Inhibit portal.Close portal.Inhibit portal.Close
+
+All keep-awake checks passed

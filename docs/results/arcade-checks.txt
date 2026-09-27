@@ -1,0 +1,15 @@
+PASS  marquee titles: file names tidied: 'Oblivion.2013.1080p.BluRay.x264' -> 'OBLIVION'; 'The_Matrix_(1999)_720p' -> 'THE MATRIX'; 'Some.Show.S01E02.HDTV.XviD' -> 'SOME SHOW'; 'sd_4x3_h264' -> 'SD 4X3'; 'Street Fighter II' -> 'STREET FIGHTER II'; '' -> 'CRT PLAYER'
+PASS  the arcade cabinet is drawn, with the title on its marquee: arcade, 'SD 4X3'
+PASS  the fly-in lands on the exact fullscreen frame: max diff 0
+PASS  an upright cabinet: much taller than wide: 775 x 1050
+PASS  the screen sits in its upper half: screen centre 390, cabinet 49..1099
+PASS  four different art styles: least different pair: 5.8% of the view
+PASS  wall scene: it stands on the floor: floor 0.00 below it, drawn arcade
+PASS  cg scene: it stands on the floor: floor 0.00 below it, drawn arcade
+PASS  desk scene: it stands on the floor: floor 0.00 below it, drawn arcade
+PASS  the theater still shows its own screen: theater-screen
+PASS  a vertical game: the screen turns, the cabinet stays upright: screen 198 x 351, cabinet 594 x 1012
+PASS  the marquee lettering follows the video: 19% lettered; next video: 'VERTICAL 9X16'
+PASS  the arcade cabinet and its art are remembered: arcade, art 1
+
+All arcade checks passed

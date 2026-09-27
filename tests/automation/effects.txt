@@ -1,0 +1,194 @@
+# Signal effects and scanline styles, captured on one paused frame so only the effect differs.
+open @M@/composite_card.mp4
+waitstate playing 15000
+wait 600
+pause
+wait 500
+preset Consumer Television
+expect preset Consumer Television
+screenshot filtered @O@/fx_consumer.png
+preset VHS Home Recording
+expect preset VHS Home Recording
+screenshot filtered @O@/fx_vhs_home.png
+preset Worn VHS TV
+expect preset Worn VHS TV
+screenshot filtered @O@/fx_worn_vhs.png
+preset LaserDisc Composite
+expect preset LaserDisc Composite
+# Dot crawl runs a 4-field sequence: pin the effect clock to four consecutive fields.
+rendertime 10.0
+screenshot filtered @O@/fx_laserdisc.png
+rendertime 10.0167
+screenshot filtered @O@/fx_laserdisc_later.png
+rendertime 10.0334
+screenshot filtered @O@/fx_laserdisc_later2.png
+rendertime 10.0501
+screenshot filtered @O@/fx_laserdisc_later3.png
+rendertime off
+preset LaserDisc with Laser Rot
+expect preset LaserDisc with Laser Rot
+screenshot filtered @O@/fx_laserrot.png
+preset Interlaced Broadcast Monitor
+expect preset Interlaced Broadcast Monitor
+preset VGA Double-Scan Monitor
+expect preset VGA Double-Scan Monitor
+preset Low-Res Console
+expect preset Low-Res Console
+screenshot filtered @O@/fx_console.png
+# isolate the scanline shape: flat tube, no mask/glow, fixed 240 lines
+preset Clean Broadcast Monitor
+param curvature 0
+param maskStrength 0
+param bloom 0
+param glow 0
+param vignette 0
+param scanLines 240
+param scanStrength 0.7
+param scanType 0
+screenshot filtered @O@/scan_0_soft.png
+param scanType 1
+screenshot filtered @O@/scan_1_sharp.png
+param scanType 2
+screenshot filtered @O@/scan_2_dynamic.png
+param scanType 3
+# The effect clock is pinned to four consecutive fields (1/59.94 s apart), so the capture
+# no longer depends on how long rendering takes.
+rendertime 10.0
+screenshot filtered @O@/scan_3_interlaced_a.png
+rendertime 10.0167
+screenshot filtered @O@/scan_3_interlaced_b.png
+rendertime 10.0334
+screenshot filtered @O@/scan_3_interlaced_c.png
+rendertime 10.0501
+screenshot filtered @O@/scan_3_interlaced_d.png
+rendertime off
+param scanType 4
+screenshot filtered @O@/scan_4_vga.png
+param scanType 5
+screenshot filtered @O@/scan_5_pixel.png
+param scanType 6
+screenshot filtered @O@/scan_6_geom.png
+param scanType 7
+screenshot filtered @O@/scan_7_lottes.png
+param scanType 8
+screenshot filtered @O@/scan_8_easymode.png
+param scanType 9
+screenshot filtered @O@/scan_9_hyllian.png
+param scanType 10
+screenshot filtered @O@/scan_10_mame.png
+# Beam behaviour on a grey ramp (15/35/55/75/100 %) over saturated primaries, 160 lines
+open @M@/scanline_card.mp4
+waitstate playing 15000
+wait 500
+pause
+wait 400
+preset Clean Broadcast Monitor
+param curvature 0
+param maskStrength 0
+param bloom 0
+param glow 0
+param vignette 0
+param scanLines 160
+param scanStrength 1
+param scanType 0
+screenshot filtered @O@/ramp_0.png
+param scanType 6
+screenshot filtered @O@/ramp_6.png
+param scanType 7
+screenshot filtered @O@/ramp_7.png
+param scanType 8
+screenshot filtered @O@/ramp_8.png
+param scanType 9
+screenshot filtered @O@/ramp_9.png
+param scanType 10
+screenshot filtered @O@/ramp_10.png
+preset Geom Look
+expect preset Geom Look
+preset Lottes Look
+expect preset Lottes Look
+preset Easymode Look
+expect preset Easymode Look
+preset Hyllian Look
+expect preset Hyllian Look
+preset MAME HLSL Look
+expect preset MAME HLSL Look
+# Lowered resolution ("bigger pixels") on 1080p content; scanlines/mask off to isolate it
+open @M@/fhd_16x9_60fps.mp4
+waitstate playing 15000
+seek 3
+wait 800
+pause
+wait 500
+preset Clean Broadcast Monitor
+param curvature 0
+param maskStrength 0
+param bloom 0
+param glow 0
+param vignette 0
+param scanStrength 0
+param pixelHeight 0
+screenshot filtered @O@/px_native.png
+param pixelHeight 60
+param pixelFilter 0
+wait 200
+expect pixelResolution 107x60
+report px-hard
+screenshot filtered @O@/px_hard.png
+param pixelFilter 1
+screenshot filtered @O@/px_sharp.png
+param pixelFilter 2
+screenshot filtered @O@/px_soft.png
+param pixelHeight 240
+param pixelFilter 1
+param scanStrength 0.8
+wait 200
+expect pixelResolution 427x240
+expect scanlines 240
+screenshot original @O@/px_original.png
+compare on 0.5
+wait 200
+screenshot filtered @O@/px_compare.png
+compare off
+param pixelHeight 0
+param scanStrength 0
+compare on 0.5
+wait 200
+screenshot filtered @O@/px_compare_native.png
+compare off
+preset 16-bit Console (256×224)
+wait 200
+expect pixelResolution 256x224
+expect scanlines 224
+preset Home Computer (320×200)
+wait 200
+expect pixelResolution 320x200
+expect scanlines 200
+# tape effects must follow the picture, not the window: vertical and ultrawide sources
+open @M@/vertical_9x16_h264.mp4
+waitstate playing 15000
+preset Worn VHS TV
+wait 1200
+expect pictureAspectOnScreen 0.5625
+grabwindow @O@/fx_vertical_vhs.png
+open @M@/ultrawide_64x27_vp9.webm
+waitstate playing 15000
+preset LaserDisc with Laser Rot
+wait 1200
+expect pictureAspectOnScreen 2.3704
+grabwindow @O@/fx_ultrawide_laserdisc.png
+# cost of the heaviest presets while playing (software GL here; see VERIFICATION.md)
+open @M@/sd_4x3_h264.mp4
+waitstate playing 15000
+preset Consumer Television
+resetsync
+wait 4000
+report perf-consumer-tv
+preset Worn VHS TV
+resetsync
+wait 4000
+report perf-worn-vhs
+preset LaserDisc with Laser Rot
+resetsync
+wait 4000
+report perf-laserdisc-rot
+quit

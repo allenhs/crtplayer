@@ -1,0 +1,55 @@
+# Jellyfin client against tests/jellyfin_mock.py (started by scripts/run-jellyfin-tests.sh)
+jfsignin @JF@ demo wrong-password
+wait 2500
+jfwait signedout 3000
+report jf-bad-password
+jfsignin @JF@ demo crt
+jfwait signedin 8000
+jfwait listing 8000
+expect jellyfinUser demo
+report jf-home
+jfopen Movies
+jfwait listing 8000
+jfopen Test Pattern 4x3
+waitstate playing 20000
+wait 1500
+expect source jellyfin
+expect file Test Pattern 4x3 (2024)
+expect windowTitle Test Pattern 4x3 (2024) — CRT Player
+expect pictureAspectOnScreen 1.3333
+report jf-playing
+expect externalSubtitleOffers 1
+subfile offer 0
+waitstate playing 20000
+wait 1200
+expect externalSubtitle English (SRT, external)
+seek 12
+wait 2500
+report jf-after-seek
+pause
+wait 800
+play
+wait 800
+jfhome
+jfwait listing 8000
+# Continue watching: "Multitrack HD" has a resume point at 12 s
+jfopen Multitrack HD
+waitstate playing 20000
+wait 1500
+expect source jellyfin
+report jf-resumed
+jfhome
+jfwait listing 8000
+jfopen Shows
+jfwait listing 8000
+jfopen Test Show
+jfwait listing 8000
+jfopen Season 1
+jfwait listing 8000
+expect jellyfinListingCount 2
+jfopen Pilot
+waitstate playing 20000
+wait 1200
+expect displayAspect 2.3704
+report jf-episode
+quit

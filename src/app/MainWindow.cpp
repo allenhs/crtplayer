@@ -1,0 +1,2262 @@
+#include "MainWindow.h"
+
+#include "playback/Player.h"
+#include "render/VideoWidget.h"
+#include "render/DeskView.h"
+#include "render/DeskRenderer.h"
+#include "app/DeskWindow.h"
+#include "jellyfin/JellyfinClient.h"
+#include "playback/Thumbnailer.h"
+#include "app/Gamepad.h"
+#ifndef _WIN32
+#include "app/Mpris.h"   // media keys and the desktop's media widget (Linux: D-Bus)
+#endif
+#include "app/SleepInhibitor.h"
+#include "playback/Distro.h"
+#include "playback/TapeAudio.h"
+#include <QCheckBox>
+#include <QHBoxLayout>
+#include <QGroupBox>
+#include <QButtonGroup>
+#include <QStandardItemModel>
+#include <QFormLayout>
+#include <QPushButton>
+#include "settings/ResumeStore.h"
+#include "ui/JellyfinPanel.h"
+#include "ui/ControlBar.h"
+#include "ui/CrtPanel.h"
+#include "ui/DisplayPanel.h"
+#include "ui/Icons.h"
+#include "ui/PlaybackPanel.h"
+#include "ui/PlaylistPanel.h"
+
+#include <QAction>
+#include <QActionGroup>
+#include <QApplication>
+#include <QCloseEvent>
+#include <QComboBox>
+#include <QDesktopServices>
+#include <QDir>
+#include <QDockWidget>
+#include <QFileDialog>
+#include <QFileInfo>
+#include <QInputDialog>
+#include <QJsonArray>
+#include <QLabel>
+#include <QMenu>
+#include <QMessageBox>
+#include <QMimeData>
+#include <QClipboard>
+#include <QCryptographicHash>
+#include <QStandardPaths>
+#include <QVBoxLayout>
+#include <QDirIterator>
+#include <QGuiApplication>
+#include <QScreen>
+#include <QSysInfo>
+#include <gst/gst.h>
+#include <QEventLoop>
+#include <QNetworkReply>
+#include <QLineEdit>
+#include <QRegularExpression>
+#include <QMouseEvent>
+#include <QPushButton>
+#include <QSignalBlocker>
+#include <QSlider>
+#include <QTabWidget>
+#include <QScreen>
+#include <QToolButton>
+#include <QUrl>
+#include <QWindow>
+
+namespace {
+const char* kVideoFilter =
+    "Video files (*.mp4 *.m4v *.mkv *.webm *.mov *.avi *.wmv *.flv *.mpg *.mpeg *.ts *.m2ts *.mts *.vob *.ogv *.3gp *.divx *.asf *.y4m);;"
+    "Audio files (*.mp3 *.flac *.ogg *.opus *.m4a *.wav *.aac);;All files (*)";
+
+QJsonObject rectJson(const QRectF& r) { return {{"x", r.x()}, {"y", r.y()}, {"w", r.width()}, {"h", r.height()}}; }
+}
+
+MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent)
+{
+    m_player = new Player(this);
+    buildUi();
+    buildActions();
+    restoreSettings();
+
+    m_posTimer.setInterval(100);
+    connect(&m_posTimer, &QTimer::timeout, this, &MainWindow::updatePosition);
+    m_posTimer.start();
+    m_hideTimer.setSingleShot(true);
+    m_hideTimer.setInterval(2200);
+    connect(&m_hideTimer, &QTimer::timeout, this, &MainWindow::updateAutoHide);
+    m_osdTimer.setSingleShot(true);
+    connect(&m_osdTimer, &QTimer::timeout, m_osd, &QLabel::hide);
+    m_infoTimer.setInterval(500);
+    connect(&m_infoTimer, &QTimer::timeout, this, &MainWindow::updateInfoOverlay);
+
+    // Player -> UI
+    connect(m_player, &Player::stateChanged, this, [this](Player::State s) {
+        if (s == Player::State::Playing) vcr(QStringLiteral("PLAY ▶"), 3.0);
+        else if (s == Player::State::Paused) vcr(QStringLiteral("PAUSE ❚❚"), 0);
+        m_controls->setPlaying(s == Player::State::Playing);
+        if (s == Player::State::Playing) m_video->resetSyncStats();
+        onMouseActivity();
+    });
+    connect(m_player, &Player::durationChanged, this, [this](qint64 ns) { m_controls->setDuration(ns > 0 ? ns / 1000000 : 0); });
+    connect(m_player, &Player::tracksChanged, this, [this] { rebuildAudioMenu(); rebuildSubtitleMenu(); });
+    connect(m_player, &Player::orientationChanged, m_video, &VideoWidget::setOrientationTag);
+    connect(m_player, &Player::decoderChanged, this, &MainWindow::updateDecoderStatus);
+    connect(m_player, &Player::mediaLoaded, this, [this] { updateDecoderStatus(); updateTitle(); });
+    connect(m_player, &Player::endOfStream, this, [this] {
+        const int next = m_playlist->currentIndex() + 1;
+        if (next > 0 && next < m_playlist->count()) {
+            playIndex(next);
+        } else {
+            m_player->pause();
+            showOsd(tr("End of playlist"));
+            vcr(QStringLiteral("STOP ■"), 3.0);
+            m_video->powerOff();   // when the preset has power effects
+        }
+    });
+    connect(m_player, &Player::errorOccurred, this, [this](const QString& title, const QString& details) {
+        m_lastError = title + ": " + details;
+        m_emptyHint->setText(title + tr("\nDetails are in the error dialog. Drop another file to continue."));
+        m_emptyHint->show();
+        layoutOverlays();
+        auto* box = new QMessageBox(QMessageBox::Warning, title, details.section("\n\nDetails:", 0, 0), QMessageBox::Ok, this);
+        box->setDetailedText(details);
+        box->setAttribute(Qt::WA_DeleteOnClose);
+        box->open();
+    });
+    connect(m_player, &Player::warningOccurred, this, [this](const QString& w) {
+        m_lastWarning = w;
+        showOsd(w, 5000);
+    });
+    connect(m_video, &VideoWidget::sourceChanged, this, [this] {
+        m_emptyHint->setVisible(!m_video->hasFrame() && m_player->state() != Player::State::Error && m_player->currentUri().isEmpty());
+        updateSourceInfo();
+    });
+    connect(m_video, &VideoWidget::glFailed, this, [this](const QString& msg) {
+        QMessageBox::critical(this, tr("OpenGL 3.3 is required"),
+                              tr("The video renderer could not start:\n%1\n\nCheck that Mesa/NVIDIA OpenGL drivers are installed.").arg(msg));
+    });
+    connect(m_video, &VideoWidget::mouseActivity, this, &MainWindow::onMouseActivity);
+    connect(m_video, &VideoWidget::doubleClicked, this, [this] { setFullscreen(!m_fullscreen); });
+    connect(m_video, &VideoWidget::splitChanged, this, [this](double f) { m_settings.split = f; });
+
+    // Controls -> player
+    connect(m_controls->openButton, &QToolButton::clicked, this, [this] { openDialog(); });
+    connect(m_controls->playButton, &QToolButton::clicked, this, [this] {
+        if (m_player->currentUri().isEmpty() && m_playlist->count() > 0) playIndex(std::max(0, m_playlist->currentIndex()));
+        else m_player->togglePause();
+    });
+    connect(m_controls->prevButton, &QToolButton::clicked, this, [this] { nextItem(-1); });
+    connect(m_controls->nextButton, &QToolButton::clicked, this, [this] { nextItem(1); });
+    connect(m_controls->stepBackButton, &QToolButton::clicked, this, [this] { m_player->stepFrame(false); });
+    connect(m_controls->stepFwdButton, &QToolButton::clicked, this, [this] { m_player->stepFrame(true); });
+    connect(m_controls->muteButton, &QToolButton::clicked, this, [this] {
+        m_player->setMuted(!m_player->isMuted());
+        m_controls->setMutedIcon(m_player->isMuted());
+        showOsd(m_player->isMuted() ? tr("Muted") : tr("Sound on"));
+    });
+    connect(m_controls, &ControlBar::volumeChanged, this, [this](double v) {
+        m_player->setVolume(v);
+        if (m_player->isMuted() && v > 0) { m_player->setMuted(false); m_controls->setMutedIcon(false); }
+    });
+    connect(m_controls->seek(), &SeekSlider::scrubStarted, this, [this] {
+        m_hideTimer.stop();
+        if (m_desk) m_desk->view()->setScrubbing(true);   // no tile reveal while dragging the timeline
+    });
+    connect(m_controls->seek(), &SeekSlider::scrubbedTo, this, [this](qint64 ms) { m_player->seek(ms * 1000000, Player::SeekMode::Fast); });
+    connect(m_controls->seek(), &SeekSlider::scrubFinished, this, [this](qint64 ms) {
+        vcr(ms * 1000000 < m_player->position() ? QStringLiteral("◀◀ REW") : QStringLiteral("▶▶ FF"), 1.2);
+        m_player->seek(ms * 1000000, Player::SeekMode::Accurate);
+        onMouseActivity();
+        if (m_desk) QTimer::singleShot(1500, m_desk, [this] { if (m_desk) m_desk->view()->setScrubbing(false); });   // after the final seek's dip
+    });
+    connect(m_controls->crtButton, &QToolButton::clicked, this, [this](bool on) { setBypass(!on); });
+    connect(m_controls->compareButton, &QToolButton::clicked, this, [this](bool on) { setCompare(on); });
+    connect(m_controls->fullscreenButton, &QToolButton::clicked, this, [this] { setFullscreen(!m_fullscreen); });
+    connect(m_controls->settingsButton, &QToolButton::clicked, this, [this](bool on) { m_settingsDock->setVisible(on); });
+    connect(m_controls->playlistButton, &QToolButton::clicked, this, [this](bool on) { m_playlistDock->setVisible(on); });
+        connect(m_controls->presetCombo(), &QComboBox::activated, this, [this](int i) { selectPreset(m_controls->presetCombo()->itemText(i)); });
+
+    // Panels
+    connect(m_crtPanel, &CrtPanel::paramsChanged, this, [this](const CrtParams& p) { applyParams(p, false); });
+    connect(m_crtPanel, &CrtPanel::presetSelected, this, [this](const QString& n) { selectPreset(n); });
+    connect(m_crtPanel, &CrtPanel::saveAsRequested, this, &MainWindow::savePresetAs);
+    connect(m_crtPanel, &CrtPanel::saveRequested, this, &MainWindow::savePreset);
+    connect(m_crtPanel, &CrtPanel::renameRequested, this, &MainWindow::renamePreset);
+    connect(m_crtPanel, &CrtPanel::deleteRequested, this, &MainWindow::deletePreset);
+    connect(m_crtPanel, &CrtPanel::importRequested, this, &MainWindow::importPreset);
+    connect(m_crtPanel, &CrtPanel::exportRequested, this, &MainWindow::exportPreset);
+    connect(m_crtPanel, &CrtPanel::revertRequested, this, [this] { selectPreset(m_presetName); });
+    connect(m_crtPanel->bypassButton(), &QPushButton::clicked, this, [this](bool on) { setBypass(on); });
+    connect(m_crtPanel->compareButton(), &QPushButton::clicked, this, [this](bool on) { setCompare(on); });
+    connect(m_displayPanel, &DisplayPanel::scaleModeChanged, this, &MainWindow::setScaleMode);
+    connect(m_displayPanel, &DisplayPanel::cropChanged, this, [this](const CropFractions& c) {
+        setCrop(c);
+        if (!c.isNull()) setScaleMode(ScaleMode::Crop);
+    });
+    connect(m_displayPanel, &DisplayPanel::cropToAspectRequested, this, [this](double a) {
+        setCrop(cropForAspect(displaySize(m_video->sourceFormat(), m_video->aspectOverride()), a));
+        setScaleMode(ScaleMode::Crop);
+    });
+    connect(m_displayPanel, &DisplayPanel::aspectOverrideChanged, this, &MainWindow::setAspectOverride);
+    connect(m_playbackPanel, &PlaybackPanel::hardwareDecodingChanged, this, [this](bool on) {
+        m_settings.hardwareDecoding = on;
+        m_player->setHardwareDecoding(on);
+        reopenForDecoderChange();
+    });
+    connect(m_playbackPanel, &PlaybackPanel::screenshotFilteredChanged, this, [this](bool f) { m_settings.screenshotFiltered = f; });
+    connect(m_playbackPanel, &PlaybackPanel::screenshotDirChanged, this, [this](const QString& d) { m_settings.screenshotDir = d; });
+    connect(m_playlist, &PlaylistPanel::activated, this, &MainWindow::playIndex);
+    connect(m_playlist, &PlaylistPanel::addRequested, this, &MainWindow::addDialog);
+    connect(m_settingsDock, &QDockWidget::visibilityChanged, this, [this](bool) {
+        QSignalBlocker b(m_controls->settingsButton);
+        m_controls->settingsButton->setChecked(m_settingsDock->isVisible());
+    });
+    connect(m_playlistDock, &QDockWidget::visibilityChanged, this, [this](bool) {
+        QSignalBlocker b(m_controls->playlistButton);
+        m_controls->playlistButton->setChecked(m_playlistDock->isVisible());
+    });
+
+    // Jellyfin
+    connect(m_jfPanel, &JellyfinPanel::playRequested, this, &MainWindow::playJellyfin);
+    connect(m_jfPanel, &JellyfinPanel::enqueueRequested, this, &MainWindow::enqueueJellyfin);
+    connect(m_controls->jellyfinButton, &QToolButton::clicked, this, [this](bool on) { showJellyfin(on); });
+    connect(m_jfDock, &QDockWidget::visibilityChanged, this, [this](bool) {
+        QSignalBlocker b(m_controls->jellyfinButton);
+        m_controls->jellyfinButton->setChecked(m_jfDock->isVisible());
+    });
+    connect(m_jf, &JellyfinClient::requestFailed, this, [this](const QString& m) { showOsd(m, 4000); });
+    connect(m_jf, &JellyfinClient::homeLoaded, this, [this](const QVector<JfItem>& resume, const QVector<JfItem>&) { m_jfResume = resume; });
+    m_jfTimer.setInterval(10000);   // progress reports keep resume points current on the server
+    connect(&m_jfTimer, &QTimer::timeout, this, [this] {
+        if (!m_jfItemId.isEmpty() && m_jfStarted) m_jf->reportProgress(m_jfItemId, m_player->position(), !m_player->isPlaying());
+    });
+    connect(m_player, &Player::mediaLoaded, this, [this] {
+        if (m_jfItemId.isEmpty() || m_jfStarted) return;
+        m_jf->reportStart(m_jfItemId, m_player->position(), false);
+        m_jfStarted = true;
+        m_jfTimer.start();
+    });
+    connect(m_player, &Player::stateChanged, this, [this](Player::State st) {
+        if (m_jfItemId.isEmpty() || !m_jfStarted) return;
+        if (st == Player::State::Paused) m_jf->reportProgress(m_jfItemId, m_player->position(), true, "pause");
+        else if (st == Player::State::Playing) m_jf->reportProgress(m_jfItemId, m_player->position(), false, "unpause");
+    });
+    connect(m_player, &Player::endOfStream, this, [this] {
+        if (!m_jfItemId.isEmpty() && m_jfStarted) {
+            m_jf->reportStopped(m_jfItemId, m_player->duration());   // at the end: the server marks it played
+            m_jfStarted = false;
+            m_jfTimer.stop();
+        }
+    });
+    m_jf->restoreSession();
+
+    // ---- Bazzite fit (1.9): media keys / KDE media widget (MPRIS), game controllers
+#ifndef _WIN32
+    m_mpris = new Mpris(this, m_player);
+#endif
+    m_gamepad = new Gamepad(this);
+    if (inGamescope()) m_gamepad->setAlwaysActive(true);   // gamescope shows only this app
+    // No screen dimming or sleep while a video plays (released on pause / stop / quit).
+    m_sleep = new SleepInhibitor(this);
+    auto updateSleep = [this] { m_sleep->setActive(m_settings.keepAwake && m_player->isPlaying()); };
+    connect(m_player, &Player::stateChanged, this, updateSleep);
+    m_playbackPanel->setKeepAwake(m_settings.keepAwake);
+    m_playbackPanel->setLookSound(m_settings.lookSound);
+    m_playbackPanel->setNoiseVolume(m_settings.noiseVolume);
+    m_playbackPanel->setEffectStrength(m_settings.effectStrength);
+    connect(m_playbackPanel, &PlaybackPanel::noiseVolumeChanged, this, [this](double v) { setSoundLevels(v, m_settings.effectStrength); });
+    connect(m_playbackPanel, &PlaybackPanel::effectStrengthChanged, this, [this](double v) { setSoundLevels(m_settings.noiseVolume, v); });
+    connect(m_playbackPanel, &PlaybackPanel::lookSoundChanged, this, [this](bool on) { m_settings.lookSound = on; applyLookSound(); });
+    connect(m_playbackPanel, &PlaybackPanel::keepAwakeChanged, this, [this, updateSleep](bool on) { m_settings.keepAwake = on; updateSleep(); });
+
+    // ---- resume, recent files, subtitles, speed, loop, chapters, previews (1.8)
+    m_resume = new ResumeStore;
+    m_resumeTimer.setInterval(15000);
+    connect(&m_resumeTimer, &QTimer::timeout, this, &MainWindow::rememberPosition);
+    m_resumeTimer.start();
+    connect(m_player, &Player::mediaLoaded, this, [this] {
+        if (m_currentLocal.isEmpty()) return;
+        m_settings.recentFiles.removeAll(m_currentLocal);
+        m_settings.recentFiles.prepend(m_currentLocal);
+        while (m_settings.recentFiles.size() > 15) m_settings.recentFiles.removeLast();
+    });
+    connect(m_player, &Player::endOfStream, this, [this] { if (!m_currentLocal.isEmpty()) m_resume->forget(m_currentLocal); });
+    // Movie theater curtains follow playback.
+    connect(m_player, &Player::stateChanged, this, &MainWindow::updateTheater);
+    connect(m_player, &Player::seekFinished, this, [this] { if (m_desk) m_desk->view()->noteSeek(); });
+    connect(m_player, &Player::mediaLoaded, this, [this] {
+        m_theaterEnded = false;
+        if (m_desk) m_desk->view()->notifyNewMedia();   // its start plays the CG room's tile reveal
+        updateTheater();
+    });
+    connect(m_player, &Player::endOfStream, this, [this] { m_theaterEnded = true; QTimer::singleShot(300, this, &MainWindow::updateTheater); });
+    connect(m_player, &Player::chaptersChanged, this, &MainWindow::updateSeekMarks);
+    connect(m_player, &Player::durationChanged, this, [this](qint64) { updateSeekMarks(); });
+    {
+        auto* recent = new QMenu(this);
+        connect(recent, &QMenu::aboutToShow, this, [this, recent] { recent->clear(); fillRecentMenu(recent); });
+        m_controls->openButton->setMenu(recent);
+        m_controls->openButton->setPopupMode(QToolButton::MenuButtonPopup);
+    }
+    connect(m_playbackPanel, &PlaybackPanel::systemReportRequested, this, [this] {
+        QGuiApplication::clipboard()->setText(systemReport());
+        showOsd(tr("System report copied to the clipboard"));
+    });
+    connect(m_jf, &JellyfinClient::subtitlesLoaded, this, [this](const QString& id, const QList<QPair<QString, QUrl>>& subs) {
+        if (id != m_jfItemId) return;
+        for (const auto& s : subs) m_extSubs.append({s.first, s.second.toString(QUrl::FullyEncoded)});
+        rebuildSubtitleMenu();
+    });
+    // Seek-bar previews (local files): a small frame and the time/chapter above the bar.
+    m_thumbs = new Thumbnailer(this);
+    m_preview = new QFrame(this);
+    m_preview->setObjectName("seekPreview");
+    m_preview->setStyleSheet("#seekPreview { background: rgba(20,22,27,235); border: 1px solid rgba(242,163,58,120); border-radius: 6px; }");
+    auto* pv = new QVBoxLayout(m_preview);
+    pv->setContentsMargins(4, 4, 4, 4);
+    pv->setSpacing(3);
+    m_previewImage = new QLabel;
+    m_previewImage->setAlignment(Qt::AlignCenter);
+    m_previewText = new QLabel;
+    m_previewText->setAlignment(Qt::AlignCenter);
+    m_previewText->setStyleSheet("color: #e8e4da; font-weight: 600;");
+    pv->addWidget(m_previewImage);
+    pv->addWidget(m_previewText);
+    m_preview->hide();
+    m_preview->setAttribute(Qt::WA_TransparentForMouseEvents);
+    m_controls->seek()->setRichHover(true);
+    connect(m_controls->seek(), &SeekSlider::hovered, this, &MainWindow::showPreview);
+    connect(m_controls->seek(), &SeekSlider::hoverLeft, m_preview, &QWidget::hide);
+    connect(m_thumbs, &Thumbnailer::ready, this, [this](const QString& uri, qint64 ns, const QImage& img) {
+        if (!m_preview->isVisible() || uri != m_player->currentUri()) return;
+        m_previewImage->setPixmap(QPixmap::fromImage(img));
+        m_preview->adjustSize();
+        Q_UNUSED(ns);
+    });
+
+    qApp->installEventFilter(this);
+    // Save on every exit path (window close, Ctrl+Q, session logout, automation exit).
+    connect(qApp, &QCoreApplication::aboutToQuit, this, &MainWindow::saveSettings);
+    updateTitle();
+}
+
+MainWindow::~MainWindow()
+{
+    qApp->removeEventFilter(this);
+    delete m_desk;
+}
+
+void MainWindow::buildUi()
+{
+    setAcceptDrops(true);
+    resize(1280, 800);
+    setMinimumSize(640, 400);
+    setDockOptions(QMainWindow::AnimatedDocks);
+
+    m_video = new VideoWidget(m_player, this);
+    m_video->installEventFilter(this);
+    setCentralWidget(m_video);
+
+    m_controls = new ControlBar(m_video);
+    m_osd = new QLabel(m_video);
+    m_osd->setObjectName("osd");
+    m_osd->setAttribute(Qt::WA_TransparentForMouseEvents);
+    m_osd->hide();
+    m_info = new QLabel(m_video);
+    m_info->setObjectName("infoOverlay");
+    m_info->setAttribute(Qt::WA_TransparentForMouseEvents);
+    m_info->setTextFormat(Qt::PlainText);
+    m_info->hide();
+    m_emptyHint = new QLabel(tr("Drop video files here or press Ctrl+O"), m_video);
+    m_emptyHint->setObjectName("emptyHint");
+    m_emptyHint->setAlignment(Qt::AlignCenter);
+    m_emptyHint->setAttribute(Qt::WA_TransparentForMouseEvents);
+
+    // Menus attached to control-bar buttons
+    m_aspectMenu = new QMenu(this);
+    m_aspectGroup = new QActionGroup(this);
+    for (ScaleMode m : {ScaleMode::Original, ScaleMode::Fit, ScaleMode::Fill, ScaleMode::Crop}) {
+        QAction* a = m_aspectMenu->addAction(scaleModeName(m));
+        a->setCheckable(true);
+        a->setData(int(m));
+        m_aspectGroup->addAction(a);
+        connect(a, &QAction::triggered, this, [this, m] { setScaleMode(m); });
+    }
+    m_aspectMenu->addSeparator();
+    m_aspectMenu->addAction(tr("Crop and aspect settings…"), this, [this] {
+        m_settingsDock->show();
+        m_tabs->setCurrentIndex(1);
+    });
+    m_controls->aspectButton->setMenu(m_aspectMenu);
+    m_audioMenu = new QMenu(this);
+    m_subMenu = new QMenu(this);
+    m_controls->audioButton->setMenu(m_audioMenu);
+    m_controls->subtitleButton->setMenu(m_subMenu);
+    auto* shotMenu = new QMenu(this);
+    shotMenu->addAction(tr("Save filtered frame, as shown\tCtrl+S"), this, [this] { takeScreenshot(true); });
+    shotMenu->addAction(tr("Save original frame, no effects\tShift+S"), this, [this] { takeScreenshot(false); });
+    shotMenu->addSeparator();
+    shotMenu->addAction(tr("Open screenshot folder"), this, [this] {
+        QDir().mkpath(m_settings.screenshotDir);
+        QDesktopServices::openUrl(QUrl::fromLocalFile(m_settings.screenshotDir));
+    });
+    m_controls->screenshotButton->setMenu(shotMenu);
+
+    // Settings dock
+    m_settingsDock = new QDockWidget(tr("Picture"), this);
+    m_settingsDock->setObjectName("settingsDock");
+    m_settingsDock->setFeatures(QDockWidget::DockWidgetClosable | QDockWidget::DockWidgetMovable);
+    m_tabs = new QTabWidget(m_settingsDock);
+    m_crtPanel = new CrtPanel;
+    m_displayPanel = new DisplayPanel;
+    m_playbackPanel = new PlaybackPanel;
+    m_tabs->addTab(m_crtPanel, tr("CRT"));
+    m_tabs->addTab(m_displayPanel, tr("Display"));
+    m_tabs->addTab(m_playbackPanel, tr("Playback"));
+    m_settingsDock->setWidget(m_tabs);
+    addDockWidget(Qt::RightDockWidgetArea, m_settingsDock);
+    resizeDocks({m_settingsDock}, {380}, Qt::Horizontal);
+    m_settingsDock->hide();
+
+    m_playlistDock = new QDockWidget(tr("Playlist"), this);
+    m_playlistDock->setObjectName("playlistDock");
+    m_playlistDock->setFeatures(QDockWidget::DockWidgetClosable | QDockWidget::DockWidgetMovable);
+    m_playlist = new PlaylistPanel;
+    m_playlistDock->setWidget(m_playlist);
+    addDockWidget(Qt::LeftDockWidgetArea, m_playlistDock);
+    resizeDocks({m_playlistDock}, {240}, Qt::Horizontal);
+    m_playlistDock->hide();
+
+    m_jf = new JellyfinClient(this);
+    m_jfDock = new QDockWidget(tr("Jellyfin"), this);
+    m_jfDock->setObjectName("jellyfinDock");
+    m_jfDock->setFeatures(QDockWidget::DockWidgetClosable | QDockWidget::DockWidgetMovable);
+    m_jfPanel = new JellyfinPanel(m_jf);
+    m_jfDock->setWidget(m_jfPanel);
+    addDockWidget(Qt::LeftDockWidgetArea, m_jfDock);
+    resizeDocks({m_jfDock}, {420}, Qt::Horizontal);
+    m_jfDock->hide();
+}
+
+void MainWindow::buildActions()
+{
+    auto add = [this](const QList<QKeySequence>& keys, auto fn) {
+        auto* a = new QAction(this);
+        a->setShortcuts(keys);
+        a->setShortcutContext(Qt::WindowShortcut);
+        connect(a, &QAction::triggered, this, fn);
+        addAction(a);
+        return a;
+    };
+    add({Qt::Key_Space, Qt::Key_K, Qt::Key_MediaPlay, Qt::Key_MediaTogglePlayPause}, [this] { m_controls->playButton->click(); });
+    add({Qt::Key_Right}, [this] { m_player->seekRelative(5'000'000'000LL); showOsd(tr("+5 s")); vcr(QStringLiteral("▶▶ FF"), 1.2); });
+    add({Qt::Key_Left}, [this] { m_player->seekRelative(-5'000'000'000LL); showOsd(tr("−5 s")); vcr(QStringLiteral("◀◀ REW"), 1.2); });
+    add({QKeySequence(Qt::CTRL | Qt::Key_Right)}, [this] { m_player->seekRelative(30'000'000'000LL); showOsd(tr("+30 s")); vcr(QStringLiteral("▶▶ FF"), 1.2); });
+    add({QKeySequence(Qt::CTRL | Qt::Key_Left)}, [this] { m_player->seekRelative(-30'000'000'000LL); showOsd(tr("−30 s")); vcr(QStringLiteral("◀◀ REW"), 1.2); });
+    add({Qt::Key_Home}, [this] { m_player->seek(0, Player::SeekMode::Accurate); });
+    add({Qt::Key_Minus}, [this] { setSpeed(m_player->rate() <= 0.5 ? 0.25 : m_player->rate() - (m_player->rate() > 1.0 ? 0.25 : 0.25)); });
+    add({Qt::Key_Plus, Qt::Key_Equal}, [this] { setSpeed(m_player->rate() + 0.25); });
+    add({Qt::Key_Backspace}, [this] { setSpeed(1.0); });
+    add({Qt::Key_R}, [this] { cycleLoop(); });
+    add({QKeySequence(Qt::SHIFT | Qt::Key_PageDown)}, [this] { jumpChapter(+1); });
+    add({QKeySequence(Qt::SHIFT | Qt::Key_PageUp)}, [this] { jumpChapter(-1); });
+    add({Qt::Key_Period}, [this] { m_player->stepFrame(true); });
+    add({Qt::Key_Comma}, [this] { m_player->stepFrame(false); });
+    add({Qt::Key_Up}, [this] { m_controls->volumeSlider()->setValue(m_controls->volumeSlider()->value() + 5); showOsd(tr("Volume %1%").arg(m_controls->volumeSlider()->value())); });
+    add({Qt::Key_Down}, [this] { m_controls->volumeSlider()->setValue(m_controls->volumeSlider()->value() - 5); showOsd(tr("Volume %1%").arg(m_controls->volumeSlider()->value())); });
+    add({Qt::Key_M}, [this] { m_controls->muteButton->click(); });
+    add({Qt::Key_F, Qt::Key_F11}, [this] {
+        if (m_deskActive) m_desk->view()->toggleFly(); else setFullscreen(!m_fullscreen);
+    });
+    add({Qt::Key_Escape}, [this] {
+        if (m_deskActive) {
+            const auto ph = m_desk->view()->phase();
+            if (ph == DeskView::Phase::Desk) leaveDeskMode(); else m_desk->view()->flyOut();
+        } else if (m_fullscreen) {
+            setFullscreen(false);
+        }
+    });
+    add({Qt::Key_T}, [this] { toggleDeskMode(); });
+    add({Qt::Key_B}, [this] { setBypass(!m_video->bypass()); showOsd(m_video->bypass() ? tr("CRT effects off") : tr("CRT effects on")); });
+    add({Qt::Key_C}, [this] { setCompare(!m_video->compare()); showOsd(m_video->compare() ? tr("Before / after comparison") : tr("Comparison off")); });
+    add({Qt::Key_BracketLeft}, [this] { cyclePreset(-1); });
+    add({Qt::Key_BracketRight}, [this] { cyclePreset(1); });
+    add({Qt::Key_Z}, [this] {
+        setScaleMode(ScaleMode((int(m_video->scaleMode()) + 1) % 4));
+        showOsd(scaleModeName(m_video->scaleMode()));
+    });
+    add({Qt::Key_A}, [this] { cycleAudio(); });
+    add({Qt::Key_J}, [this] { cycleSubtitle(); });
+    add({Qt::Key_V}, [this] {
+        if (m_player->currentSubtitleTrack() >= 0) { m_player->setSubtitleTrack(-1); showOsd(tr("Subtitles off")); }
+        else if (!m_player->subtitleTracks().isEmpty()) { m_player->setSubtitleTrack(0); showOsd(m_player->subtitleTracks().first().label); }
+        else showOsd(tr("No subtitle tracks"));
+        rebuildSubtitleMenu();
+    });
+    add({Qt::Key_S}, [this] { takeScreenshot(m_settings.screenshotFiltered); });
+    add({QKeySequence(Qt::SHIFT | Qt::Key_S)}, [this] { takeScreenshot(false); });
+    add({QKeySequence(Qt::CTRL | Qt::Key_S)}, [this] { takeScreenshot(true); });
+    add({Qt::Key_PageDown, Qt::Key_MediaNext, Qt::Key_N}, [this] { nextItem(1); });
+    add({Qt::Key_PageUp, Qt::Key_MediaPrevious, Qt::Key_P}, [this] { nextItem(-1); });
+    add({QKeySequence::Open}, [this] { openDialog(); });
+    add({Qt::Key_E}, [this] { m_settingsDock->setVisible(!m_settingsDock->isVisible()); });
+    add({Qt::Key_L}, [this] { m_playlistDock->setVisible(!m_playlistDock->isVisible()); });
+    add({QKeySequence(Qt::CTRL | Qt::Key_J)}, [this] { showJellyfin(!m_jfDock->isVisible()); });
+    add({Qt::Key_I}, [this] {
+        m_info->setVisible(!m_info->isVisible());
+        if (m_info->isVisible()) { updateInfoOverlay(); m_infoTimer.start(); } else m_infoTimer.stop();
+    });
+    add({QKeySequence::Quit, QKeySequence(Qt::CTRL | Qt::Key_Q)}, [] { qApp->quit(); });   // also from the desk window
+}
+
+void MainWindow::restoreSettings()
+{
+    m_settings.load();
+    m_player->setHardwareDecoding(m_settings.hardwareDecoding);
+    m_player->setVolume(m_settings.volume);
+    m_player->setMuted(m_settings.muted);
+    {
+        QSignalBlocker b(m_controls->volumeSlider());
+        m_controls->volumeSlider()->setValue(qRound(m_settings.volume * 100));
+    }
+    m_controls->setMutedIcon(m_settings.muted);
+    m_playbackPanel->setHardwareDecoding(m_settings.hardwareDecoding);
+    m_playbackPanel->setScreenshotFiltered(m_settings.screenshotFiltered);
+    m_playbackPanel->setScreenshotDir(m_settings.screenshotDir);
+    setScaleMode(m_settings.scaleMode);
+    setCrop(m_settings.crop);
+    setAspectOverride(m_settings.aspectOverride);
+
+    // m_settings desk fields are applied when desk mode is first opened.
+    const CrtPreset* p = m_presets.find(m_settings.presetName);
+    if (!p) p = m_presets.find("Consumer Television");
+    m_presetName = p->name;
+    applyParams(m_settings.hasParams ? m_settings.params : p->params, false);
+    setBypass(m_settings.bypass);
+    m_video->setSplitFraction(m_settings.split);
+    setCompare(m_settings.compare);
+
+    m_playlist->setItems(m_settings.playlist);
+    m_playlist->setCurrentIndex(m_settings.playlistIndex < m_playlist->count() ? m_settings.playlistIndex : -1);
+    if (!m_settings.geometry.isEmpty()) restoreGeometry(m_settings.geometry);
+    if (!m_settings.windowState.isEmpty()) restoreState(m_settings.windowState);
+    m_settingsDock->setVisible(m_settings.settingsVisible);
+    m_playlistDock->setVisible(m_settings.playlistVisible);
+    m_jfDock->setVisible(m_settings.jellyfinVisible);
+    refreshPresetUi();
+}
+
+void MainWindow::saveSettings()
+{
+    if (m_sleep) m_sleep->setActive(false);   // never leave an inhibition behind
+    storeDeskPose();
+    rememberPosition();
+    jellyfinStopCurrent(true);
+    m_settings.jellyfinVisible = m_fullscreen ? m_settings.jellyfinVisible : m_jfDock->isVisible();
+    m_settings.volume = m_player->volume();
+    m_settings.muted = m_player->isMuted();
+    m_settings.scaleMode = m_video->scaleMode();
+    m_settings.crop = m_video->crop();
+    m_settings.aspectOverride = m_video->aspectOverride();
+    m_settings.presetName = m_presetName;
+    m_settings.params = m_params;
+    m_settings.hasParams = true;
+    m_settings.bypass = m_video->bypass();
+    m_settings.compare = m_video->compare();
+    m_settings.split = m_video->splitFraction();
+    m_settings.playlist = m_playlist->items();
+    m_settings.playlistIndex = m_playlist->currentIndex();
+    if (m_fullscreen) {
+        m_settings.settingsVisible = m_dockSettingsBeforeFs;
+        m_settings.playlistVisible = m_dockPlaylistBeforeFs;
+    } else {
+        m_settings.geometry = saveGeometry();
+        m_settings.windowState = saveState();
+        m_settings.settingsVisible = m_settingsDock->isVisible();
+        m_settings.playlistVisible = m_playlistDock->isVisible();
+    }
+    m_settings.save();
+}
+
+void MainWindow::closeEvent(QCloseEvent* e)
+{
+    saveSettings();
+    e->accept();
+}
+
+// ---- files & playlist ------------------------------------------------------
+
+void MainWindow::openFiles(const QStringList& paths, bool playNow)
+{
+    if (paths.isEmpty()) return;
+    const int first = m_playlist->addItems(paths);
+    if (!QFileInfo(paths.first()).absolutePath().isEmpty()) m_settings.lastDir = QFileInfo(paths.first()).absolutePath();
+    if (playNow) playIndex(first);
+    if (paths.size() > 1) showOsd(tr("Added %1 files to the playlist").arg(paths.size()));
+}
+
+void MainWindow::playIndex(int i)
+{
+    const QString path = m_playlist->at(i);
+    if (path.isEmpty()) return;
+    rememberPosition();
+    jellyfinStopCurrent(false);
+    m_extSubs.clear();
+    m_extSubLabel.clear();
+    m_player->setExternalSubtitle(QString());
+    setLoop(-1, -1);
+    QString uri = path;
+    qint64 start = 0;
+    if (path.startsWith(QLatin1String("jellyfin:"))) {
+        // "jellyfin:///<itemId>#<title>": resolved to an authenticated stream only now, so
+        // the playlist never holds a token or even the server address.
+        const QString id = QUrl(path).path().section('/', -1);
+        if (!m_jf->isSignedIn()) {
+            showOsd(tr("Sign in to Jellyfin to play this item"), 3000);
+            showJellyfin(true);
+            m_pendingStartNs = -1;
+            return;
+        }
+        m_mediaTitle = QUrl::fromPercentEncoding(path.section('#', 1).toUtf8());
+        m_currentLocal.clear();
+        m_jf->fetchSubtitles(id);   // external subtitle files on the server, offered in the menu
+        m_jfItemId = id;
+        m_jfStarted = false;
+        const QByteArray auth = m_jf->authorizationHeader();
+        m_player->setHttpHeaders({{"Authorization", auth}, {"X-Emby-Authorization", auth}});
+        uri = m_jf->streamUrl(id).toString(QUrl::FullyEncoded);
+        if (m_pendingStartNs >= 0) start = m_pendingStartNs;
+        else if (const JfItem* it = m_jf->cachedItem(id); it && !it->played) start = it->positionTicks * 100;
+    } else {
+        m_player->setHttpHeaders({});
+        m_jfItemId.clear();
+        m_mediaTitle.clear();
+        const QFileInfo fi(path);
+        m_currentLocal = fi.exists() ? fi.absoluteFilePath() : QString();
+        if (!m_currentLocal.isEmpty()) {
+            if (m_pendingStartNs < 0) start = m_resume->position(m_currentLocal) * 1000000;   // where it was left
+            // Subtitle files next to the video ("Movie.srt", "Movie.en.srt", ...): the first loads.
+            for (const QString& sub : findSidecarSubtitles(m_currentLocal))
+                m_extSubs.append({QFileInfo(sub).fileName(), QUrl::fromLocalFile(sub).toString(QUrl::FullyEncoded)});
+            if (!m_extSubs.isEmpty()) {
+                QFile sf(QUrl(m_extSubs.first().second).toLocalFile());
+                if (sf.open(QIODevice::ReadOnly) && sf.size() < 50 * 1024 * 1024) {
+                    m_player->setExternalSubtitle(stageSubtitle(sf.readAll(), sf.fileName()));
+                    m_extSubLabel = m_extSubs.first().first;
+                }
+            }
+        }
+    }
+    m_pendingStartNs = -1;
+    m_playlist->setCurrentIndex(i);
+    m_lastError.clear();
+    m_emptyHint->hide();
+    if (m_params.channelStatic && m_video->hasFrame()) {
+        m_video->channelChange();   // static over the old picture until the new file's first frame
+    } else {
+        m_video->clearFrame();
+        if (m_desk) m_desk->view()->clearFrame();
+    }
+    m_player->open(uri, true, start);
+    updateTitle();
+    const QString shown = m_mediaTitle.isEmpty() ? QFileInfo(path).fileName() : m_mediaTitle;
+    showOsd(start > 0 ? tr("%1 — resuming at %2 (Home: start over)").arg(shown, formatTime(start / 1000000)) : shown);
+}
+
+void MainWindow::jellyfinStopCurrent(bool waitForServer)
+{
+    if (m_jfItemId.isEmpty() || !m_jfStarted) return;
+    QNetworkReply* r = m_jf->reportStopped(m_jfItemId, m_player->position());
+    m_jfStarted = false;
+    m_jfTimer.stop();
+    if (waitForServer && r && !r->isFinished()) {
+        // On quit, give the final position a moment to reach the server.
+        QEventLoop loop;
+        QTimer::singleShot(1500, &loop, &QEventLoop::quit);
+        connect(r, &QNetworkReply::finished, &loop, &QEventLoop::quit);
+        loop.exec();
+    }
+}
+
+void MainWindow::vcr(const QString& text, double seconds)
+{
+    if (m_params.vcrOsd) m_video->setOsdText(text, seconds);
+}
+
+void MainWindow::showJellyfin(bool on)
+{
+    if (m_deskActive && on) leaveDeskMode();
+    m_jfDock->setVisible(on);
+    if (on) m_jfDock->raise();
+}
+
+void MainWindow::playJellyfin(const JfItem& item, bool fromStart)
+{
+    const QString ref = QStringLiteral("jellyfin:///%1#%2").arg(item.id, QString::fromUtf8(QUrl::toPercentEncoding(item.displayName())));
+    const int idx = m_playlist->addItems({ref});
+    m_pendingStartNs = fromStart ? 0 : (item.played ? 0 : item.positionTicks * 100);
+    playIndex(idx);
+}
+
+void MainWindow::enqueueJellyfin(const JfItem& item)
+{
+    const QString ref = QStringLiteral("jellyfin:///%1#%2").arg(item.id, QString::fromUtf8(QUrl::toPercentEncoding(item.displayName())));
+    m_playlist->addItems({ref});
+    showOsd(tr("Added to playlist: %1").arg(item.displayName()));
+}
+
+void MainWindow::nextItem(int dir)
+{
+    const int i = m_playlist->currentIndex() + dir;
+    if (i >= 0 && i < m_playlist->count()) playIndex(i);
+    else showOsd(dir > 0 ? tr("End of playlist") : tr("Start of playlist"));
+}
+
+void MainWindow::openDialog(QWidget* parent)
+{
+    const QStringList files = QFileDialog::getOpenFileNames(parent ? parent : this, tr("Open video"), m_settings.lastDir, tr(kVideoFilter));
+    if (!files.isEmpty()) openFiles(files, true);
+}
+
+void MainWindow::addDialog()
+{
+    const QStringList files = QFileDialog::getOpenFileNames(this, tr("Add to playlist"), m_settings.lastDir, tr(kVideoFilter));
+    if (!files.isEmpty()) openFiles(files, m_player->currentUri().isEmpty());
+}
+
+void MainWindow::dragEnterEvent(QDragEnterEvent* e)
+{
+    if (e->mimeData()->hasUrls()) e->acceptProposedAction();
+}
+
+void MainWindow::dropEvent(QDropEvent* e)
+{
+    QStringList files;
+    for (const QUrl& u : e->mimeData()->urls()) {
+        if (u.isLocalFile()) {
+            const QFileInfo fi(u.toLocalFile());
+            if (fi.isDir()) {
+                for (const QFileInfo& f : QDir(fi.absoluteFilePath()).entryInfoList(QDir::Files, QDir::Name)) files << f.absoluteFilePath();
+            } else {
+                files << fi.absoluteFilePath();
+            }
+        } else {
+            files << u.toString();
+        }
+    }
+    if (!files.isEmpty()) { openFiles(files, true); e->acceptProposedAction(); }
+}
+
+void MainWindow::updateTitle()
+{
+    const QString p = m_player->currentPath();
+    const QString name = !m_mediaTitle.isEmpty() ? m_mediaTitle : QFileInfo(p).fileName();
+    setWindowTitle(p.isEmpty() ? tr("CRT Player") : name + tr(" — CRT Player"));
+    if (m_desk) m_desk->view()->setMarqueeText(DeskView::marqueeTitle(mediaTitle()));   // the arcade cabinet's marquee
+}
+
+// ---- presets & CRT parameters ----------------------------------------------
+
+void MainWindow::applyParams(const CrtParams& p, bool fromPreset)
+{
+    Q_UNUSED(fromPreset);
+    m_params = p;
+    m_video->setParams(p);
+    applyLookSound();
+    if (m_crtPanel->params() != p) m_crtPanel->setParams(p);
+    refreshPresetUi();
+}
+
+void MainWindow::showSettingsTab(const QString& name)
+{
+    m_settingsDock->show();
+    for (int i = 0; i < m_tabs->count(); ++i)
+        if (m_tabs->tabText(i).remove('&').compare(name, Qt::CaseInsensitive) == 0 ||
+            m_tabs->widget(i)->objectName().compare(name, Qt::CaseInsensitive) == 0) m_tabs->setCurrentIndex(i);
+}
+
+void MainWindow::setLookSound(bool on)
+{
+    m_settings.lookSound = on;
+    m_playbackPanel->setLookSound(on);
+    applyLookSound();
+}
+
+void MainWindow::setSoundLevels(double noiseVolume, double effectStrength)
+{
+    m_settings.noiseVolume = std::clamp(noiseVolume, 0.0, 2.0);
+    m_settings.effectStrength = std::clamp(effectStrength, 0.0, 1.0);
+    m_playbackPanel->setNoiseVolume(m_settings.noiseVolume);
+    m_playbackPanel->setEffectStrength(m_settings.effectStrength);
+    applyLookSound();
+}
+
+void MainWindow::applyLookSound()
+{
+    // The look's tape and speaker sound (unless switched off in Playback).
+    TapeParams t;
+    if (m_settings.lookSound) {
+        // Noise volume: how loud the added hiss and crackle are. Effect strength: how strongly
+        // the rest changes the sound.
+        const float k = float(m_settings.effectStrength);
+        t.hiss = m_params.tapeHiss; t.crackle = m_params.filmCrackle;
+        t.noiseGain = float(m_settings.noiseVolume);
+        t.wow = m_params.wowFlutter * k; t.saturation = m_params.tapeSaturation * k;
+        t.tone = m_params.tapeTone * k; t.speaker = m_params.tvSpeaker * k;
+        t.dropouts = m_params.tapeHiss > 0.f ? m_params.vhsDropouts * k : 0.f;   // tape dropouts dip the sound too
+    }
+    m_lastTape = t;
+    m_player->setTapeParams(t);
+}
+
+void MainWindow::refreshPresetUi()
+{
+    const CrtPreset* cur = m_presets.find(m_presetName);
+    const bool modified = cur && cur->params != m_params;
+    m_crtPanel->setPresetList(m_presets.builtinNames(), m_presets.userNames());
+    m_crtPanel->setCurrentPreset(m_presetName, modified, cur && cur->builtin);
+    QComboBox* combo = m_controls->presetCombo();
+    QSignalBlocker b(combo);
+    combo->clear();
+    combo->addItems(m_presets.builtinNames());
+    if (!m_presets.userNames().isEmpty()) {
+        combo->insertSeparator(combo->count());
+        combo->addItems(m_presets.userNames());
+    }
+    combo->setCurrentIndex(combo->findText(m_presetName));
+    combo->setToolTip(modified ? tr("%1 (modified)").arg(m_presetName) : m_presetName);
+    if (m_desk) {
+        QComboBox* dc = m_desk->bar()->presetCombo();
+        QSignalBlocker db(dc);
+        dc->clear();
+        for (int i = 0; i < combo->count(); ++i) {
+            if (combo->itemText(i).isEmpty()) dc->insertSeparator(dc->count());
+            else dc->addItem(combo->itemText(i));
+        }
+        dc->setCurrentIndex(dc->findText(m_presetName));
+    }
+}
+
+bool MainWindow::selectPreset(const QString& name)
+{
+    const CrtPreset* p = m_presets.find(name);
+    if (!p) return false;
+    m_presetName = p->name;
+    applyParams(p->params, true);
+    showOsd(p->name);
+    return true;
+}
+
+void MainWindow::cyclePreset(int dir)
+{
+    QStringList all = m_presets.builtinNames() + m_presets.userNames();
+    int i = all.indexOf(m_presetName);
+    i = (i + dir + all.size()) % all.size();
+    selectPreset(all.at(i));
+}
+
+void MainWindow::setParams(const CrtParams& p) { applyParams(p, false); }
+
+void MainWindow::savePresetAs()
+{
+    bool ok = false;
+    const QString suggestion = m_presets.uniqueName(m_presetName.isEmpty() ? tr("My preset") : m_presetName);
+    const QString name = QInputDialog::getText(this, tr("Save preset"), tr("Preset name:"), QLineEdit::Normal, suggestion, &ok).trimmed();
+    if (!ok || name.isEmpty()) return;
+    if (const CrtPreset* existing = m_presets.find(name)) {
+        if (existing->builtin) {
+            QMessageBox::warning(this, tr("Save preset"), tr("\"%1\" is a built-in preset. Choose another name.").arg(name));
+            return;
+        }
+        if (QMessageBox::question(this, tr("Save preset"), tr("Replace the preset \"%1\"?").arg(existing->name)) != QMessageBox::Yes) return;
+    }
+    QString err;
+    if (!m_presets.saveUser(name, m_params, &err)) { QMessageBox::warning(this, tr("Save preset"), err); return; }
+    m_presetName = m_presets.find(name)->name;
+    refreshPresetUi();
+    showOsd(tr("Saved preset “%1”").arg(m_presetName));
+}
+
+void MainWindow::savePreset()
+{
+    QString err;
+    if (!m_presets.saveUser(m_presetName, m_params, &err)) { QMessageBox::warning(this, tr("Save preset"), err); return; }
+    refreshPresetUi();
+    showOsd(tr("Saved preset “%1”").arg(m_presetName));
+}
+
+void MainWindow::renamePreset()
+{
+    bool ok = false;
+    const QString name = QInputDialog::getText(this, tr("Rename preset"), tr("New name:"), QLineEdit::Normal, m_presetName, &ok).trimmed();
+    if (!ok || name.isEmpty() || name == m_presetName) return;
+    const bool modified = m_presets.find(m_presetName) && m_presets.find(m_presetName)->params != m_params;
+    const CrtParams current = m_params;
+    QString err;
+    if (!m_presets.rename(m_presetName, name, &err)) { QMessageBox::warning(this, tr("Rename preset"), err); return; }
+    m_presetName = name;
+    applyParams(modified ? current : m_presets.find(name)->params, false);
+    showOsd(tr("Renamed to “%1”").arg(name));
+}
+
+void MainWindow::deletePreset()
+{
+    if (QMessageBox::question(this, tr("Delete preset"), tr("Delete the preset \"%1\"?").arg(m_presetName)) != QMessageBox::Yes) return;
+    QString err;
+    if (!m_presets.remove(m_presetName, &err)) { QMessageBox::warning(this, tr("Delete preset"), err); return; }
+    const QString removed = m_presetName;
+    m_presetName = m_presets.builtinNames().first();
+    refreshPresetUi();
+    showOsd(tr("Deleted “%1”; current settings kept").arg(removed));
+}
+
+void MainWindow::importPreset()
+{
+    const QString path = QFileDialog::getOpenFileName(this, tr("Import CRT preset"), m_settings.lastDir, tr("CRT Player presets (*.json);;All files (*)"));
+    if (path.isEmpty()) return;
+    QString name, err;
+    if (!m_presets.importFile(path, &name, &err)) { QMessageBox::warning(this, tr("Import preset"), err); return; }
+    selectPreset(name);
+    showOsd(tr("Imported “%1”").arg(name));
+}
+
+void MainWindow::exportPreset()
+{
+    QString fname = m_presetName;
+    fname.replace(QRegularExpression("[^A-Za-z0-9 _-]"), "_");
+    const QString path = QFileDialog::getSaveFileName(this, tr("Export CRT preset"),
+                                                      QDir(m_settings.lastDir).filePath(fname + ".json"), tr("CRT Player presets (*.json)"));
+    if (path.isEmpty()) return;
+    QString err;
+    // Exports the settings as currently shown (including unsaved tweaks) under the preset's name.
+    if (!m_presets.exportFile(m_presetName, m_params, path, &err)) { QMessageBox::warning(this, tr("Export preset"), err); return; }
+    showOsd(tr("Exported to %1").arg(QFileInfo(path).fileName()));
+}
+
+void MainWindow::setBypass(bool on)
+{
+    m_video->setBypass(on);
+    QSignalBlocker b1(m_controls->crtButton), b2(m_crtPanel->bypassButton());
+    m_controls->crtButton->setChecked(!on);
+    m_crtPanel->bypassButton()->setChecked(on);
+}
+
+void MainWindow::setCompare(bool on)
+{
+    if (on && m_video->bypass()) setBypass(false);
+    m_video->setCompare(on);
+    QSignalBlocker b1(m_controls->compareButton), b2(m_crtPanel->compareButton());
+    m_controls->compareButton->setChecked(on);
+    m_crtPanel->compareButton()->setChecked(on);
+}
+
+void MainWindow::setScaleMode(ScaleMode m)
+{
+    m_video->setScaleMode(m);
+    m_displayPanel->setScaleMode(m);
+    for (QAction* a : m_aspectGroup->actions()) a->setChecked(a->data().toInt() == int(m));
+    updateSourceInfo();
+}
+
+void MainWindow::setCrop(const CropFractions& c)
+{
+    m_video->setCrop(c);
+    m_displayPanel->setCrop(m_video->crop());
+    updateSourceInfo();
+}
+
+void MainWindow::setAspectOverride(double a)
+{
+    m_video->setAspectOverride(a);
+    m_displayPanel->setAspectOverride(a);
+}
+
+// ---- tracks ----------------------------------------------------------------
+
+void MainWindow::rebuildAudioMenu()
+{
+    m_audioMenu->clear();
+    const auto tracks = m_player->audioTracks();
+    const int cur = m_player->currentAudioTrack();
+    if (tracks.isEmpty()) { m_audioMenu->addAction(tr("No audio tracks"))->setEnabled(false); return; }
+    auto* g = new QActionGroup(m_audioMenu);
+    for (const TrackInfo& t : tracks) {
+        QAction* a = m_audioMenu->addAction(t.label);
+        a->setCheckable(true);
+        a->setChecked(t.index == cur);
+        g->addAction(a);
+        connect(a, &QAction::triggered, this, [this, t] { m_player->setAudioTrack(t.index); showOsd(t.label); });
+    }
+}
+
+void MainWindow::rebuildSubtitleMenu()
+{
+    m_subMenu->clear();
+    const auto tracks = m_player->subtitleTracks();
+    const int cur = m_player->currentSubtitleTrack();
+    auto* g = new QActionGroup(m_subMenu);
+    QAction* off = m_subMenu->addAction(tr("Off"));
+    off->setCheckable(true);
+    off->setChecked(cur < 0);
+    g->addAction(off);
+    connect(off, &QAction::triggered, this, [this] { m_player->setSubtitleTrack(-1); showOsd(tr("Subtitles off")); });
+    if (tracks.isEmpty()) m_subMenu->addAction(tr("No subtitle tracks in this file"))->setEnabled(false);
+    for (const TrackInfo& t : tracks) {
+        QAction* a = m_subMenu->addAction(t.label);
+        a->setCheckable(true);
+        a->setChecked(t.index == cur);
+        g->addAction(a);
+        connect(a, &QAction::triggered, this, [this, t] { m_player->setSubtitleTrack(t.index); showOsd(t.label); });
+    }
+    // External subtitle files: next to a local video, or offered by the Jellyfin server.
+    m_subMenu->addSection(tr("Subtitle files"));
+    for (const auto& ext : m_extSubs) {
+        QAction* a = m_subMenu->addAction(ext.first);
+        a->setCheckable(true);
+        a->setChecked(ext.first == m_extSubLabel);
+        connect(a, &QAction::triggered, this, [this, ext] { setExternalSubtitleFile(ext.second, ext.first); });
+    }
+    if (!m_extSubLabel.isEmpty())
+        m_subMenu->addAction(tr("No subtitle file"), this, [this] { setExternalSubtitleFile(QString(), QString()); });
+    if (!m_currentLocal.isEmpty())
+        m_subMenu->addAction(tr("Load subtitle file…"), this, [this] {
+            const QString f = QFileDialog::getOpenFileName(this, tr("Load subtitle file"), QFileInfo(m_currentLocal).absolutePath(),
+                                                           tr("Subtitles (*.srt *.ass *.ssa *.vtt *.sub *.txt);;All files (*)"));
+            if (!f.isEmpty()) {
+                m_extSubs.append({QFileInfo(f).fileName(), QUrl::fromLocalFile(f).toString(QUrl::FullyEncoded)});
+                setExternalSubtitleFile(m_extSubs.last().second, m_extSubs.last().first);
+            }
+        });
+}
+
+QStringList MainWindow::findSidecarSubtitles(const QString& videoPath) const
+{
+    const QFileInfo fi(videoPath);
+    const QString base = fi.completeBaseName();
+    static const QStringList exts = {"srt", "ass", "ssa", "vtt", "sub"};
+    QStringList exact, prefixed;
+    const QFileInfoList files = QDir(fi.absolutePath()).entryInfoList(QDir::Files, QDir::Name);
+    for (const QFileInfo& f : files) {
+        if (!exts.contains(f.suffix().toLower())) continue;
+        if (f.completeBaseName() == base) exact << f.absoluteFilePath();
+        else if (f.fileName().startsWith(base + '.')) prefixed << f.absoluteFilePath();   // Movie.en.srt
+    }
+    return exact + prefixed;
+}
+
+QString MainWindow::stageSubtitle(const QByteArray& data, const QString& nameHint)
+{
+    // External subtitles are played from a local copy. SRT files have no header, and
+    // GStreamer's type detection cannot recognise very short ones (a few cues), so short
+    // files are padded with trailing blank lines, which subtitle formats ignore.
+    const QString dir = QDir(QStandardPaths::writableLocation(QStandardPaths::CacheLocation)).filePath("subtitles");
+    QDir().mkpath(dir);
+    QString ext = QFileInfo(nameHint).suffix().toLower();
+    if (ext.isEmpty() || ext.size() > 4) ext = "srt";
+    const QString name = QString::fromLatin1(QCryptographicHash::hash(nameHint.toUtf8(), QCryptographicHash::Sha1).toHex().left(16));
+    const QString path = QDir(dir).filePath(name + '.' + ext);
+    QFile f(path);
+    if (!f.open(QIODevice::WriteOnly | QIODevice::Truncate)) return {};
+    f.write(data);
+    if (data.size() < 4096) f.write(QByteArray(4096 - data.size(), '\n'));
+    f.close();
+    return QUrl::fromLocalFile(path).toString(QUrl::FullyEncoded);
+}
+
+void MainWindow::setExternalSubtitleFile(const QString& uri, const QString& label)
+{
+    if (uri.isEmpty()) { applyExternalSubtitle(QString(), QString()); return; }
+    const QUrl u(uri);
+    if (u.isLocalFile()) {
+        QFile f(u.toLocalFile());
+        if (!f.open(QIODevice::ReadOnly) || f.size() > 50 * 1024 * 1024) { showOsd(tr("Could not read the subtitle file")); return; }
+        applyExternalSubtitle(stageSubtitle(f.readAll(), u.toLocalFile()), label);
+        return;
+    }
+    // Server subtitle (Jellyfin): download it with the session's authentication first.
+    showOsd(tr("Loading subtitles…"));
+    m_jf->fetchBytes(u, [this, uri, label](const QByteArray& data, const QString& err) {
+        if (!err.isEmpty()) { showOsd(tr("Could not load the subtitles: %1").arg(err), 4000); return; }
+        applyExternalSubtitle(stageSubtitle(data, uri), label);
+    });
+}
+
+void MainWindow::applyExternalSubtitle(const QString& uri, const QString& label)
+{
+    // playbin reads a subtitle file only when a stream opens: reopen where we are.
+    const qint64 pos = m_player->position();
+    const bool playing = m_player->isPlaying();
+    const QString cur = m_player->currentUri();
+    if (cur.isEmpty()) return;
+    m_player->setExternalSubtitle(uri);
+    m_extSubLabel = label;
+    m_player->open(cur, playing, pos);
+    showOsd(label.isEmpty() ? tr("Subtitle file off") : tr("Subtitles: %1").arg(label));
+}
+
+void MainWindow::showPluginNotice()
+{
+    const auto gaps = Player::missingRecommended();
+    if (gaps.isEmpty()) return;
+    QStringList items, pkgs;
+    for (const auto& g : gaps) { items << QStringLiteral("  •  ") + g.what; if (!pkgs.contains(g.package)) pkgs << g.package; }
+    const QString key = pkgs.join(',');
+    if (m_settings.hiddenPluginNotice == key) return;   // the user said "don't show again" for exactly this
+    const QString cmd = Distro::installCommand(pkgs);
+    auto* box = new QMessageBox(QMessageBox::Information, tr("Some videos won't play yet"),
+                                tr("CRT Player uses the GStreamer plugins installed on this system. These are missing, so "
+                                   "the following won't work:\n\n%1\n\nOn %2, install them with:\n\n    %3%4")
+                                    .arg(items.join('\n'), Distro::prettyName(), cmd,
+                                         Distro::codecNote().isEmpty() ? QString() : "\n\n" + Distro::codecNote()),
+                                QMessageBox::Close, this);
+    box->setTextInteractionFlags(Qt::TextSelectableByMouse);
+    QPushButton* copy = box->addButton(tr("Copy command"), QMessageBox::ActionRole);
+    copy->disconnect();   // keep the box open after copying
+    connect(copy, &QPushButton::clicked, this, [cmd, copy] {
+        QString c = cmd;
+        QGuiApplication::clipboard()->setText(c.remove(QStringLiteral("   (then reboot)")));
+        copy->setText(tr("Copied"));
+    });
+    auto* dontShow = new QCheckBox(tr("Don't show this again (until the list changes)"));
+    box->setCheckBox(dontShow);
+    connect(box, &QMessageBox::finished, this, [this, dontShow, key] { if (dontShow->isChecked()) m_settings.hiddenPluginNotice = key; });
+    box->setAttribute(Qt::WA_DeleteOnClose);
+    box->setModal(false);
+    box->show();
+}
+
+void MainWindow::theaterLook(bool entering)
+{
+    static const char* kLooks[] = {"Film Print (35mm)", "Worn Film (16mm)", "Drive-in Movie"};
+    if (entering) {
+        if (m_preTheaterValid || m_settings.theaterLook >= 3) return;
+        m_preTheaterName = m_presetName;
+        m_preTheaterParams = m_params;
+        m_preTheaterValid = true;
+        selectPreset(QString::fromLatin1(kLooks[m_settings.theaterLook]));
+    } else if (m_preTheaterValid) {
+        m_preTheaterValid = false;
+        m_presetName = m_preTheaterName;
+        applyParams(m_preTheaterParams, true);
+    }
+}
+
+void MainWindow::setDeskScene(const DeskView::Scene& s)
+{
+    if (!m_desk) return;
+    const int before = m_desk->view()->scene().scene;
+    m_desk->view()->setScene(s);
+    if (s.scene == 3 && before != 3) theaterLook(true);
+    else if (s.scene != 3 && before == 3) theaterLook(false);
+    updateTheater();
+    m_desk->update();
+}
+
+void MainWindow::updateTheater()
+{
+    if (!m_desk) return;
+    // Open while playing, and while paused part-way through; closed before the start and
+    // at the end of the playlist.
+    const bool playing = m_player->isPlaying();
+    if (playing) m_theaterEnded = false;
+    const bool open = playing || (m_player->hasMedia() && !m_theaterEnded && m_player->position() > 500000000LL);
+    m_desk->view()->setTheaterState(open, playing);
+}
+
+void MainWindow::openSceneDialog()
+{
+    if (!m_desk) return;
+    if (m_sceneDialog) { m_sceneDialog->show(); m_sceneDialog->raise(); m_sceneDialog->activateWindow(); return; }
+    DeskView* view = m_desk->view();
+    auto* dlg = new QDialog(m_desk);
+    dlg->setWindowTitle(tr("Scene settings"));
+    dlg->setAttribute(Qt::WA_DeleteOnClose);
+    auto* v = new QVBoxLayout(dlg);
+    v->setContentsMargins(18, 16, 18, 16);
+    v->setSpacing(12);
+
+    // Scene cards with previews of the current view.
+    auto* cards = new QHBoxLayout;
+    auto* group = new QButtonGroup(dlg);
+    const QStringList names = {tr("Your desktop"), tr("Desk"), tr("Wall-mounted TV"), tr("Movie theater"), tr("90s CG room")};
+    for (int i = 0; i < 5; ++i) {
+        auto* b = new QToolButton(dlg);
+        b->setCheckable(true);
+        b->setToolButtonStyle(Qt::ToolButtonTextUnderIcon);
+        b->setIcon(QIcon(QPixmap::fromImage(view->scenePreview(i, QSize(144, 81)))));
+        b->setIconSize(QSize(144, 81));
+        b->setText(names[i]);
+        b->setChecked(view->scene().scene == i);
+        b->setEnabled(!(inGamescope() && i == 0));   // Game Mode has no desktop to show
+        group->addButton(b, i);
+        cards->addWidget(b);
+    }
+    v->addLayout(cards);
+
+    auto combo = [dlg](const QStringList& items, int current) {
+        auto* c = new QComboBox(dlg);
+        c->addItems(items);
+        c->setCurrentIndex(current);
+        return c;
+    };
+    const DeskView::Scene cur = view->scene();
+    auto* room = new QGroupBox(tr("Room"), dlg);
+    auto* rf = new QFormLayout(room);
+    auto* mood = combo({tr("Evening (lamp on)"), tr("Night (lamp dimmed)"), tr("Lights off")}, cur.mood);
+    auto* fog = combo({tr("Off"), tr("Light haze"), tr("Thick fog")}, cur.fog);
+    auto* strength = new QSlider(Qt::Horizontal, dlg);
+    strength->setRange(25, 200);
+    strength->setValue(int(cur.fogStrength * 100));
+    auto* wood = combo({tr("Walnut"), tr("Oak"), tr("Cherry")}, cur.wood);
+    auto* quality = combo({tr("Low (fastest)"), tr("Medium"), tr("High")}, cur.quality);
+    quality->setToolTip(tr("Fog detail. Lower it if desk mode stutters with fog on."));
+    rf->addRow(tr("Mood"), mood);
+    rf->addRow(tr("Fog"), fog);
+    rf->addRow(tr("Fog strength"), strength);
+    rf->addRow(tr("Wood"), wood);
+    rf->addRow(tr("Quality"), quality);
+    v->addWidget(room);
+
+    auto* wallBox = new QGroupBox(tr("Wall and pictures"), dlg);
+    auto* wf = new QFormLayout(wallBox);
+    auto* wallStyle = combo({tr("Warm white"), tr("Sage green"), tr("Navy"), tr("Charcoal"), tr("Pinstripe wallpaper"), tr("Damask wallpaper")}, cur.wallStyle);
+    auto* layout = combo({tr("None"), tr("One on each side"), tr("Two on the left"), tr("Two on the right"), tr("Two on each side")}, cur.frameLayout);
+    auto* frameStyle = combo({tr("Black"), tr("Wood"), tr("Gold")}, cur.frameStyle);
+    wf->addRow(tr("Wall"), wallStyle);
+    wf->addRow(tr("Pictures"), layout);
+    wf->addRow(tr("Frames"), frameStyle);
+    // Placement: how high the set hangs, and where the pictures go.
+    auto slider = [dlg](int lo, int hi, double value, const QString& tip) {
+        auto* sl = new QSlider(Qt::Horizontal, dlg);
+        sl->setRange(lo, hi);
+        sl->setValue(int(std::lround(value * 100)));
+        sl->setToolTip(tip);
+        return sl;
+    };
+    auto* tvHeight = slider(100, 300, cur.tvHeight, tr("How high the set hangs on the wall"));
+    auto* picHeight = slider(-60, 60, cur.picHeight, tr("The pictures' height, relative to the middle of the screen"));
+    auto* picSpacing = slider(50, 200, cur.picSpacing, tr("How far the pictures hang from the set"));
+    auto* picSize = slider(60, 150, cur.picSize, tr("How big the pictures are"));
+    wf->addRow(tr("TV height"), tvHeight);
+    wf->addRow(tr("Picture height"), picHeight);
+    wf->addRow(tr("Picture spacing"), picSpacing);
+    wf->addRow(tr("Picture size"), picSize);
+    auto paths = std::make_shared<QStringList>(cur.framePaths);
+    while (paths->size() < 4) paths->append(QString());
+    QLabel* names4[4];
+    for (int i = 0; i < 4; ++i) {
+        auto* row = new QHBoxLayout;
+        names4[i] = new QLabel(dlg);
+        names4[i]->setMinimumWidth(160);
+        auto* choose = new QPushButton(tr("Choose…"), dlg);
+        auto* clear = new QToolButton(dlg);
+        clear->setText(QStringLiteral("✕"));
+        clear->setToolTip(tr("Remove this picture"));
+        row->addWidget(names4[i], 1);
+        row->addWidget(choose);
+        row->addWidget(clear);
+        wf->addRow(tr("Picture %1").arg(i + 1), row);
+        connect(choose, &QPushButton::clicked, dlg, [this, dlg, paths, i, names4] {
+            const QString f = QFileDialog::getOpenFileName(dlg, tr("Choose a picture"), QFileInfo(paths->value(i)).absolutePath(),
+                                                           tr("Images (*.png *.jpg *.jpeg *.webp *.bmp *.gif)"));
+            if (f.isEmpty()) return;
+            (*paths)[i] = f;
+            names4[i]->setText(QFileInfo(f).fileName());
+            DeskView::Scene s = m_desk->view()->scene(); s.framePaths = *paths; setDeskScene(s);
+        });
+        connect(clear, &QToolButton::clicked, dlg, [this, paths, i, names4] {
+            (*paths)[i].clear();
+            names4[i]->setText(tr("(empty)"));
+            DeskView::Scene s = m_desk->view()->scene(); s.framePaths = *paths; setDeskScene(s);
+        });
+        names4[i]->setText(paths->value(i).isEmpty() ? tr("(empty)") : QFileInfo(paths->value(i)).fileName());
+    }
+    v->addWidget(wallBox);
+    wallBox->setVisible(cur.scene == 2);
+
+    auto* cgBox = new QGroupBox(tr("90s CG room"), dlg);
+    auto* cf = new QFormLayout(cgBox);
+    auto* cgPalette = combo({tr("Workstation (teal)"), tr("Sunset"), tr("Deep space")}, cur.cgPalette);
+    auto* cgFloor = combo({tr("Mirror checkerboard"), tr("Neon grid")}, cur.cgFloor);
+    auto* cgStand = combo({tr("Chrome pedestal"), tr("Marble plinth"), tr("Floating")}, cur.cgStand);
+    auto check = [dlg](const QString& text, bool on, const QString& tip) {
+        auto* c = new QCheckBox(text, dlg); c->setChecked(on); c->setToolTip(tip); return c;
+    };
+    auto* cgSet = combo({tr("Chrome and marble"), tr("Toybox (plastic)"), tr("Organic"), tr("Wooden mannequins"), tr("Mixed")}, cur.cgObjectSet);
+    cgSet->setToolTip(tr("Which shapes surround the set: chrome and marble (the default), glossy plastic toys, "
+                         "bumpy and glowing organic forms, walking wooden mannequins, or some of each"));
+    auto* cgObjects = check(tr("Show the objects"), cur.cgObjects, tr("The shapes around the set"));
+    auto* cgBackground = check(tr("Background crowd"), cur.cgBackground,
+                               tr("Shapes floating in the distance and wooden figures walking behind the set, whichever objects you choose"));
+    auto* cgBanding = check(tr("90s colour banding"), cur.cgBanding, tr("Smooth gradients step slightly, like the limited colour depth of the time"));
+    auto* cgReveal = check(tr("Tile reveal when playback starts"), cur.cgReveal, tr("The picture resolves tile by tile, as if it were being ray traced"));
+    auto* cgOrbit = check(tr("Demo-reel orbit while nothing plays"), cur.cgOrbit, tr("The camera slowly circles the set while paused or stopped"));
+    cf->addRow(tr("Palette"), cgPalette);
+    cf->addRow(tr("Floor"), cgFloor);
+    cf->addRow(tr("TV stand"), cgStand);
+    cf->addRow(tr("Objects"), cgSet);
+    cf->addRow(cgObjects);
+    cf->addRow(cgBackground);
+    cf->addRow(cgBanding);
+    cf->addRow(cgReveal);
+    cf->addRow(cgOrbit);
+    // Your own 3D models (statues), from a folder of OBJ / STL files
+    auto* modelsRow = new QHBoxLayout;
+    auto* modelsInfo = new QLabel(dlg);
+    modelsInfo->setWordWrap(true);
+    modelsInfo->setMinimumWidth(200);
+    auto* chooseModels = new QPushButton(tr("Choose folder…"), dlg);
+    auto* clearModels = new QToolButton(dlg);
+    clearModels->setText(QStringLiteral("✕"));
+    clearModels->setToolTip(tr("No models"));
+    modelsRow->addWidget(modelsInfo, 1);
+    modelsRow->addWidget(chooseModels);
+    modelsRow->addWidget(clearModels);
+    auto* modelFinish = combo({tr("Marble"), tr("Bronze"), tr("Chrome"), tr("Candy plastic"), tr("Their own colours")}, cur.modelFinish);
+    auto* showModels = check(tr("Show my models"), cur.models, tr("Statues from your folder, on plinths around the set"));
+    cf->addRow(tr("Your 3D models"), modelsRow);
+    cf->addRow(tr("Model finish"), modelFinish);
+    cf->addRow(showModels);
+    auto refreshModels = [this, modelsInfo] {
+        if (!m_desk) return;
+        ModelLibrary* lib = m_desk->view()->modelLibrary();
+        const QString folder = m_desk->view()->scene().modelsFolder;
+        if (folder.isEmpty()) { modelsInfo->setText(tr("None (OBJ or STL files, up to 6)")); return; }
+        if (lib->loading()) { modelsInfo->setText(tr("%1: loading…").arg(QFileInfo(folder).fileName())); return; }
+        QString t = tr("%1: %n model(s)", "", lib->meshes().size()).arg(QFileInfo(folder).fileName());
+        const QStringList sk = lib->skipped();
+        if (!sk.isEmpty()) t += tr(" · skipped %1").arg(sk.join(", "));
+        modelsInfo->setText(t);
+    };
+    refreshModels();
+    connect(m_desk->view()->modelLibrary(), &ModelLibrary::loaded, dlg, refreshModels);
+    connect(chooseModels, &QPushButton::clicked, dlg, [this, dlg, refreshModels] {
+        const QString d = QFileDialog::getExistingDirectory(dlg, tr("Folder with 3D models (OBJ, STL)"), m_desk->view()->scene().modelsFolder);
+        if (d.isEmpty()) return;
+        DeskView::Scene s = m_desk->view()->scene(); s.modelsFolder = d; s.models = true; setDeskScene(s);
+        m_desk->view()->modelLibrary()->setFolder(d);
+        refreshModels();
+    });
+    connect(clearModels, &QToolButton::clicked, dlg, [this, refreshModels] {
+        DeskView::Scene s = m_desk->view()->scene(); s.modelsFolder.clear(); setDeskScene(s); refreshModels();
+    });
+    connect(modelFinish, &QComboBox::currentIndexChanged, dlg, [this](int i) { DeskView::Scene s = m_desk->view()->scene(); s.modelFinish = i; setDeskScene(s); });
+    connect(showModels, &QCheckBox::toggled, dlg, [this](bool on) { DeskView::Scene s = m_desk->view()->scene(); s.models = on; setDeskScene(s); });
+    v->addWidget(cgBox);
+    cgBox->setVisible(cur.scene == 4);
+    auto applyCg = [this, cgPalette, cgFloor, cgStand, cgObjects, cgBanding, cgReveal, cgOrbit, cgSet, cgBackground] {
+        DeskView::Scene s = m_desk->view()->scene();
+        s.cgObjectSet = cgSet->currentIndex();
+        s.cgBackground = cgBackground->isChecked();
+        s.cgPalette = cgPalette->currentIndex(); s.cgFloor = cgFloor->currentIndex(); s.cgStand = cgStand->currentIndex();
+        s.cgObjects = cgObjects->isChecked(); s.cgBanding = cgBanding->isChecked();
+        s.cgReveal = cgReveal->isChecked(); s.cgOrbit = cgOrbit->isChecked();
+        setDeskScene(s);
+    };
+    for (QComboBox* c : {cgPalette, cgFloor, cgStand, cgSet}) connect(c, &QComboBox::currentIndexChanged, dlg, applyCg);
+    for (QCheckBox* c : {cgObjects, cgBanding, cgReveal, cgOrbit, cgBackground}) connect(c, &QCheckBox::toggled, dlg, applyCg);
+
+    auto* theaterBox = new QGroupBox(tr("Theater"), dlg);
+    auto* tf = new QFormLayout(theaterBox);
+    auto* look = combo({tr("35mm film print"), tr("Worn 16mm print"), tr("Drive-in"), tr("Keep my current look")}, m_settings.theaterLook);
+    look->setToolTip(tr("The picture on the big screen. Leaving the theater brings your own look back."));
+    tf->addRow(tr("Picture"), look);
+    v->addWidget(theaterBox);
+    theaterBox->setVisible(cur.scene == 3);
+    connect(look, &QComboBox::currentIndexChanged, dlg, [this](int i) {
+        m_settings.theaterLook = i;
+        if (m_desk && m_desk->view()->scene().scene == 3) { theaterLook(false); theaterLook(true); }
+    });
+
+    auto apply = [this, group, mood, fog, strength, wood, quality, wallStyle, layout, frameStyle, wallBox, room, dlg,
+                  tvHeight, picHeight, picSpacing, picSize, theaterBox, cgBox] {
+        DeskView::Scene s = m_desk->view()->scene();
+        s.scene = group->checkedId(); s.mood = mood->currentIndex(); s.fog = fog->currentIndex();
+        s.fogStrength = strength->value() / 100.0; s.wood = wood->currentIndex(); s.quality = quality->currentIndex();
+        s.wallStyle = wallStyle->currentIndex(); s.frameLayout = layout->currentIndex(); s.frameStyle = frameStyle->currentIndex();
+        s.tvHeight = tvHeight->value() / 100.0; s.picHeight = picHeight->value() / 100.0;
+        s.picSpacing = picSpacing->value() / 100.0; s.picSize = picSize->value() / 100.0;
+        setDeskScene(s);
+        wallBox->setVisible(s.scene == 2);
+        theaterBox->setVisible(s.scene == 3);
+        cgBox->setVisible(s.scene == 4);
+        room->setEnabled(s.scene != 0);
+        dlg->adjustSize();
+    };
+    connect(group, &QButtonGroup::idClicked, dlg, apply);
+    for (QComboBox* c : {mood, fog, wood, quality, wallStyle, layout, frameStyle}) connect(c, &QComboBox::currentIndexChanged, dlg, apply);
+    for (QSlider* sl : {strength, tvHeight, picHeight, picSpacing, picSize}) connect(sl, &QSlider::valueChanged, dlg, apply);
+    room->setEnabled(cur.scene != 0);
+
+    m_sceneDialog = dlg;
+    // Beside the set, not over the picture: the right edge of the screen, near the top.
+    dlg->adjustSize();
+    const QRect avail = (m_desk->screen() ? m_desk->screen() : QGuiApplication::primaryScreen())->availableGeometry();
+    dlg->move(avail.right() - dlg->width() - 40, avail.top() + 60);
+    dlg->show();
+}
+
+bool MainWindow::inGamescope()
+{
+    // Steam Game Mode runs apps inside gamescope, which sets these.
+    return qEnvironmentVariableIsSet("GAMESCOPE_WAYLAND_DISPLAY") ||
+           qEnvironmentVariable("XDG_CURRENT_DESKTOP").contains(QLatin1String("gamescope"), Qt::CaseInsensitive);
+}
+
+bool MainWindow::isVideoFocus(QWidget* w) const
+{
+    for (QWidget* p = w; p; p = p->parentWidget())
+        if (p == m_jfDock || p == m_playlistDock || p == m_settingsDock) return false;
+    return true;
+}
+
+QString MainWindow::mediaTitle() const
+{
+    if (!m_mediaTitle.isEmpty()) return m_mediaTitle;
+    const QString p = m_player->currentPath();
+    return p.isEmpty() ? QString() : QFileInfo(p).completeBaseName();
+}
+int MainWindow::playlistCount() const { return m_playlist->count(); }
+int MainWindow::playlistIndex() const { return m_playlist->currentIndex(); }
+double MainWindow::volume01() const { return m_controls->volumeSlider()->value() / 100.0; }
+
+void MainWindow::showControlsBriefly()
+{
+    // Remote input (gamepad) has no pointer: show the control bar as mouse movement would.
+    if (m_deskActive) return;
+    QMouseEvent e(QEvent::MouseMove, QPointF(m_video->width() / 2.0, m_video->height() - 20.0),
+                  m_video->mapToGlobal(QPointF(m_video->width() / 2.0, m_video->height() - 20.0)), Qt::NoButton, Qt::NoButton, Qt::NoModifier);
+    QCoreApplication::sendEvent(m_video, &e);
+}
+
+bool MainWindow::remoteAction(const QString& a, double v)
+{
+    if (a == "playpause") m_controls->playButton->click();
+    else if (a == "play") m_player->play();
+    else if (a == "pause") m_player->pause();
+    else if (a == "stop") { m_player->pause(); m_player->seek(0, Player::SeekMode::Accurate); }
+    else if (a == "next") nextItem(1);
+    else if (a == "prev") nextItem(-1);
+    else if (a == "seekrel") { m_player->seekRelative(qint64(v)); showOsd(v >= 0 ? tr("+%1 s").arg(qRound(v / 1e9)) : tr("−%1 s").arg(qRound(-v / 1e9))); }
+    else if (a == "seekabs") m_player->seek(qint64(v), Player::SeekMode::Accurate);
+    else if (a == "volume") { m_controls->volumeSlider()->setValue(qRound(std::clamp(v, 0.0, 1.0) * 100)); }
+    else if (a == "volup" || a == "voldown") {
+        m_controls->volumeSlider()->setValue(m_controls->volumeSlider()->value() + (a == "volup" ? 5 : -5));
+        showOsd(tr("Volume %1%").arg(m_controls->volumeSlider()->value()));
+    }
+    else if (a == "rate") setSpeed(v);
+    else if (a == "fullscreen") setFullscreen(v != 0);
+    else if (a == "raise") { if (m_deskActive && m_desk) { m_desk->raise(); m_desk->activateWindow(); } else { show(); raise(); activateWindow(); } }
+    else if (a == "quit") close();
+    else if (a == "preset+") cyclePreset(1);
+    else if (a == "preset-") cyclePreset(-1);
+    else if (a == "subs") cycleSubtitle();
+    else if (a == "audio") cycleAudio();
+    else if (a == "desk") toggleDeskMode();
+    else if (a == "fly") { if (m_deskActive && m_desk) m_desk->view()->toggleFly(); else setFullscreen(!m_fullscreen); }
+    else if (a == "chapter+") jumpChapter(+1);
+    else if (a == "chapter-") jumpChapter(-1);
+    else if (a == "controls") {
+        if (m_deskActive && m_desk) {   // in desk mode the Menu button changes the scene
+            DeskView::Scene sc = m_desk->view()->scene();
+            sc.scene = (sc.scene + 1) % 5;
+            if (inGamescope() && sc.scene == 0) sc.scene = 1;
+            setDeskScene(sc);
+            showOsd(sc.scene == 0 ? tr("Scene: your desktop") : sc.scene == 1 ? tr("Scene: desk")
+                    : sc.scene == 2 ? tr("Scene: wall-mounted TV") : sc.scene == 3 ? tr("Scene: movie theater") : tr("Scene: 90s CG room"));
+        } else showControlsBriefly();
+    }
+    else if (a == "back") {
+        // Back out one level: a flight into fullscreen, then fullscreen, then panels.
+        if (m_deskActive && m_desk && m_desk->view()->phase() != DeskView::Phase::Desk) m_desk->view()->toggleFly();
+        else if (m_fullscreen) setFullscreen(false);
+        else if (m_jfDock->isVisible()) m_jfDock->hide();
+        else if (m_playlistDock->isVisible()) m_playlistDock->hide();
+        else if (m_settingsDock->isVisible()) m_settingsDock->hide();
+    }
+    else return false;
+    return true;
+}
+
+bool MainWindow::loadSubtitleOffer(int index)
+{
+    if (index < 0 || index >= m_extSubs.size()) return false;
+    setExternalSubtitleFile(m_extSubs[index].second, m_extSubs[index].first);
+    return true;
+}
+
+void MainWindow::rememberPosition()
+{
+    if (m_currentLocal.isEmpty() || !m_player->hasMedia()) return;
+    m_resume->remember(m_currentLocal, m_player->position() / 1000000, m_player->duration() / 1000000);
+    m_resume->save();
+}
+
+void MainWindow::fillRecentMenu(QMenu* menu)
+{
+    QStringList existing;
+    for (const QString& f : m_settings.recentFiles) if (QFileInfo::exists(f)) existing << f;
+    if (existing.isEmpty()) { menu->addAction(tr("No recent files"))->setEnabled(false); return; }
+    for (const QString& f : existing) {
+        const qint64 at = m_resume->position(f);
+        const QString label = at > 0 ? tr("%1  (at %2)").arg(QFileInfo(f).fileName(), formatTime(at)) : QFileInfo(f).fileName();
+        QAction* a = menu->addAction(label, this, [this, f] { playIndex(m_playlist->addItems({f})); });
+        a->setToolTip(f);
+    }
+    menu->addSeparator();
+    menu->addAction(tr("Clear recent files"), this, [this] { m_settings.recentFiles.clear(); });
+}
+
+void MainWindow::setSpeed(double rate)
+{
+    rate = std::clamp(rate, 0.25, 4.0);
+    m_player->setRate(rate);
+    showOsd(qFuzzyCompare(rate, 1.0) ? tr("Normal speed") : tr("Speed %1×").arg(rate, 0, 'g', 3));
+}
+
+void MainWindow::setLoop(qint64 aNs, qint64 bNs)
+{
+    m_loopA = aNs;
+    m_loopB = bNs;
+    updateSeekMarks();
+}
+
+void MainWindow::cycleLoop()
+{
+    const qint64 pos = m_player->position();
+    if (m_loopA < 0) { setLoop(pos, -1); showOsd(tr("Loop from %1 — press R again to set the end").arg(formatTime(pos / 1000000))); }
+    else if (m_loopB < 0 && pos > m_loopA + 200000000) {
+        setLoop(m_loopA, pos);
+        showOsd(tr("Looping %1 – %2 (R: off)").arg(formatTime(m_loopA / 1000000), formatTime(pos / 1000000)));
+        m_player->seek(m_loopA, Player::SeekMode::Accurate);
+    } else { setLoop(-1, -1); showOsd(tr("Loop off")); }
+}
+
+void MainWindow::jumpChapter(int dir)
+{
+    const auto ch = m_player->chapters();
+    if (ch.isEmpty()) { showOsd(tr("No chapters")); return; }
+    const qint64 pos = m_player->position();
+    int target = -1;
+    if (dir > 0) { for (int i = 0; i < ch.size(); ++i) if (ch[i].startNs > pos + 500000000) { target = i; break; } }
+    else {
+        // Back: to the start of the current chapter, or the previous one if right at its start.
+        for (int i = ch.size() - 1; i >= 0; --i) if (ch[i].startNs < pos - 2000000000) { target = i; break; }
+        if (target < 0) target = 0;
+    }
+    if (target < 0) { showOsd(tr("Last chapter")); return; }
+    m_player->seek(ch[target].startNs, Player::SeekMode::Accurate);
+    showOsd(tr("Chapter %1: %2").arg(target + 1).arg(ch[target].title));
+}
+
+void MainWindow::updateSeekMarks()
+{
+    QVector<qint64> ms;
+    for (const ChapterInfo& c : m_player->chapters()) ms << c.startNs / 1000000;
+    m_controls->seek()->setMarks(ms, m_loopA >= 0 ? m_loopA / 1000000 : -1, m_loopB >= 0 ? m_loopB / 1000000 : -1);
+}
+
+void MainWindow::showPreview(qint64 ms, int x)
+{
+    QString text = formatTime(ms, m_player->duration() >= 3600000000000LL);
+    for (const ChapterInfo& c : m_player->chapters()) if (c.startNs / 1000000 <= ms) text = formatTime(ms) + QStringLiteral("  ·  ") + c.title;
+    m_previewText->setText(text);
+    const bool thumbs = !m_currentLocal.isEmpty() && m_player->currentUri().startsWith(QLatin1String("file:"));
+    m_previewImage->setVisible(thumbs);
+    if (thumbs && std::llabs(ms - m_previewMs) > 250) { m_previewMs = ms; m_thumbs->request(m_player->currentUri(), ms * 1000000); }
+    m_preview->adjustSize();
+    const QPoint at = m_controls->seek()->mapTo(this, QPoint(x, 0));
+    const int w = m_preview->width(), h = m_preview->height();
+    m_preview->move(std::clamp(at.x() - w / 2, 4, width() - w - 4), at.y() - h - 10);
+    m_preview->show();
+    m_preview->raise();
+}
+
+QString MainWindow::systemReport() const
+{
+    // For bug reports: no file names, paths, user names or server addresses.
+    QStringList r;
+    auto line = [&](const QString& k, const QString& v) { r << QStringLiteral("%1: %2").arg(k, v); };
+    QString distro = QSysInfo::prettyProductName();
+    line("CRT Player", QCoreApplication::applicationVersion() + (qEnvironmentVariableIsSet("APPIMAGE") ? " (AppImage)" : " (binary)"));
+    line("OS", distro + " | kernel " + QSysInfo::kernelVersion() + " | " + QSysInfo::currentCpuArchitecture());
+    line("Session", qEnvironmentVariable("XDG_SESSION_TYPE", "?") + " | desktop " + qEnvironmentVariable("XDG_CURRENT_DESKTOP", "?") +
+                        " | Qt platform " + QGuiApplication::platformName() +
+                        (qEnvironmentVariableIsSet("GAMESCOPE_WAYLAND_DISPLAY") ? " | gamescope" : ""));
+    line("Qt", QStringLiteral("%1 (built with %2)%3").arg(qVersion(), QT_VERSION_STR,
+         qEnvironmentVariableIsSet("CRTPLAYER_QT_MODE") ? QStringLiteral(", AppImage using the %1 Qt").arg(qEnvironmentVariable("CRTPLAYER_QT_MODE")) : QString()));
+    line("OpenGL", m_video->glInfo());
+    QStringList scr;
+    for (QScreen* s : QGuiApplication::screens())
+        scr << QStringLiteral("%1x%2@%3x %4 Hz").arg(s->size().width()).arg(s->size().height()).arg(s->devicePixelRatio()).arg(s->refreshRate(), 0, 'f', 0);
+    line("Screens", scr.join(", "));
+    gchar* gv = gst_version_string();
+    line("GStreamer", QString::fromUtf8(gv));
+    g_free(gv);
+    const QStringList hw = Player::availableHardwareDecoders();
+    line("Hardware decoders", hw.isEmpty() ? QStringLiteral("none found") : hw.join(", "));
+    const QStringList missing = Player::missingEssentialElements();
+    line("Missing essentials", missing.isEmpty() ? QStringLiteral("none") : missing.join(", "));
+    line("Hardware decoding setting", m_settings.hardwareDecoding ? "on" : "off");
+    line("Distribution", Distro::prettyName() + " (" + Distro::familyName(Distro::family()) + ")");
+    {
+        QStringList g;
+        for (const auto& gap : Player::missingRecommended()) g << gap.what + " [" + gap.package + "]";
+        line("Missing for common formats", g.isEmpty() ? QStringLiteral("nothing") : g.join("; "));
+    }
+    line("Audio output", m_player->audioOutput());
+    if (m_player->hasMedia()) {
+        const SourceFormat f = m_video->sourceFormat();
+        line("Current video", QStringLiteral("%1 | video %2 | audio %3 | %4x%5 | %6 fps | decoder %7 | source %8")
+                                  .arg(m_player->containerFormat(), m_player->videoCodec(), m_player->audioCodec())
+                                  .arg(f.width).arg(f.height).arg(m_player->frameRate(), 0, 'f', 3)
+                                  .arg(m_player->videoDecoder(), m_jfItemId.isEmpty() ? "local file" : "Jellyfin stream"));
+        line("Playback", QStringLiteral("state %1 | speed %2x | frames presented %3")
+                             .arg(m_player->isPlaying() ? "playing" : "paused").arg(m_player->rate())
+                             .arg(m_video->framesPresented()));
+    } else line("Current video", "none");
+    line("Look", QStringLiteral("preset %1 | desk mode %2").arg(m_presetName, m_deskActive ? "on" : "off"));
+    line("Controllers", m_gamepad ? m_gamepad->status() : QStringLiteral("off"));
+ line("Keep awake while playing", m_settings.keepAwake ? QStringLiteral("on (now: %1)").arg(m_sleep ? m_sleep->method() : QString()) : QStringLiteral("off"));
+#ifndef _WIN32
+    line("MPRIS", m_mpris && m_mpris->isRegistered() ? QStringLiteral("registered") : QStringLiteral("not available (no session bus)"));
+#endif
+    line("Jellyfin", m_jf->isSignedIn() ? QStringLiteral("signed in, server version %1").arg(m_jf->serverVersion()) : QStringLiteral("not signed in"));
+    return r.join('\n');
+}
+
+void MainWindow::cycleAudio()
+{
+    const auto tracks = m_player->audioTracks();
+    if (tracks.size() < 2) { showOsd(tracks.isEmpty() ? tr("No audio tracks") : tr("Only one audio track")); return; }
+    const int next = (m_player->currentAudioTrack() + 1) % tracks.size();
+    m_player->setAudioTrack(next);
+    showOsd(tracks.at(next).label);
+    rebuildAudioMenu();
+}
+
+void MainWindow::cycleSubtitle()
+{
+    const auto tracks = m_player->subtitleTracks();
+    if (tracks.isEmpty()) { showOsd(tr("No subtitle tracks")); return; }
+    int next = m_player->currentSubtitleTrack() + 1;   // -1 (off) -> 0 -> ... -> off
+    if (next >= tracks.size()) next = -1;
+    m_player->setSubtitleTrack(next);
+    showOsd(next < 0 ? tr("Subtitles off") : tracks.at(next).label);
+    rebuildSubtitleMenu();
+}
+
+// ---- screenshots -------------------------------------------------------------
+
+QString MainWindow::takeScreenshot(bool filtered, const QString& pathIn)
+{
+    if (!m_video->hasFrame()) { showOsd(tr("Nothing to capture yet")); return {}; }
+    const QImage img = filtered ? m_video->grabFilteredFrame() : m_video->grabOriginalFrame();
+    if (img.isNull()) { showOsd(tr("Screenshot failed")); return {}; }
+    QString path = pathIn;
+    if (path.isEmpty()) {
+        QDir().mkpath(m_settings.screenshotDir);
+        QString base = m_mediaTitle.isEmpty() ? QFileInfo(m_player->currentPath()).completeBaseName() : m_mediaTitle;
+        base.replace(QRegularExpression("[/\\\\:*?\"<>|]"), "_");
+        const qint64 ms = m_player->position() / 1000000;
+        const QString stamp = QString::asprintf("%02lld-%02lld-%02lld.%03lld", ms / 3600000, (ms / 60000) % 60, (ms / 1000) % 60, ms % 1000);
+        path = QDir(m_settings.screenshotDir).filePath(QStringLiteral("%1_%2_%3.png").arg(base.isEmpty() ? "frame" : base, stamp, filtered ? "crt" : "original"));
+    }
+    if (!img.save(path)) { showOsd(tr("Could not write %1").arg(path), 4000); return {}; }
+    showOsd(tr("Saved %1 screenshot: %2").arg(filtered ? tr("filtered") : tr("original"), QFileInfo(path).fileName()), 2500);
+    return path;
+}
+
+// ---- overlays, fullscreen and auto-hide ----------------------------------------
+
+void MainWindow::layoutOverlays()
+{
+    const int w = m_video->width(), h = m_video->height();
+    const int barH = m_controls->sizeHint().height();
+    if (m_fullscreen) {
+        const int bw = std::min(w - 48, 1280);
+        m_controls->setGeometry((w - bw) / 2, h - barH - 24, bw, barH);
+        m_video->setBottomInset(0);
+    } else {
+        m_controls->setGeometry(8, h - barH - 8, w - 16, barH);
+        m_video->setBottomInset(barH + 16);
+    }
+    m_osd->adjustSize();
+    m_osd->move((w - m_osd->width()) / 2, 28);
+    if (m_info->isVisible()) { m_info->adjustSize(); m_info->move(16, 16); }
+    m_emptyHint->setGeometry(0, 0, w, h - (m_fullscreen ? 0 : barH + 16));
+    m_controls->raise();
+    m_osd->raise();
+}
+
+void MainWindow::setFullscreen(bool on)
+{
+    if (m_deskActive) {   // in desk mode "fullscreen" means flying into the set
+        if (on) m_desk->view()->flyIn(); else m_desk->view()->flyOut();
+        return;
+    }
+    if (on == m_fullscreen) return;
+    m_fullscreen = on;
+    if (on) {
+        m_dockSettingsBeforeFs = m_settingsDock->isVisible();
+        m_dockPlaylistBeforeFs = m_playlistDock->isVisible();
+        m_settingsDock->hide();
+        m_playlistDock->hide();
+        m_wasMaximized = isMaximized();
+        showFullScreen();
+    } else {
+        if (m_wasMaximized) showMaximized(); else showNormal();
+        m_settingsDock->setVisible(m_dockSettingsBeforeFs);
+        m_playlistDock->setVisible(m_dockPlaylistBeforeFs);
+    }
+    m_controls->setFullscreenIcon(on);
+    layoutOverlays();
+    setControlsShown(true);
+    onMouseActivity();
+}
+
+bool MainWindow::controlsVisible() const { return m_controls->isVisible(); }
+
+void MainWindow::setControlsShown(bool shown)
+{
+    m_controlsShown = shown;
+    m_controls->setVisible(shown);
+    if (shown) m_video->unsetCursor();
+    else m_video->setCursor(Qt::BlankCursor);
+}
+
+void MainWindow::onMouseActivity()
+{
+    if (!m_controlsShown) setControlsShown(true);
+    if (m_fullscreen) m_hideTimer.start();
+}
+
+void MainWindow::updateAutoHide()
+{
+    if (!m_fullscreen) { setControlsShown(true); return; }
+    if (!m_player->isPlaying() || m_controls->isInteracting() || QApplication::activePopupWidget()) {
+        m_hideTimer.start();
+        return;
+    }
+    setControlsShown(false);
+}
+
+void MainWindow::changeEvent(QEvent* e)
+{
+    QMainWindow::changeEvent(e);
+    if (e->type() == QEvent::WindowStateChange) {
+        // Keep our flag in sync if the compositor or window manager leaves fullscreen.
+        const bool fs = windowState() & Qt::WindowFullScreen;
+        if (!fs && m_fullscreen) {
+            m_fullscreen = false;
+            m_settingsDock->setVisible(m_dockSettingsBeforeFs);
+            m_playlistDock->setVisible(m_dockPlaylistBeforeFs);
+            m_controls->setFullscreenIcon(false);
+            setControlsShown(true);
+            layoutOverlays();
+        }
+    }
+}
+
+bool MainWindow::eventFilter(QObject* o, QEvent* e)
+{
+    if (o == m_video && e->type() == QEvent::Resize) layoutOverlays();
+    if (e->type() == QEvent::MouseMove && m_fullscreen) {
+        if (auto* w = qobject_cast<QWidget*>(o); w && w->window() == this) onMouseActivity();
+    }
+    return QMainWindow::eventFilter(o, e);
+}
+
+void MainWindow::showOsd(const QString& text, int ms)
+{
+    m_osd->setText(text);
+    m_osd->adjustSize();
+    m_osd->move((m_video->width() - m_osd->width()) / 2, 28);
+    m_osd->show();
+    m_osd->raise();
+    m_osdTimer.start(ms);
+}
+
+// ---- periodic updates & info ---------------------------------------------------
+
+void MainWindow::updatePosition()
+{
+    if (m_loopB > m_loopA && m_loopA >= 0 && m_player->isPlaying() && !m_controls->seek()->isScrubbing() &&
+        m_player->position() >= m_loopB)
+        m_player->seek(m_loopA, Player::SeekMode::Accurate);
+    const qint64 pos = m_player->position() / 1000000;
+    const qint64 dur = m_player->duration() > 0 ? m_player->duration() / 1000000 : 0;
+    m_controls->setTimes(pos, dur);
+    if (m_deskActive) syncDeskBar();
+}
+
+void MainWindow::updateSourceInfo()
+{
+    const SourceFormat f = m_video->sourceFormat();
+    if (!f.isValid()) { m_displayPanel->setSourceInfo(tr("No video loaded.")); return; }
+    const QSizeF ds = displaySize(f, 0);
+    m_displayPanel->setSourceInfo(tr("Coded %1×%2, pixel aspect %3:%4, rotation %5\nDisplays as %6×%7 (aspect %8:1)")
+                                      .arg(f.width).arg(f.height).arg(f.parN).arg(f.parD)
+                                      .arg(orientationToString(f.orient))
+                                      .arg(qRound(ds.width())).arg(qRound(ds.height()))
+                                      .arg(ds.width() / ds.height(), 0, 'f', 3));
+    if (m_info->isVisible()) updateInfoOverlay();
+}
+
+void MainWindow::updateDecoderStatus()
+{
+    QString s;
+    const QString vd = m_player->videoDecoder();
+    if (!vd.isEmpty()) s += tr("Video decoder: %1 (%2)\n").arg(vd, m_player->videoDecoderIsHardware() ? tr("hardware") : tr("software"));
+    const QString ad = m_player->audioDecoder();
+    if (!ad.isEmpty()) s += tr("Audio decoder: %1\n").arg(ad);
+    if (m_player->fellBackToSoftware()) s += tr("Hardware decoding failed for this file; using software.\n");
+    const QStringList hw = Player::availableHardwareDecoders();
+    s += hw.isEmpty() ? tr("No hardware video decoders are registered with GStreamer on this system.")
+                      : tr("Hardware decoders available: %1").arg(hw.join(", "));
+    m_playbackPanel->setDecoderStatus(s);
+}
+
+void MainWindow::reopenForDecoderChange()
+{
+    if (m_player->currentUri().isEmpty()) return;
+    const qint64 pos = m_player->position();
+    const bool playing = m_player->isPlaying();
+    m_player->open(m_player->currentUri(), playing, pos);
+    showOsd(m_settings.hardwareDecoding ? tr("Hardware decoding enabled") : tr("Software decoding"));
+}
+
+void MainWindow::updateInfoOverlay()
+{
+    const SourceFormat f = m_video->sourceFormat();
+    const LayoutResult L = m_video->currentLayout();
+    const SyncStats st = m_video->syncStats();
+    QStringList lines;
+    lines << tr("File        %1").arg(QFileInfo(m_player->currentPath()).fileName());
+    lines << tr("Container   %1").arg(m_player->containerFormat());
+    lines << tr("Video       %1 via %2 [%3]").arg(m_player->videoCodec(), m_player->videoDecoder(),
+                                                  m_player->videoDecoderIsHardware() ? "HW" : "SW");
+    lines << tr("Audio       %1 via %2").arg(m_player->audioCodec(), m_player->audioDecoder());
+    if (f.isValid()) {
+        const QSizeF ds = displaySize(f, m_video->aspectOverride());
+        lines << tr("Coded       %1×%2 %3, %4 fps").arg(f.width).arg(f.height).arg(m_video->pixelFormat()).arg(m_player->frameRate(), 0, 'f', 3);
+        lines << tr("PAR / DAR   %1:%2 / %3").arg(f.parN).arg(f.parD).arg(ds.width() / ds.height(), 0, 'f', 4);
+        lines << tr("Rotation    %1").arg(orientationToString(f.orient));
+        lines << tr("Colour      %1").arg(m_video->colorimetry());
+    }
+    lines << tr("Scaling     %1, picture %2×%3 px at (%4, %5)").arg(scaleModeName(m_video->scaleMode()))
+                 .arg(qRound(L.visibleRect.width())).arg(qRound(L.visibleRect.height()))
+                 .arg(qRound(L.visibleRect.x())).arg(qRound(L.visibleRect.y()));
+    lines << tr("CRT         %1%2, %3 scanlines").arg(m_presetName, m_video->bypass() ? tr(" (bypassed)") : QString())
+                 .arg(m_video->currentScanlines(), 0, 'f', 0);
+    lines << tr("A/V sync    %1 frames, mean %2 ms, sd %3 ms (clock %4)").arg(st.frames).arg(st.meanMs, 0, 'f', 1)
+                 .arg(st.stddevMs, 0, 'f', 1).arg(m_player->clockName());
+    lines << tr("GL          %1").arg(m_video->glInfo());
+    m_info->setText(lines.join('\n'));
+    m_info->adjustSize();
+    m_info->move(16, 16);
+}
+
+QJsonObject MainWindow::stateReport() const
+{
+    QJsonObject o;
+    // Report the view that is actually showing the video.
+    const SourceFormat f = (m_deskActive && m_desk) ? m_desk->view()->sourceFormat() : m_video->sourceFormat();
+    const LayoutResult L = m_video->currentLayout();
+    const QSizeF ds = displaySize(f, m_video->aspectOverride());
+    static const char* states[] = {"idle", "loading", "paused", "playing", "error"};
+    o["file"] = m_mediaTitle.isEmpty() ? QFileInfo(m_player->currentPath()).fileName() : m_mediaTitle;
+    o["source"] = m_jfItemId.isEmpty() ? QStringLiteral("file") : QStringLiteral("jellyfin");
+    o["jellyfinSignedIn"] = m_jf->isSignedIn();
+    o["jellyfinUser"] = m_jf->userName();
+    o["jellyfinServerVersion"] = m_jf->serverVersion();
+    o["jellyfinItem"] = m_jfItemId;
+    o["jellyfinListing"] = m_jfPanel->currentTitle();
+    o["jellyfinListingCount"] = m_jfPanel->itemCount();
+    o["windowTitle"] = windowTitle();
+    o["state"] = states[int(m_player->state())];
+    o["positionMs"] = double(m_player->position() / 1000000);
+    o["framePtsMs"] = m_player->lastFrameStreamTime() >= 0 ? m_player->lastFrameStreamTime() / 1e6 : -1.0;
+    o["fps"] = m_player->frameRate();
+    o["durationMs"] = double(m_player->duration() / 1000000);
+    o["codedWidth"] = f.width;
+    o["codedHeight"] = f.height;
+    o["par"] = QStringLiteral("%1:%2").arg(f.parN).arg(f.parD);
+    o["rotation"] = f.orient.rotation;
+    o["displayWidth"] = ds.width();
+    o["displayHeight"] = ds.height();
+    o["displayAspect"] = ds.height() > 0 ? ds.width() / ds.height() : 0.0;
+    o["pixelFormat"] = m_video->pixelFormat();
+    o["videoDecoder"] = m_player->videoDecoder();
+    o["videoDecoderHardware"] = m_player->videoDecoderIsHardware();
+    o["audioDecoder"] = m_player->audioDecoder();
+    o["clock"] = m_player->clockName();
+    o["videoArea"] = rectJson(m_video->videoAreaPx());
+    o["pictureRect"] = rectJson(L.visibleRect);
+    o["pictureAspectOnScreen"] = L.visibleRect.height() > 0 ? L.visibleRect.width() / L.visibleRect.height() : 0.0;
+    o["srcRect"] = rectJson(L.srcRect);
+    o["scaleMode"] = scaleModeName(m_video->scaleMode());
+    o["preset"] = m_presetName;
+    o["bypass"] = m_video->bypass();
+    o["compare"] = m_video->compare();
+    o["scanlines"] = m_video->currentScanlines();
+    o["moment"] = m_video->momentName();
+    o["gamepad"] = m_gamepad ? m_gamepad->status() : QString();
+    o["audioOutput"] = m_player->audioOutput();
+    o["lookSound"] = m_settings.lookSound;
+    o["noiseVolume"] = m_settings.noiseVolume;
+    o["effectStrength"] = m_settings.effectStrength;
+    o["tapeSound"] = QJsonObject{{"hiss", m_lastTape.hiss}, {"crackle", m_lastTape.crackle}, {"noiseGain", m_lastTape.noiseGain},
+                                 {"wow", m_lastTape.wow}, {"saturation", m_lastTape.saturation}, {"tone", m_lastTape.tone},
+                                 {"speaker", m_lastTape.speaker}, {"dropouts", m_lastTape.dropouts}};
+    o["tapeSoundActive"] = m_player->hasTapeSound() && m_settings.lookSound &&
+                           (m_params.tapeHiss > 0 || m_params.wowFlutter > 0 || m_params.tapeSaturation > 0 || m_params.tapeTone > 0 ||
+                            m_params.tvSpeaker > 0 || m_params.filmCrackle > 0);
+    o["sleepInhibited"] = m_sleep && m_sleep->active();
+    o["sleepInhibitMethod"] = m_sleep ? m_sleep->method() : QString();
+    o["qtVersion"] = QString::fromLatin1(qVersion());
+    o["qtMode"] = qEnvironmentVariable("CRTPLAYER_QT_MODE", "not an AppImage");
+    o["qtPlatform"] = QGuiApplication::platformName();
+    o["distroFamily"] = Distro::familyName(Distro::family());
+    {
+        QJsonArray gaps;
+        for (const auto& g : Player::missingRecommended()) gaps.append(g.what + " [" + g.package + "]");
+        o["missingRecommended"] = gaps;
+        o["installCommand"] = Distro::fullCodecCommand();
+    }
+    o["gamepadLastAction"] = m_gamepad ? m_gamepad->lastAction() : QString();
+#ifndef _WIN32
+    o["mprisService"] = m_mpris && m_mpris->isRegistered() ? m_mpris->serviceName() : QString();
+#endif
+    o["inGamescope"] = inGamescope();
+    o["volume"] = volume01();
+    o["rate"] = m_player->rate();
+    o["loopA"] = double(m_loopA / 1000000);
+    o["loopB"] = double(m_loopB / 1000000);
+    o["chapterCount"] = int(m_player->chapters().size());
+    o["externalSubtitle"] = m_extSubLabel;
+    o["externalSubtitleOffers"] = int(m_extSubs.size());
+    o["resumeMs"] = double(m_currentLocal.isEmpty() ? 0 : m_resume->position(m_currentLocal));
+    QJsonArray rec;
+    for (const QString& f : m_settings.recentFiles) rec.append(QFileInfo(f).fileName());
+    o["recentFiles"] = rec;
+    {
+        const QSize ps = pixelatedSize(f, m_video->aspectOverride(), m_params.pixelHeight, m_params.pixelWidth);
+        o["pixelResolution"] = ps.isEmpty() ? QStringLiteral("native") : QStringLiteral("%1x%2").arg(ps.width()).arg(ps.height());
+    }
+    o["fullscreen"] = m_fullscreen;
+    o["windowFullScreenState"] = bool(windowState() & Qt::WindowFullScreen);
+    o["controlsVisible"] = m_controls->isVisible();
+    o["framesPresented"] = double(m_video->framesPresented());
+    o["hasFrame"] = (m_deskActive && m_desk) ? m_desk->view()->hasFrame() : m_video->hasFrame();
+    o["sync"] = m_video->syncStats().toJson();
+    QJsonArray at, st;
+    for (const auto& t : m_player->audioTracks()) at.append(t.label);
+    for (const auto& t : m_player->subtitleTracks()) st.append(t.label);
+    o["audioTracks"] = at;
+    o["subtitleTracks"] = st;
+    o["currentAudio"] = m_player->currentAudioTrack();
+    o["currentSubtitle"] = m_player->currentSubtitleTrack();
+    o["missingPlugins"] = QJsonArray::fromStringList(m_player->missingPlugins());
+    o["lastError"] = m_lastError;
+    o["lastWarning"] = m_lastWarning;
+    o["gl"] = m_video->glInfo();
+    o["platform"] = QGuiApplication::platformName();
+    o["deskMode"] = m_deskActive;
+    if (m_desk) {
+        DeskView* v = m_desk->view();
+        o["deskPhase"] = v->phaseName();
+        o["deskProgress"] = v->flightProgress();
+        o["deskPivot"] = v->isPivoted();
+        o["deskShadowVisible"] = v->shadowVisible();
+        o["deskClassic"] = v->classicShape();
+        o["deskCabinet"] = DeskView::cabinetName(v->cabinet());
+        o["deskBackdrop"] = v->room() ? QStringLiteral("room") : QStringLiteral("desktop");
+        o["deskScene"] = DeskView::sceneName(v->scene().scene);
+        o["sceneMood"] = v->scene().mood;
+        o["sceneFog"] = v->scene().fog;
+        o["sceneWood"] = v->scene().wood;
+        o["sceneWall"] = v->scene().wallStyle;
+        o["framesShown"] = v->framesShown();
+        o["picturesLoaded"] = v->picturesLoaded();
+        o["deskPitch"] = v->deskPose().pitch;
+        o["deskClearance"] = v->cameraClearance();
+        o["curtainOpen"] = v->curtainOpen();
+        {
+            const QVector3D c = v->theaterCamera();
+            o["theaterCamera"] = QJsonArray{c.x(), c.y(), c.z()};
+            o["seatEye"] = DeskView::seatEye(c.z());
+        }
+        o["houseLights"] = v->houseLights();
+        o["deskCabinetDrawn"] = DeskView::cabinetName(v->effectiveCabinet());
+        o["arcadeArt"] = v->arcadeArt();
+        o["marqueeText"] = v->marqueeText();
+        o["cgReveal"] = v->revealProgress();
+        o["cgIdleMs"] = double(v->idleMs());
+        o["seeksNoted"] = v->seeksNoted();
+        o["cgPalette"] = v->scene().cgPalette;
+        o["modelsShown"] = v->modelsShown();
+        o["modelsLoading"] = v->modelLibrary()->loading();
+        o["modelsSkipped"] = QJsonArray::fromStringList(v->modelLibrary()->skipped());
+        o["floorDrop"] = v->floorDrop();
+        o["maskRect"] = QJsonArray{v->maskRect().left(), v->maskRect().right(), v->maskRect().top(), v->maskRect().bottom()};
+        o["deskTvRect"] = rectJson(v->silhouetteLogical().boundingRect());
+        o["deskGlassRect"] = rectJson(v->glassRectLogical());
+        o["deskGlassAspect"] = v->glassRectLogical().height() > 0 ? v->glassRectLogical().width() / v->glassRectLogical().height() : 0.0;
+        o["deskMaskRect"] = rectJson(m_desk->currentMask().boundingRect());
+        o["deskControlsVisible"] = m_desk->controlsVisible();
+        o["deskWindowVisible"] = m_desk->isVisible();
+        o["mainWindowVisible"] = isVisible();
+        const auto dp = v->deskPose();
+        o["deskYaw"] = dp.yaw;
+        o["deskPitch"] = dp.pitch;
+    }
+    return o;
+}
+
+// ---- desk mode -------------------------------------------------------------------
+
+void MainWindow::createDesk()
+{
+    if (m_desk) return;
+    m_desk = new DeskWindow(m_player, m_video, nullptr);
+    m_desk->addActions(actions());   // every shortcut also works on the desk
+    DeskView* v = m_desk->view();
+    DeskView::DeskPose pose;
+    pose.yaw = m_settings.deskYaw; pose.pitch = m_settings.deskPitch; pose.height = m_settings.deskHeight;
+    pose.cx = m_settings.deskCx; pose.cy = m_settings.deskCy;
+    v->setDeskPose(pose);
+    v->setClassicShape(m_settings.deskClassic);
+    v->setCabinet(m_settings.deskCabinet);
+    v->setArcadeArt(m_settings.arcadeArt);
+    v->setMarqueeText(DeskView::marqueeTitle(mediaTitle()));
+    // Steam Game Mode (gamescope) cannot show the desktop through a window: always a scene.
+    {
+        DeskView::Scene sc;
+        sc.scene = m_settings.deskScene; sc.mood = m_settings.sceneMood; sc.wood = m_settings.sceneWood;
+        sc.fog = m_settings.sceneFog; sc.fogStrength = m_settings.sceneFogStrength; sc.quality = m_settings.sceneQuality;
+        sc.wallStyle = m_settings.sceneWall; sc.frameStyle = m_settings.sceneFrameStyle;
+        sc.frameLayout = m_settings.sceneFrameLayout; sc.framePaths = m_settings.sceneFrames;
+        sc.tvHeight = m_settings.sceneTvHeight; sc.picHeight = m_settings.scenePicHeight;
+        sc.picSpacing = m_settings.scenePicSpacing; sc.picSize = m_settings.scenePicSize;
+        sc.cgPalette = m_settings.cgPalette; sc.cgFloor = m_settings.cgFloor; sc.cgStand = m_settings.cgStand;
+        sc.cgObjects = m_settings.cgObjects; sc.cgBanding = m_settings.cgBanding;
+        sc.cgReveal = m_settings.cgReveal; sc.cgOrbit = m_settings.cgOrbit; sc.cgObjectSet = m_settings.cgObjectSet; sc.cgBackground = m_settings.cgBackground;
+        sc.modelsFolder = m_settings.cgModelsFolder; sc.models = m_settings.cgModels; sc.modelFinish = m_settings.cgModelFinish;
+        if (inGamescope() && sc.scene == 0) sc.scene = 1;
+        v->setScene(sc);
+        if (sc.scene == 3) theaterLook(true);
+        QTimer::singleShot(0, this, &MainWindow::updateTheater);
+    }
+    m_desk->setKeepOnTop(m_settings.deskOnTop);
+
+    // The desk control strip mirrors the main controls.
+    ControlBar* b = m_desk->bar();
+    b->playlistButton->hide();
+    b->settingsButton->hide();
+    b->jellyfinButton->hide();
+    b->aspectButton->setMenu(m_controls->aspectButton->menu());
+    b->audioButton->setMenu(m_controls->audioButton->menu());
+    b->subtitleButton->setMenu(m_controls->subtitleButton->menu());
+    b->screenshotButton->setMenu(m_controls->screenshotButton->menu());
+    b->fullscreenButton->setToolTip(tr("Fly into / out of the screen (F, double-click the set)"));
+    for (auto pair : {std::pair{b->openButton, m_controls->openButton}, std::pair{b->prevButton, m_controls->prevButton},
+                      std::pair{b->playButton, m_controls->playButton}, std::pair{b->nextButton, m_controls->nextButton},
+                      std::pair{b->stepBackButton, m_controls->stepBackButton}, std::pair{b->stepFwdButton, m_controls->stepFwdButton},
+                      std::pair{b->muteButton, m_controls->muteButton}}) {
+        QToolButton* main = pair.second;
+        connect(pair.first, &QToolButton::clicked, main, [main] { main->click(); });
+    }
+    connect(b->crtButton, &QToolButton::clicked, this, [this](bool on) { setBypass(!on); });
+    connect(b->compareButton, &QToolButton::clicked, this, [this](bool on) { setCompare(on); });
+    connect(b->fullscreenButton, &QToolButton::clicked, this, [v] { v->toggleFly(); });
+    connect(b->presetCombo(), &QComboBox::activated, this, [this, b](int i) { selectPreset(b->presetCombo()->itemText(i)); });
+    connect(b, &ControlBar::volumeChanged, this, [this](double vol) { m_controls->volumeSlider()->setValue(qRound(vol * 100)); });
+    connect(b->seek(), &SeekSlider::scrubbedTo, this, [this](qint64 ms) { m_player->seek(ms * 1000000, Player::SeekMode::Fast); });
+    connect(b->seek(), &SeekSlider::scrubFinished, this, [this](qint64 ms) { m_player->seek(ms * 1000000, Player::SeekMode::Accurate); });
+    connect(v, &DeskView::contextMenuRequested, this, &MainWindow::showDeskMenu);
+    connect(m_desk, &DeskWindow::closed, this, [this] { if (m_deskActive) leaveDeskMode(); });
+    connect(v, &DeskView::phaseChanged, this, [this](DeskView::Phase ph) {
+        if (ph == DeskView::Phase::Full) showOsd(tr("Fullscreen — press Esc or double-click to return to the desk"), 2200);
+    });
+    refreshPresetUi();
+}
+
+void MainWindow::enterDeskMode()
+{
+    if (m_deskActive) return;
+    createDesk();
+    QScreen* screen = windowHandle() ? windowHandle()->screen() : QGuiApplication::primaryScreen();
+    if (m_fullscreen) setFullscreen(false);
+    m_deskActive = true;
+    m_desk->openOn(screen);
+    syncDeskBar();
+    hide();
+}
+
+void MainWindow::leaveDeskMode()
+{
+    if (!m_deskActive) return;
+    storeDeskPose();
+    m_deskActive = false;
+    m_desk->hide();
+    show();
+    raise();
+    activateWindow();
+    m_video->update();
+}
+
+void MainWindow::storeDeskPose()
+{
+    if (!m_desk) return;
+    const auto p = m_desk->view()->deskPose();
+    m_settings.deskYaw = p.yaw; m_settings.deskPitch = p.pitch; m_settings.deskHeight = p.height;
+    m_settings.deskCx = p.cx; m_settings.deskCy = p.cy;
+    m_settings.deskClassic = m_desk->view()->classicShape();
+    m_settings.deskCabinet = m_desk->view()->cabinet();
+    m_settings.arcadeArt = m_desk->view()->arcadeArt();
+    {
+        const DeskView::Scene sc = m_desk->view()->scene();
+        if (!inGamescope() || sc.scene != 0) m_settings.deskScene = sc.scene;
+        theaterLook(false);   // the regular window gets your own look back
+        m_settings.sceneMood = sc.mood; m_settings.sceneWood = sc.wood; m_settings.sceneFog = sc.fog;
+        m_settings.sceneFogStrength = sc.fogStrength; m_settings.sceneQuality = sc.quality;
+        m_settings.sceneWall = sc.wallStyle; m_settings.sceneFrameStyle = sc.frameStyle;
+        m_settings.sceneFrameLayout = sc.frameLayout; m_settings.sceneFrames = sc.framePaths;
+        m_settings.sceneTvHeight = sc.tvHeight; m_settings.scenePicHeight = sc.picHeight;
+        m_settings.scenePicSpacing = sc.picSpacing; m_settings.scenePicSize = sc.picSize;
+        m_settings.cgPalette = sc.cgPalette; m_settings.cgFloor = sc.cgFloor; m_settings.cgStand = sc.cgStand;
+        m_settings.cgObjects = sc.cgObjects; m_settings.cgBanding = sc.cgBanding;
+        m_settings.cgReveal = sc.cgReveal; m_settings.cgOrbit = sc.cgOrbit; m_settings.cgObjectSet = sc.cgObjectSet; m_settings.cgBackground = sc.cgBackground;
+        m_settings.cgModelsFolder = sc.modelsFolder; m_settings.cgModels = sc.models; m_settings.cgModelFinish = sc.modelFinish;
+    }
+    m_settings.deskOnTop = m_desk->keepOnTop();
+}
+
+void MainWindow::syncDeskBar()
+{
+    if (!m_desk) return;
+    ControlBar* b = m_desk->bar();
+    const qint64 pos = m_player->position() / 1000000;
+    const qint64 dur = m_player->duration() > 0 ? m_player->duration() / 1000000 : 0;
+    b->setTimes(pos, dur);
+    b->setPlaying(m_player->isPlaying());
+    b->setMutedIcon(m_player->isMuted());
+    QSignalBlocker vb(b->volumeSlider());
+    b->volumeSlider()->setValue(m_controls->volumeSlider()->value());
+    QSignalBlocker cb(b->crtButton), pb(b->compareButton);
+    b->crtButton->setChecked(!m_video->bypass());
+    b->compareButton->setChecked(m_video->compare());
+}
+
+void MainWindow::showDeskMenu(const QPoint& globalPos)
+{
+    DeskView* v = m_desk->view();
+    QMenu menu;
+    const bool inside = v->phase() == DeskView::Phase::Full || v->phase() == DeskView::Phase::FlyingIn;
+    menu.addAction(inside ? tr("Back to the desk\tEsc") : tr("Fly into fullscreen\tF"), v, [v] { v->toggleFly(); });
+    menu.addSeparator();
+    // Choose something to watch without leaving the desk.
+    menu.addAction(tr("Open files…\tCtrl+O"), this, [this] { openDialog(m_desk); });
+    QMenu* pl = menu.addMenu(tr("Playlist"));
+    if (m_playlist->count() == 0) pl->addAction(tr("Empty — open files or drop them on the set"))->setEnabled(false);
+    for (int i = 0; i < m_playlist->count() && i < 40; ++i) {
+        QAction* a = pl->addAction(m_playlist->labelAt(i), this, [this, i] { playIndex(i); });
+        a->setCheckable(true);
+        a->setChecked(i == m_playlist->currentIndex());
+    }
+    fillRecentMenu(menu.addMenu(tr("Recent files")));
+    if (m_jf->isSignedIn()) {
+        QMenu* jm = menu.addMenu(tr("Jellyfin: continue watching"));
+        if (m_jfResume.isEmpty()) jm->addAction(tr("Nothing to continue"))->setEnabled(false);
+        for (const JfItem& it : m_jfResume) jm->addAction(it.displayName(), this, [this, it] { playJellyfin(it, false); });
+        jm->addSeparator();
+        jm->addAction(tr("Browse the library (opens the regular window)"), this, [this] { showJellyfin(true); });
+        m_jf->loadHome();   // refresh the list for next time
+    }
+    menu.addSeparator();
+    QMenu* presets = menu.addMenu(tr("CRT preset"));
+    for (const QString& n : m_presets.builtinNames() + m_presets.userNames()) {
+        QAction* a = presets->addAction(n, this, [this, n] { selectPreset(n); });
+        a->setCheckable(true);
+        a->setChecked(n == m_presetName);
+    }
+    QMenu* set = menu.addMenu(tr("Set"));
+    const struct { int id; const char* label; } sets[] = {
+        {0, "CRT television (curved glass)"}, {1, "Flat-face CRT (late 90s)"}, {2, "Flat-panel screen"},
+        {3, "80s wood-grain console TV"}, {4, "Broadcast monitor (PVM)"}, {5, "Beige PC monitor"}, {6, "Arcade cabinet"}};
+    for (const auto& c : sets) {
+        QAction* a = set->addAction(tr(c.label), this, [v, id = c.id] { v->setCabinet(id); });
+        a->setCheckable(true);
+        a->setChecked(v->cabinet() == c.id);
+    }
+    if (v->cabinet() == DeskRenderer::ArcadeCabinet) {
+        QMenu* art = set->addMenu(tr("Arcade art"));
+        const QStringList arts = {tr("Space (stars, a ringed planet, a neon grid)"), tr("Sunset (striped sun, mountains)"),
+                                  tr("Neon (stripes and triangles)"), tr("70s woodgrain (with a stripe)")};
+        for (int i = 0; i < arts.size(); ++i) {
+            QAction* a = art->addAction(arts[i], this, [v, i] { v->setArcadeArt(i); });
+            a->setCheckable(true);
+            a->setChecked(v->arcadeArt() == i);
+        }
+    }
+    QMenu* sceneMenu = menu.addMenu(tr("Scene"));
+    {
+        const DeskView::Scene cur = v->scene();
+        auto choice = [this, sceneMenu, cur](const QString& title, const QStringList& names, int current,
+                                             std::function<void(DeskView::Scene&, int)> set, bool sub) {
+            QMenu* m = sub ? sceneMenu->addMenu(title) : sceneMenu;
+            for (int i = 0; i < names.size(); ++i) {
+                QAction* a = m->addAction(names[i], this, [this, set, i] { DeskView::Scene s = m_desk->view()->scene(); set(s, i); setDeskScene(s); });
+                a->setCheckable(true);
+                a->setChecked(i == current);
+            }
+        };
+        choice(QString(), {tr("Your desktop (transparent)"), tr("Desk (wooden desk, wall and lamp)"), tr("Wall-mounted TV (with pictures)"),
+                           tr("Movie theater"), tr("90s CG room")}, cur.scene,
+               [](DeskView::Scene& s, int i) { s.scene = i; }, false);
+        if (inGamescope()) sceneMenu->actions().first()->setEnabled(false);   // Game Mode has no desktop to show
+        sceneMenu->addSeparator();
+        choice(tr("Mood"), {tr("Evening (lamp on)"), tr("Night (lamp dimmed)"), tr("Lights off (only the screen)")}, cur.mood,
+               [](DeskView::Scene& s, int i) { s.mood = i; }, true);
+        choice(tr("Fog"), {tr("Off"), tr("Light haze"), tr("Thick fog")}, cur.fog, [](DeskView::Scene& s, int i) { s.fog = i; }, true);
+        choice(tr("Wood"), {tr("Walnut"), tr("Oak"), tr("Cherry")}, cur.wood, [](DeskView::Scene& s, int i) { s.wood = i; }, true);
+        choice(tr("Quality"), {tr("Low (fastest)"), tr("Medium"), tr("High")}, cur.quality, [](DeskView::Scene& s, int i) { s.quality = i; }, true);
+        if (cur.scene == 4) {
+            choice(tr("Palette"), {tr("Workstation (teal)"), tr("Sunset"), tr("Deep space")}, cur.cgPalette,
+                   [](DeskView::Scene& s, int i) { s.cgPalette = i; }, true);
+            choice(tr("Floor"), {tr("Mirror checkerboard"), tr("Neon grid")}, cur.cgFloor, [](DeskView::Scene& s, int i) { s.cgFloor = i; }, true);
+            choice(tr("TV stand"), {tr("Chrome pedestal"), tr("Marble plinth"), tr("Floating")}, cur.cgStand,
+                   [](DeskView::Scene& s, int i) { s.cgStand = i; }, true);
+            choice(tr("Objects"), {tr("Chrome and marble"), tr("Toybox (plastic)"), tr("Organic"), tr("Wooden mannequins"), tr("Mixed")},
+                   cur.cgObjectSet, [](DeskView::Scene& s, int i) { s.cgObjectSet = i; }, true);
+        }
+        if (cur.scene == 2) {
+            choice(tr("Wall"), {tr("Warm white"), tr("Sage green"), tr("Navy"), tr("Charcoal"), tr("Pinstripe wallpaper"), tr("Damask wallpaper")},
+                   cur.wallStyle, [](DeskView::Scene& s, int i) { s.wallStyle = i; }, true);
+            choice(tr("Pictures"), {tr("None"), tr("One on each side"), tr("Two on the left"), tr("Two on the right"), tr("Two on each side")},
+                   cur.frameLayout, [](DeskView::Scene& s, int i) { s.frameLayout = i; }, true);
+            choice(tr("Frames"), {tr("Black"), tr("Wood"), tr("Gold")}, cur.frameStyle, [](DeskView::Scene& s, int i) { s.frameStyle = i; }, true);
+        }
+        sceneMenu->addSeparator();
+        sceneMenu->addAction(tr("Scene settings…"), this, &MainWindow::openSceneDialog);
+    }
+    QMenu* shape = menu.addMenu(tr("Screen shape"));
+    QAction* follow = shape->addAction(tr("Follow the video (portrait video pivots the set)"), this, [v] { v->setClassicShape(false); });
+    QAction* classic = shape->addAction(tr("Classic 4:3 tube (letterboxed)"), this, [v] { v->setClassicShape(true); });
+    follow->setCheckable(true); classic->setCheckable(true);
+    follow->setChecked(!v->classicShape()); classic->setChecked(v->classicShape());
+    QAction* top = menu.addAction(tr("Keep on top of other windows"), this, [this](bool on) { m_desk->setKeepOnTop(on); });
+    top->setCheckable(true);
+    top->setChecked(m_desk->keepOnTop());
+    menu.addAction(tr("Reset position and angle"), this, [v] { v->resetDeskPose(); });
+    menu.addSeparator();
+    menu.addAction(tr("Open the regular player window\tT"), this, [this] { leaveDeskMode(); });
+    menu.exec(globalPos);
+}

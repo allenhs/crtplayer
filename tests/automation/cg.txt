@@ -1,0 +1,197 @@
+# 2.3: the 90s CG room.
+open @M@/hd_16x9_multitrack.mkv
+waitstate playing 15000
+pause
+seek 5
+wait 1200
+preset Clean Broadcast Monitor
+rendertime 5
+fullscreen on
+wait 1500
+screenshot filtered @O@/cg_ref_full.png
+fullscreen off
+wait 600
+rendertime off
+desk on
+wait 1500
+scene cg
+cg orbit off
+expect deskScene cg
+deskpose -20 10 0.30 0.5 0.55
+wait 1000
+# the sweeping fly-in still lands on the exact fullscreen frame
+rendertime 5
+deskfly in
+deskwait full 10000
+wait 500
+deskgrab @O@/cg_full.png
+deskfly out
+deskwait desk 10000
+rendertime off
+deskpose -20 10 0.30 0.5 0.55
+wait 800
+deskgrab @O@/cg_ws.png
+cg palette 1
+wait 700
+deskgrab @O@/cg_sunset.png
+cg palette 2
+wait 700
+deskgrab @O@/cg_space.png
+cg palette 0
+cg floor grid
+wait 700
+deskgrab @O@/cg_grid.png
+cg floor checker
+cg objects off
+wait 700
+deskgrab @O@/cg_noobj.png
+cg objects on
+cg stand plinth
+wait 700
+deskgrab @O@/cg_plinth.png
+cg stand pedestal
+scenequality low
+wait 700
+deskgrab @O@/cg_noshadow.png
+scenequality medium
+# the camera: above the floor; all the way round
+deskpose -20 -40 0.30 0.5 0.55
+wait 500
+report cg-low
+deskpose 170 10 0.30 0.5 0.55
+wait 500
+report cg-round
+# demo-reel orbit: only once stopped (and untouched) for 10 s; never while briefly paused or seeking
+play
+wait 1000
+pause
+deskpose -20 10 0.30 0.5 0.55
+cg orbit on
+wait 300
+report orbit-a
+wait 1500
+report orbit-b
+scrub 5 12 30 60
+wait 600
+report orbit-c
+wait 10500
+report orbit-d
+# the picture reflected: red vs white
+open @M@/solid_red.mp4
+waitstate playing 15000
+cg orbit off
+deskpose -20 10 0.30 0.5 0.55
+wait 400
+pause
+cg revealsnap
+wait 800
+deskgrab @O@/cg_red.png
+open @M@/solid_white.mp4
+waitstate playing 15000
+wait 400
+pause
+cg revealsnap
+wait 800
+deskgrab @O@/cg_white.png
+# tile reveal when playback starts; no orbit while playing
+open @M@/hd_16x9_multitrack.mkv
+waitstate playing 15000
+wait 300
+report reveal-start
+deskgrab @O@/cg_reveal.png
+cg orbit on
+report play-a
+wait 1500
+report play-b
+cg revealsnap
+wait 300
+report reveal-done
+# never for skipping back or forward, scrubbing, or a short pause; again after a long pause
+cg orbit off
+seek 20
+wait 1000
+report seek-fwd
+seek 6
+wait 1000
+report seek-back
+scrub 8 25 40 75
+wait 1200
+report scrubbed
+pause
+wait 2000
+play
+wait 800
+report short-pause
+pause
+wait 10500
+play
+wait 300
+report long-pause
+# object sets: each one changes the scene
+pause
+cg orbit off
+deskpose -18 8 0.28 0.5 0.55
+cg revealsnap
+rendertime 5
+wait 800
+deskgrab @O@/cg_set0.png
+cg set 1
+wait 800
+deskgrab @O@/cg_set1.png
+cg set 2
+wait 800
+deskgrab @O@/cg_set2.png
+cg set 3
+wait 800
+deskgrab @O@/cg_set3.png
+cg set 4
+wait 800
+deskgrab @O@/cg_set4.png
+cg set 0
+# the background crowd (with the default set too), and the walkers walking
+cg background off
+wait 700
+deskgrab @O@/cg_bgoff.png
+cg background on
+wait 700
+deskgrab @O@/cg_bgon.png
+cg set 3
+rendertime 5
+wait 700
+deskgrab @O@/cg_walk_a.png
+rendertime 5.7
+wait 700
+deskgrab @O@/cg_walk_b.png
+rendertime 5
+wait 700
+deskgrab @O@/cg_walk_c.png
+cg set 0
+# stars: small and round (deep space, looking along the horizon)
+cg palette 2
+deskpose -10 -6 0.30 0.5 0.62
+wait 800
+deskgrab @O@/cg_stars.png
+cg palette 0
+# your 3D models: a folder with an OBJ, a binary STL, a text STL, a broken file and a non-model
+deskpose -12 10 0.20 0.5 0.55
+wait 600
+deskgrab @O@/cg_nomodels.png
+cg models @M@/models
+modelswait 30000
+wait 800
+report models
+deskgrab @O@/cg_models.png
+cg finish 1
+wait 700
+deskgrab @O@/cg_bronze.png
+cg finish 0
+desk off
+wait 800
+desk on
+wait 1500
+modelswait 30000
+wait 800
+report models-again
+rendertime off
+desk off
+quit

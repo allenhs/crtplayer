@@ -1,0 +1,5 @@
+report restored
+expect preset Arcade Display
+expect scaleMode Fill
+expect bypass true
+quit

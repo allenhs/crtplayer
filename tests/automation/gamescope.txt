@@ -1,0 +1,10 @@
+# Run with GAMESCOPE_WAYLAND_DISPLAY set, as Steam Game Mode does.
+open @M@/sd_4x3_h264.mp4
+waitstate playing 15000
+wait 1500
+report gs-start
+desk on
+wait 1500
+report gs-desk
+sysreport @O@/gs-sysreport.txt
+quit

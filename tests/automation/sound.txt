@@ -1,0 +1,30 @@
+# 2.5: the look's sound in the running player.
+open @M@/hd_16x9_multitrack.mkv
+waitstate playing 15000
+preset Clean Broadcast Monitor
+wait 300
+report clean
+preset Worn VHS TV
+wait 300
+report vhs
+wait 2500
+report vhs-later
+looksound volume 2
+wait 200
+report vol200
+looksound volume 0
+wait 200
+report vol0
+looksound volume 1
+looksound strength 0.5
+wait 200
+report str50
+looksound strength 1
+looksound off
+wait 300
+report off
+looksound on
+preset Film Print (35mm)
+wait 300
+report film
+quit

@@ -1,0 +1,10 @@
+PASS  desk grain at a believable scale (1.9.2 measured 0.123): texture period 0.055 x the picture height
+PASS  moods: evening > night > lights off (wall): 29.8 > 9.9 > 1.2
+PASS  the picture lights the desk in front of the set: white 49.8 vs black 1.1
+PASS  in the picture's colour: red picture: R 80, G 1, B 1
+PASS  fog glows around the set: surroundings 15.8 -> 41.7 with thick fog
+PASS  scenes are opaque (nothing shows through): 100%
+PASS  flying in with a scene and thick fog lands on the exact fullscreen frame: max diff 0
+PASS  scene settings are remembered: desk, mood 2, fog 2
+
+All scene checks passed

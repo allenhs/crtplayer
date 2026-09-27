@@ -1,0 +1,114 @@
+# Desk mode (3D set on the desktop). Frame is paused and the preset has no animated
+# noise, so every capture is deterministic.
+open @M@/sd_4x3_h264.mp4
+waitstate playing 15000
+seek 5
+wait 800
+pause
+wait 500
+preset Clean Broadcast Monitor
+# Reference: the regular player in fullscreen
+fullscreen on
+wait 1500
+screenshot filtered @O@/desk_ref_fullscreen.png
+fullscreen off
+wait 800
+desk on
+wait 1500
+expect deskMode true
+expect mainWindowVisible false
+expect deskPhase desk
+deskgrab @O@/desk_idle.png
+report desk-idle
+deskfly in
+wait 150
+deskgrab @O@/desk_flying.png
+deskwait full 8000
+wait 400
+expect deskPhase full
+deskgrab @O@/desk_full.png
+report desk-full
+deskfly out
+deskwait desk 8000
+wait 400
+deskgrab @O@/desk_back.png
+report desk-back
+# Flat-panel set: same flight, same exact landing
+deskcabinet flat-panel
+wait 500
+expect deskCabinet flat-panel
+deskgrab @O@/desk_panel.png
+deskfly in
+deskwait full 8000
+wait 400
+deskgrab @O@/desk_panel_full.png
+deskfly out
+deskwait desk 8000
+deskcabinet flat-crt
+wait 400
+expect deskCabinet flat-crt
+deskgrab @O@/desk_flatcrt.png
+deskcabinet wood-console
+wait 400
+expect deskCabinet wood-console
+deskgrab @O@/desk_wood.png
+# low, from the side: the legs must meet the cabinet (no gap)
+deskpose 58 -2 0.62 0.5 0.45
+wait 500
+deskgrab @O@/desk_wood_low.png
+deskpose 20 4 0.62 0.5 0.45
+wait 500
+deskgrab @O@/desk_wood_front.png
+deskpose -24 9 0.46 0.5 0.52
+wait 400
+deskcabinet pvm
+wait 400
+expect deskCabinet pvm
+deskgrab @O@/desk_pvm.png
+deskcabinet beige-monitor
+wait 400
+expect deskCabinet beige-monitor
+deskgrab @O@/desk_beige.png
+deskfly in
+deskwait full 8000
+wait 400
+deskgrab @O@/desk_beige_full.png
+deskfly out
+deskwait desk 8000
+deskcabinet crt
+wait 400
+# Screen shape follows the video; portrait video pivots the set
+open @M@/vertical_9x16_h264.mp4
+waitstate playing 15000
+wait 800
+expect deskPivot true
+expect displayAspect 0.5625
+deskgrab @O@/desk_vertical.png
+open @M@/hd_16x9_multitrack.mkv
+waitstate playing 15000
+wait 800
+expect deskPivot false
+deskgrab @O@/desk_wide.png
+deskshape classic
+wait 500
+expect deskClassic true
+deskgrab @O@/desk_wide_classic.png
+deskshape follow
+deskpose 50 20 0.5 0.5 0.5
+wait 500
+deskgrab @O@/desk_angle.png
+# Tilted so the camera is below the floor plane: no shadow; then back above it
+deskpose -24 -30 0.46 0.5 0.52
+wait 500
+deskgrab @O@/desk_below.png
+report desk-below
+deskpose -24 9 0.46 0.5 0.52
+wait 500
+deskgrab @O@/desk_above.png
+report desk-above
+deskpose -24 9 0.46 0.5 0.52
+desk off
+wait 800
+expect deskMode false
+expect mainWindowVisible true
+quit

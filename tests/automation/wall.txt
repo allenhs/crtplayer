@@ -1,0 +1,81 @@
+# 2.1: the camera stays above the floor in scenes; the wall-mounted TV scene and its pictures.
+open @M@/sd_4x3_h264.mp4
+waitstate playing 15000
+seek 5
+wait 800
+pause
+wait 400
+preset Clean Broadcast Monitor
+fullscreen on
+wait 1500
+screenshot filtered @O@/wall_ref_full.png
+fullscreen off
+wait 800
+desk on
+wait 1500
+scene desk
+deskpose -24 -30 0.42 0.5 0.55
+wait 600
+report floor-desk
+scene desktop
+deskpose -24 -30 0.42 0.5 0.55
+wait 400
+report floor-desktop
+scene wall
+deskpose -18 6 0.36 0.5 0.5
+scenepicture 0 @M@/pictures/sunset.jpg
+scenepicture 1 @M@/pictures/mountain.jpg
+scenepicture 2 @M@/pictures/circles.png
+scenepicture 3 @M@/pictures/stripes.png
+sceneframes 1
+sceneframestyle black
+wait 1000
+expect deskScene wall
+deskgrab @O@/wall_black.png
+report wall-1
+sceneframestyle gold
+wait 700
+deskgrab @O@/wall_gold.png
+sceneplace 1.7 0.3 1.6 1.3
+sceneframestyle black
+wait 700
+deskgrab @O@/wall_placed.png
+sceneplace 1.7 0 1 1
+sceneframes 4
+wait 800
+deskgrab @O@/wall_four.png
+report wall-4
+scenepicture 3 /nonexistent/missing.png
+wait 700
+report wall-missing
+scenepicture 3 @M@/pictures/stripes.png
+sceneframes 1
+sceneframestyle black
+wait 600
+deskfly in
+deskwait full 8000
+wait 400
+deskgrab @O@/wall_full.png
+deskfly out
+deskwait desk 8000
+# A real room: side walls and a ceiling, and the camera stays inside it.
+deskpose 70 6 0.30 0.5 0.5
+wait 700
+report room-turn
+deskgrab @O@/room_side.png
+deskpose 0 45 0.15 0.5 0.5
+wait 700
+report room-high
+deskpose -25 -22 0.22 0.5 0.62
+wait 700
+deskgrab @O@/room_up.png
+deskpose -18 6 0.36 0.5 0.5
+wait 400
+desk off
+wait 800
+desk on
+wait 1500
+report wall-reenter
+scenepreviews @O@
+desk off
+quit

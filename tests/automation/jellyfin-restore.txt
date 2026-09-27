@@ -1,0 +1,9 @@
+# Second launch: the stored session is restored, then signing out revokes it.
+jfwait signedin 5000
+jfwait listing 8000
+report jf-restored
+jfsignout
+jfwait signedout 3000
+wait 800
+report jf-signed-out
+quit

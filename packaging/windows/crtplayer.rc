@@ -1,0 +1,32 @@
+// Windows resources: the icon (Explorer, the taskbar, the window) and version details.
+#include <winver.h>
+
+IDI_ICON1 ICON "crtplayer.ico"
+
+VS_VERSION_INFO VERSIONINFO
+FILEVERSION     CRTPLAYER_RC_VERSION
+PRODUCTVERSION  CRTPLAYER_RC_VERSION
+FILEFLAGSMASK   0x3fL
+FILEFLAGS       0x0L
+FILEOS          VOS_NT_WINDOWS32
+FILETYPE        VFT_APP
+FILESUBTYPE     0x0L
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        BLOCK "040904b0"
+        BEGIN
+            VALUE "CompanyName",      "CRT Player"
+            VALUE "FileDescription",  "CRT Player"
+            VALUE "FileVersion",      CRTPLAYER_RC_VERSION_STR
+            VALUE "InternalName",     "crtplayer"
+            VALUE "OriginalFilename", "crtplayer.exe"
+            VALUE "ProductName",      "CRT Player"
+            VALUE "ProductVersion",   CRTPLAYER_RC_VERSION_STR
+        END
+    END
+    BLOCK "VarFileInfo"
+    BEGIN
+        VALUE "Translation", 0x409, 1200
+    END
+END

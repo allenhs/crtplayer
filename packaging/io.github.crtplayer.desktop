@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=CRT Player
+GenericName=Video Player
+Comment=Play videos with a configurable CRT presentation
+Exec=crtplayer %U
+Icon=crtplayer
+Terminal=false
+Categories=AudioVideo;Video;Player;Qt;
+MimeType=video/mp4;video/x-matroska;video/webm;video/quicktime;video/x-msvideo;video/mpeg;video/mp2t;video/x-flv;video/ogg;video/3gpp;video/x-ms-wmv;
+Keywords=video;player;crt;retro;scanlines;

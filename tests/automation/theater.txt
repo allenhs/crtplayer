@@ -1,0 +1,114 @@
+# 2.2: the movie theater (curtains, house lights, masking, haze, landing) and the film looks.
+open @M@/hd_16x9_multitrack.mkv
+waitstate playing 15000
+pause
+seek 0
+wait 600
+preset Consumer Television
+desk on
+wait 1500
+scene theater
+wait 1200
+theatersnap
+wait 500
+report t-closed
+deskgrab @O@/th_closed.png
+play
+wait 1500
+theatersnap
+wait 600
+report t-open
+deskgrab @O@/th_open.png
+scenefog thick
+wait 900
+deskgrab @O@/th_haze.png
+scenefog off
+# The auditorium: zoom moves between rows, the eye stays at seated height, turning stays inside.
+deskgrab @O@/th_seats.png
+deskpose 0 4 0.06 0.5 0.40
+wait 400
+report t-back
+deskpose 0 4 0.24 0.5 0.40
+wait 400
+# Seats seen across the rows at an angle, against a near-exact (slow) reference rendering:
+# they must match (no jagged edges from the ray-marching). Paused: the seats are lit by the
+# picture, so a playing video would change them between the two captures.
+pause
+wait 600
+theatersnap
+wait 300
+rendertime 5
+deskpose 30 4 0.30 0.5 0.40
+wait 900
+deskgrab @O@/th_angle.png
+theatermarch ref
+wait 3000
+deskgrab @O@/th_angle_ref.png
+theatermarch normal
+rendertime off
+deskpose 0 4 0.24 0.5 0.40
+play
+wait 400
+report t-middle
+deskpose 0 4 0.95 0.5 0.40
+wait 400
+report t-front
+deskpose 30 4 0.10 0.5 0.40
+wait 400
+report t-turned
+deskpose 0 4 0.24 0.5 0.40
+wait 400
+open @M@/sd_4x3_h264.mp4
+waitstate playing 15000
+wait 500
+theatersnap
+wait 400
+report t-4x3
+pause
+seek 6
+wait 1200
+rendertime 5
+wait 400
+deskfly in
+deskwait full 8000
+wait 500
+deskgrab @O@/th_full.png
+deskfly out
+deskwait desk 8000
+seek 19
+play
+wait 3000
+theatersnap
+wait 300
+report t-end
+desk off
+wait 800
+report t-left
+# The reference: the channel-change static runs on the effect clock, so it is unpinned
+# while the file reopens, then pinned again at the same moment as the landing.
+rendertime off
+open @M@/sd_4x3_h264.mp4
+waitstate playing 15000
+pause
+seek 6
+wait 1500
+preset Film Print (35mm)
+rendertime 5
+wait 400
+fullscreen on
+wait 1500
+screenshot filtered @O@/th_ref_full.png
+fullscreen off
+wait 600
+preset Worn Film (16mm)
+rendertime 1
+wait 500
+screenshot filtered @O@/film_a.png
+rendertime 1.05
+wait 500
+screenshot filtered @O@/film_b.png
+rendertime 1
+wait 500
+screenshot filtered @O@/film_c.png
+rendertime off
+quit

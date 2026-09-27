@@ -1,0 +1,76 @@
+# Windows build: MSYS2 (UCRT64) with Qt 6 and GStreamer, packaged as a self-contained folder
+# and tested on its own. Every push uploads the zip as a build artifact; a version tag
+# (v2.7.0, ...) also publishes it as a GitHub Release.
+name: Windows
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 90
+    defaults:
+      run:
+        shell: msys2 {0}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: true
+          install: zip
+          pacboy: >-
+            toolchain:p cmake:p ninja:p pkgconf:p
+            qt6-base:p qt6-tools:p
+            gstreamer:p gst-plugins-base:p gst-plugins-good:p gst-plugins-bad:p gst-plugins-ugly:p gst-libav:p
+            glib-networking:p SDL2:p
+            mesa:p python:p python-pillow:p python-numpy:p
+
+      - name: Build
+        run: |
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+          cmake --build build
+
+      - name: Unit tests
+        run: ctest --test-dir build --output-on-failure
+
+      - name: Package
+        run: |
+          VERSION=$(sed -n 's/^project(CRTPlayer VERSION \([0-9.]*\).*/\1/p' CMakeLists.txt)
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+          bash packaging/windows/package.sh build "dist/CRT Player"
+          cp README.md "dist/CRT Player/README.md"
+          (cd dist && zip -qr "../CRT_Player-$VERSION-windows-x64.zip" "CRT Player")
+          ls -la CRT_Player-*.zip
+
+      - name: Smoke test (the packaged player on its own)
+        run: bash packaging/windows/smoke-test.sh "dist/CRT Player" smoke
+
+      - name: Upload the smoke test's results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: smoke-test-results
+          path: smoke/out
+          if-no-files-found: ignore
+
+      - name: Upload the Windows build
+        uses: actions/upload-artifact@v4
+        with:
+          name: CRT_Player-${{ env.VERSION }}-windows-x64
+          path: CRT_Player-*-windows-x64.zip
+
+      - name: Publish the release (version tags)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: CRT_Player-*-windows-x64.zip

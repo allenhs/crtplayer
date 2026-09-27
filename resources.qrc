@@ -1,0 +1,21 @@
+<RCC>
+  <qresource prefix="/">
+    <file>shaders/quad.vert</file>
+    <file>shaders/convert.frag</file>
+    <file>shaders/downsample.frag</file>
+    <file>shaders/blur.frag</file>
+    <file>shaders/crt.frag</file>
+    <file>shaders/desk.vert</file>
+    <file>shaders/persist.frag</file>
+    <file>shaders/copy.frag</file>
+    <file>shaders/scene_desk.frag</file>
+    <file>shaders/haze.frag</file>
+    <file>shaders/theater.frag</file>
+    <file>shaders/theater_front.frag</file>
+    <file>shaders/cg90.frag</file>
+    <file>shaders/flare.frag</file>
+    <file>shaders/model.vert</file>
+    <file>shaders/model.frag</file>
+    <file>shaders/desk.frag</file>
+  </qresource>
+</RCC>

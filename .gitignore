@@ -1,0 +1,6 @@
+build/
+build-*/
+dist/
+smoke/
+.appimage-tools/
+*.AppImage

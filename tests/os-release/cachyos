@@ -1,0 +1,4 @@
+NAME="CachyOS Linux"
+ID=cachyos
+ID_LIKE=arch
+PRETTY_NAME="CachyOS"

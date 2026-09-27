@@ -1,0 +1,13 @@
+PASS  with every amount at 0 the sound is untouched (bit-exact): 96000 samples compared
+PASS  tape hiss: a believable level, following the amount: -31.4 dBFS at full, -41.8 dBFS at 0.3
+PASS  noise volume: 200% is twice as loud, 0% is silent: hiss +6.0 dB at 200%; at 0% the peak is 0
+PASS  noise volume scales the crackle's loudness: loudest pop 0.394 at 100%, 0.197 at 50%
+PASS  TV speaker: thin bass, mids kept, no highs: 100 Hz -18.9 dB, 1 kHz +0.9 dB, 10 kHz -13.1 dB
+PASS  TV speaker at full is mono: left-only input: left/right differ by at most 0
+PASS  treble loss: highs cut, mids kept: 1 kHz -0.0 dB, 10 kHz -19.3 dB
+PASS  wow and flutter: the pitch wobbles, within what a worn tape does: pitch spread 2.09% with wow and flutter, 0.000% without
+PASS  tape saturation: warm harmonics: 3rd harmonic 14 dB below the tone (180 dB without)
+PASS  film crackle: pops: 27 pops in 3 s of silence
+PASS  dropouts: the level dips now and then: 1 dips in 5.5 s
+
+All tape sound checks passed

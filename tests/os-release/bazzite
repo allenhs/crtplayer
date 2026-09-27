@@ -1,0 +1,5 @@
+NAME="Bazzite"
+ID=bazzite
+ID_LIKE="fedora"
+VARIANT_ID=bazzite-deck
+PRETTY_NAME="Bazzite 42"

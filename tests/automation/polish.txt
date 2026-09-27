@@ -1,0 +1,72 @@
+# 1.8: chapters, speed, A-B loop, seek previews, sidecar subtitles, resume, system report
+open @M@/chapters.mkv
+waitstate playing 15000
+wait 1500
+expect chapterCount 3
+pause
+seek 2
+wait 600
+chapter next
+wait 900
+report ch-next
+chapter next
+wait 900
+report ch-next2
+chapter prev
+wait 900
+report ch-prev
+seek 0
+wait 400
+rate 2
+play
+wait 600
+report sp2-a
+wait 3000
+report sp2-b
+rate 0.5
+wait 600
+report sp05-a
+wait 3000
+report sp05-b
+rate 1
+wait 300
+expect rate 1
+loop 3000 5000
+seek 3
+wait 4500
+report loop1
+wait 2000
+report loop2
+loop off
+pause
+wait 400
+thumb 20000 @O@/thumb20.png
+thumb 5000 @O@/thumb5.png
+seek 20
+wait 900
+screenshot original @O@/orig20.png
+open @M@/subs_clip.mp4
+waitstate playing 15000
+seek 5
+wait 800
+pause
+wait 600
+expect externalSubtitle subs_clip.srt
+expect externalSubtitleOffers 2
+screenshot original @O@/sub_on.png
+subfile off
+waitstate paused 15000
+wait 1200
+screenshot original @O@/sub_off.png
+subfile offer 1
+waitstate paused 15000
+wait 1200
+screenshot original @O@/sub_en.png
+report sub-en
+open @M@/resume_clip.mp4
+waitstate playing 15000
+seek 45
+wait 1500
+report resume-set
+sysreport @O@/sysreport.txt
+quit

@@ -1,0 +1,24 @@
+open @M@/sd_4x3_h264.mp4
+waitstate playing 15000
+seek 6
+wait 800
+pause
+wait 800
+report start
+step fwd
+wait 700
+report f1
+step fwd
+wait 700
+report f2
+step back
+wait 900
+report b1
+step back
+wait 900
+report b2
+step back
+wait 900
+report b3
+screenshot original @O@/step_b3.png
+quit

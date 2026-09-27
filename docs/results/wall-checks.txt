@@ -1,0 +1,19 @@
+PASS  in a scene the camera stays above the floor: asked for pitch -30: got -5.0, 0.16 above the floor
+PASS  on the transparent desktop it may still look from below: pitch -30.0
+PASS  frames per layout (one each side / two each side): 2 and 4
+PASS  a missing picture file is skipped: 3 loaded, 3 frames
+PASS  pictures are remembered: wall, 4 pictures
+PASS  the first picture hangs on the left: sunset pixels left 1366, right 0
+PASS  the second picture hangs on the right: mountain pixels right 13196, left 0
+PASS  with four, the third and fourth are on the right: green 9380, magenta 18995 pixels right of the set
+PASS  gold frames look gold, black frames dark: black [35. 27. 18.], gold [65. 49. 32.]
+PASS  placement: pictures higher, further from the set, larger: centre (509,445) -> (407,373), area 1366 -> 6752
+PASS  turned hard to the side, the camera stays inside the side walls: x -3.49 (walls at +-3.8)
+PASS  from high above, the camera stays under the ceiling: 4.69 above the floor (ceiling 5.0)
+PASS  side walls: no black void at the edges of the view: darkest edge strip 20.6
+PASS  looking up shows the ceiling: top strip 18.9
+PASS  the wall scene is opaque: 100%
+PASS  flying in from the wall scene lands on the exact fullscreen frame: max diff 0
+PASS  scene previews render, and differ: smallest difference 11.6
+
+All wall checks passed

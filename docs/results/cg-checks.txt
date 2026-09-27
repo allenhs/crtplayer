@@ -1,0 +1,26 @@
+PASS  the sweeping fly-in lands on the exact fullscreen frame: max diff 0
+PASS  palettes: teal workstation, orange sunset, dark space: workstation [ 34. 116. 134.], sunset [221. 122.  86.], space [13. 14. 29.]
+PASS  the neon grid floor differs from the checkerboard: mean difference 62.0
+PASS  the objects can be turned off: 6.5% of the view changes
+PASS  the plinth differs from the pedestal: mean difference 38.1
+PASS  hard shadows (quality medium vs low): floor difference 7.23
+PASS  the camera stays above the floor: 0.15 above it (asked for pitch -40)
+PASS  an open world: the camera goes all the way round: yaw 170.0
+PASS  demo-reel orbit: not while briefly paused, seeking, or playing: paused (4.9 s idle) +0.0 deg; scrubbing while paused (29 seeks, then 0.6 s idle) +0.0 deg; playing +0.0 deg
+PASS  demo-reel orbit once stopped and untouched for 10 s: +6.0 deg over the next 10.5 s
+PASS  the picture is reflected in the scene: 40611 pixels outside the screen turn red
+PASS  tile reveal: starts when playback starts, and completes: 0.20 just after starting, then 1
+PASS  no tile reveal for skipping forward or back, scrubbing, or a short pause: seek-fwd 1.00, seek-back 1.00, scrubbed 1.00, short-pause 1.00
+PASS  the tile reveal again after a long pause (10 s or more): 0.20 just after resuming
+PASS  each object set changes the scene (toybox, organic, mannequins, mixed): 7.0%, 7.8%, 5.4%, 6.9%
+PASS  the background crowd appears with the default set too: 2.2% of the view changes
+PASS  the mannequins walk around (0.7 s later they have moved), deterministically: 3.52% of the view changes; same moment again: max diff 0
+PASS  stars are small round points (not squares): 56 stars, up to 17 px, median width/height 1.00
+PASS  your models load (OBJ, binary STL, text STL); a broken file is skipped: 3 shown; skipped: d_broken.obj: face refers to a missing vertex
+PASS  they appear in the scene: 3.7% of the view changes
+PASS  they cast shadows on the floor, and show in the mirror floor: 14956 floor pixels darker, 69103 brighter
+PASS  the bronze finish differs from marble: warm pixels 9485 (marble) -> 28478 (bronze)
+PASS  the scene stays opaque (the floor mask is reset): 100.00% opaque
+PASS  your models folder is remembered: 3 shown after leaving and re-entering desk mode
+
+All CG room checks passed

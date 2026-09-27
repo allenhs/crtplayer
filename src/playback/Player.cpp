@@ -1,0 +1,887 @@
+#include <functional>
+#include "Player.h"
+#include "Distro.h"
+#include "TapeAudio.h"
+
+#include <QFileInfo>
+#include <cmath>
+#include <QHash>
+#include <QMetaObject>
+#include <QPointer>
+#include <QUrl>
+#include <QDebug>
+#include <gst/app/gstappsink.h>
+#include <gst/audio/streamvolume.h>
+#include <gst/pbutils/pbutils.h>
+#include <gst/tag/tag.h>
+#include <gst/video/video.h>
+
+namespace {
+constexpr int kFlagVideo = 1 << 0;
+constexpr int kFlagAudio = 1 << 1;
+constexpr int kFlagText = 1 << 2;
+constexpr int kFlagSoftColorbalance = 1 << 10;
+
+bool klassHas(GstElementFactory* f, const char* a, const char* b = nullptr, const char* c = nullptr)
+{
+    const gchar* k = f ? gst_element_factory_get_metadata(f, GST_ELEMENT_METADATA_KLASS) : nullptr;
+    if (!k) return false;
+    return strstr(k, a) && (!b || strstr(k, b)) && (!c || strstr(k, c));
+}
+
+bool isHwVideoDecoderFactory(GstElementFactory* f) { return klassHas(f, "Decoder", "Video", "Hardware"); }
+
+QHash<QString, guint>& originalRanks()
+{
+    static QHash<QString, guint> h;
+    return h;
+}
+
+QString tagString(const GstTagList* tags, const char* tag)
+{
+    gchar* s = nullptr;
+    QString out;
+    if (tags && gst_tag_list_get_string(tags, tag, &s)) {
+        out = QString::fromUtf8(s);
+        g_free(s);
+    }
+    return out;
+}
+
+QString trackLabel(int idx, const GstTagList* tags, const char* codecTag)
+{
+    QString label = QStringLiteral("Track %1").arg(idx + 1);
+    const QString code = tagString(tags, GST_TAG_LANGUAGE_CODE);
+    QString lang = tagString(tags, GST_TAG_LANGUAGE_NAME);
+    if (lang.isEmpty() && !code.isEmpty()) {
+        const gchar* n = gst_tag_get_language_name(code.toUtf8().constData());
+        lang = n ? QString::fromUtf8(n) : code;
+    }
+    const QString title = tagString(tags, GST_TAG_TITLE);
+    const QString codec = tagString(tags, codecTag);
+    QStringList parts;
+    if (!lang.isEmpty()) parts << lang;
+    if (!title.isEmpty() && title != lang) parts << title;
+    if (!parts.isEmpty()) label += QStringLiteral(": ") + parts.join(QStringLiteral(", "));
+    if (!codec.isEmpty()) label += QStringLiteral(" (%1)").arg(codec);
+    return label;
+}
+} // namespace
+
+Player::Player(QObject* parent) : QObject(parent)
+{
+    m_seekWatchdog.setSingleShot(true);
+    m_seekWatchdog.setInterval(1500);
+    connect(&m_seekWatchdog, &QTimer::timeout, this, [this] {
+        // A flushing seek should always complete with ASYNC_DONE; never leave the UI stuck.
+        m_seekInFlight = false;
+        if (m_hasPendingSeek) { m_hasPendingSeek = false; doSeek(m_pendingSeek, m_pendingMode); }
+    });
+}
+
+Player::~Player() { teardown(); }
+
+QStringList Player::missingEssentialElements()
+{
+    // Only what the player cannot run without: all of it is in GStreamer core / base, which
+    // every distribution installs with GStreamer itself.
+    struct Req { const char* element; Distro::Set set; };
+    static const Req reqs[] = {
+        {"playbin", Distro::Set::Base}, {"appsink", Distro::Set::Base}, {"videoconvert", Distro::Set::Base},
+        {"audioconvert", Distro::Set::Base}, {"audioresample", Distro::Set::Base}, {"typefind", Distro::Set::Base},
+    };
+    QStringList missing;
+    for (const auto& r : reqs) {
+        GstElementFactory* f = gst_element_factory_find(r.element);
+        if (!f) missing << QStringLiteral("%1 (%2)").arg(QString::fromUtf8(r.element), Distro::package(r.set));
+        else gst_object_unref(f);
+    }
+    return missing;
+}
+
+QList<Player::Gap> Player::missingRecommended()
+{
+    auto have = [](std::initializer_list<const char*> names) {
+        for (const char* n : names)
+            if (GstElementFactory* f = gst_element_factory_find(n)) { gst_object_unref(f); return true; }
+        return false;
+    };
+    using S = Distro::Set;
+    QList<Gap> gaps;
+    if (!have({"qtdemux"})) gaps.append({tr("MP4 / MOV files"), Distro::package(S::Good)});
+    if (!have({"matroskademux"})) gaps.append({tr("MKV / WebM files"), Distro::package(S::Good)});
+    if (!have({"avdec_h264", "openh264dec", "vah264dec", "vaapih264dec", "nvh264dec", "v4l2h264dec"}))
+        gaps.append({tr("H.264 video (most videos)"), Distro::package(S::Libav)});
+    if (!have({"avdec_aac", "faad", "fdkaacdec"})) gaps.append({tr("AAC audio (most videos)"), Distro::package(S::Libav)});
+    if (!have({"souphttpsrc"})) gaps.append({tr("network streams (Jellyfin)"), Distro::package(S::Good)});
+    if (!have({"autoaudiosink"})) gaps.append({tr("automatic audio output (falls back to PipeWire, PulseAudio or ALSA)"), Distro::package(S::Good)});
+    if (!have({"scaletempo"})) gaps.append({tr("natural-sounding speed changes"), Distro::package(S::Good)});
+    if (!have({"textoverlay"})) gaps.append({tr("subtitles (drawing their text)"), Distro::package(S::Text)});
+    return gaps;
+}
+
+// Without autoaudiosink (gst-plugins-good), playbin has no automatic audio output: pick
+// the first sink that can actually open, and fall back to silent (but timed) playback.
+static GstElement* fallbackAudioSink(QString* name)
+{
+    if (GstElementFactory* f = gst_element_factory_find("autoaudiosink")) { gst_object_unref(f); *name = QStringLiteral("automatic"); return nullptr; }
+    for (const char* n : {"pipewiresink", "pulsesink", "alsasink", "osssink"}) {
+        GstElement* e = gst_element_factory_make(n, nullptr);
+        if (!e) continue;
+        const bool ok = gst_element_set_state(e, GST_STATE_READY) != GST_STATE_CHANGE_FAILURE;
+        gst_element_set_state(e, GST_STATE_NULL);
+        if (ok) { *name = QString::fromUtf8(n); return e; }
+        gst_object_unref(e);
+    }
+    GstElement* f = gst_element_factory_make("fakesink", nullptr);
+    if (f) g_object_set(f, "sync", TRUE, nullptr);
+    *name = QStringLiteral("none");
+    return f;
+}
+
+void Player::applyDecoderPolicy(bool allowHw)
+{
+    GList* list = gst_registry_get_feature_list(gst_registry_get(), GST_TYPE_ELEMENT_FACTORY);
+    for (GList* l = list; l; l = l->next) {
+        auto* f = GST_ELEMENT_FACTORY(l->data);
+        if (!isHwVideoDecoderFactory(f)) continue;
+        const QString name = QString::fromUtf8(gst_plugin_feature_get_name(GST_PLUGIN_FEATURE(f)));
+        auto& ranks = originalRanks();
+        if (!ranks.contains(name)) ranks.insert(name, gst_plugin_feature_get_rank(GST_PLUGIN_FEATURE(f)));
+        const guint orig = ranks.value(name);
+        guint rank = orig;
+        if (!allowHw) {
+            rank = GST_RANK_NONE;
+        } else if (name.startsWith("vulkan")) {
+            // Vulkan decoders output Vulkan images only; this sink needs system memory.
+            rank = orig;
+        } else if (orig > GST_RANK_NONE) {
+            // Enabled hardware decoders should win over libav/dav1d (PRIMARY).
+            // The modern "va" plugin is preferred over the legacy "vaapi" one.
+            const bool modernVa = name.startsWith("va") && !name.startsWith("vaapi");
+            rank = std::max<guint>(orig, GST_RANK_PRIMARY + (modernVa ? 3 : 2));
+        }
+        gst_plugin_feature_set_rank(GST_PLUGIN_FEATURE(f), rank);
+    }
+    gst_plugin_feature_list_free(list);
+}
+
+QStringList Player::availableHardwareDecoders()
+{
+    QStringList out;
+    GList* list = gst_registry_get_feature_list(gst_registry_get(), GST_TYPE_ELEMENT_FACTORY);
+    for (GList* l = list; l; l = l->next) {
+        auto* f = GST_ELEMENT_FACTORY(l->data);
+        if (isHwVideoDecoderFactory(f))
+            out << QString::fromUtf8(gst_plugin_feature_get_name(GST_PLUGIN_FEATURE(f)));
+    }
+    gst_plugin_feature_list_free(list);
+    out.sort();
+    return out;
+}
+
+QString Player::currentPath() const
+{
+    const QUrl u(m_uri);
+    return u.isLocalFile() ? u.toLocalFile() : m_uri;
+}
+
+bool Player::open(const QString& in, bool autoplay, qint64 startNs)
+{
+    QString uri = in;
+    if (!in.contains(QStringLiteral("://")))
+        uri = QUrl::fromLocalFile(QFileInfo(in).absoluteFilePath()).toString(QUrl::FullyEncoded);
+    m_hwRetried = false;
+    return openInternal(uri, autoplay, startNs, false);
+}
+
+bool Player::openInternal(const QString& uri, bool autoplay, qint64 startNs, bool isRetry)
+{
+    teardown();
+    if (!isRetry) applyDecoderPolicy(m_hwEnabled);
+    m_uri = uri;
+    m_targetPlaying = autoplay;
+    m_startPos = startNs;
+    m_loaded = false;
+    m_duration = -1;
+    m_missing.clear();
+    m_audioTracks.clear();
+    m_textTracks.clear();
+    m_chapters.clear();
+    emit chaptersChanged();
+    m_nVideo = 0;
+    m_videoCodec.clear(); m_audioCodec.clear(); m_container.clear();
+    m_orientationTag = QStringLiteral("rotate-0");
+    emit orientationChanged(m_orientationTag);
+    ++m_generation;
+
+    m_pipe = gst_element_factory_make("playbin", "crtplayer");
+    GstElement* conv = gst_element_factory_make("videoconvert", nullptr);
+    m_appsink = gst_element_factory_make("appsink", "crtsink");
+    if (!m_pipe || !conv || !m_appsink) {
+        if (conv) gst_object_unref(conv);
+        if (m_appsink) gst_object_unref(m_appsink);
+        if (m_pipe) gst_object_unref(m_pipe);
+        m_pipe = m_appsink = nullptr;
+        m_tape = nullptr;
+        setState(State::Error);
+        emit errorOccurred(tr("GStreamer is incomplete"),
+                           tr("Required elements are missing:\n%1\n\nInstall with:\n  %2")
+                               .arg(missingEssentialElements().join('\n'), Distro::installCommand({Distro::package(Distro::Set::Base)})));
+        return false;
+    }
+
+    // Video sink: videoconvert only converts when upstream cannot provide one of the
+    // formats the shader understands (NV12/I420/RGBx variants); otherwise it is passthrough.
+    GstElement* bin = gst_bin_new("crt-video-sink");
+    if (g_object_class_find_property(G_OBJECT_GET_CLASS(conv), "n-threads"))
+        g_object_set(conv, "n-threads", 0u, nullptr);
+    GstCaps* caps = gst_caps_from_string("video/x-raw, format=(string){ NV12, I420, BGRx, BGRA, RGBx, RGBA }");
+    g_object_set(m_appsink, "caps", caps, "sync", TRUE, "max-buffers", 2u, "drop", TRUE,
+                 "enable-last-sample", FALSE, "qos", TRUE, nullptr);
+    gst_caps_unref(caps);
+    GstAppSinkCallbacks cb{};
+    cb.new_sample = [](GstAppSink* s, gpointer self) { return onNewSample(GST_ELEMENT(s), self); };
+    cb.new_preroll = [](GstAppSink* s, gpointer self) { return onNewPreroll(GST_ELEMENT(s), self); };
+    gst_app_sink_set_callbacks(GST_APP_SINK(m_appsink), &cb, this, nullptr);
+    gst_bin_add_many(GST_BIN(bin), conv, m_appsink, nullptr);
+    gst_element_link(conv, m_appsink);
+    GstPad* pad = gst_element_get_static_pad(conv, "sink");
+    gst_element_add_pad(bin, gst_ghost_pad_new("sink", pad));
+    gst_object_unref(pad);
+
+    g_object_set(m_pipe, "video-sink", bin, "uri", uri.toUtf8().constData(), nullptr);
+    if (!m_subUri.isEmpty()) g_object_set(m_pipe, "suburi", m_subUri.toUtf8().constData(), nullptr);
+    if (GstElement* as = fallbackAudioSink(&m_audioOutput)) g_object_set(m_pipe, "audio-sink", as, nullptr);
+    // Keeps voices at their normal pitch when the speed changes (passthrough at 1x).
+    // Audio chain: natural-sounding speed changes, then the look's tape and speaker sound.
+    {
+        crtTapeRegister();
+        GstElement* bin = gst_bin_new("audiochain");
+        GstElement* st = gst_element_factory_make("scaletempo", nullptr);
+        GstElement* c1 = gst_element_factory_make("audioconvert", nullptr);
+        GstElement* tape = gst_element_factory_make("crttape", nullptr);
+        GstElement* c2 = gst_element_factory_make("audioconvert", nullptr);
+        if (c1 && tape && c2) {
+            if (st) gst_bin_add(GST_BIN(bin), st);
+            gst_bin_add_many(GST_BIN(bin), c1, tape, c2, nullptr);
+            if (st) gst_element_link(st, c1);
+            gst_element_link_many(c1, tape, c2, nullptr);
+            GstPad* in = gst_element_get_static_pad(st ? st : c1, "sink");
+            GstPad* out = gst_element_get_static_pad(c2, "src");
+            gst_element_add_pad(bin, gst_ghost_pad_new("sink", in));
+            gst_element_add_pad(bin, gst_ghost_pad_new("src", out));
+            gst_object_unref(in); gst_object_unref(out);
+            g_object_set(m_pipe, "audio-filter", bin, nullptr);
+            m_tape = tape;
+            TapeParams tp;
+            tp.hiss = m_tapeValues[0]; tp.wow = m_tapeValues[1]; tp.saturation = m_tapeValues[2]; tp.tone = m_tapeValues[3];
+            tp.speaker = m_tapeValues[4]; tp.crackle = m_tapeValues[5]; tp.dropouts = m_tapeValues[6];
+            crtTapeSetParams(m_tape, tp);
+        } else {
+            gst_object_unref(bin);
+            if (c1) gst_object_unref(c1);
+            if (tape) gst_object_unref(tape);
+            if (c2) gst_object_unref(c2);
+            if (st) g_object_set(m_pipe, "audio-filter", st, nullptr);
+            m_tape = nullptr;
+        }
+    }
+    gint flags = 0;
+    g_object_get(m_pipe, "flags", &flags, nullptr);
+    flags |= kFlagVideo | kFlagAudio | kFlagText;
+    flags &= ~kFlagSoftColorbalance;  // colour controls live in the shader
+    g_object_set(m_pipe, "flags", flags, nullptr);
+    gst_stream_volume_set_volume(GST_STREAM_VOLUME(m_pipe), GST_STREAM_VOLUME_FORMAT_CUBIC, m_volume);
+    g_object_set(m_pipe, "mute", m_muted ? TRUE : FALSE, nullptr);
+
+    GstBus* bus = gst_element_get_bus(m_pipe);
+    gst_bus_set_sync_handler(bus, &Player::busSyncHandler, this, nullptr);
+    gst_object_unref(bus);
+    g_signal_connect(m_pipe, "deep-element-added", G_CALLBACK(&Player::onDeepElementAdded), this);
+    g_signal_connect(m_pipe, "audio-changed", G_CALLBACK(&Player::onStreamsChanged), this);
+    g_signal_connect(m_pipe, "text-changed", G_CALLBACK(&Player::onStreamsChanged), this);
+    g_signal_connect(m_pipe, "video-changed", G_CALLBACK(&Player::onStreamsChanged), this);
+    g_signal_connect(m_pipe, "source-setup", G_CALLBACK(&Player::onSourceSetup), this);
+
+    setState(State::Loading);
+    const GstStateChangeReturn r = gst_element_set_state(m_pipe, GST_STATE_PAUSED);
+    if (r == GST_STATE_CHANGE_FAILURE) {
+        // The bus will carry the precise error; keep the generic message as a fallback.
+        qWarning() << "playbin failed to pause for" << uri;
+    }
+    return true;
+}
+
+void Player::teardown()
+{
+    m_seekWatchdog.stop();
+    m_seekInFlight = false;
+    m_hasPendingSeek = false;
+    if (m_pipe) {
+        GstBus* bus = gst_element_get_bus(m_pipe);
+        gst_bus_set_sync_handler(bus, nullptr, nullptr, nullptr);
+        gst_object_unref(bus);
+        g_signal_handlers_disconnect_by_data(m_pipe, this);
+        gst_element_set_state(m_pipe, GST_STATE_NULL);
+        gst_object_unref(m_pipe);
+        m_pipe = nullptr;
+        m_appsink = nullptr;
+        m_tape = nullptr;   // it belonged to the pipeline
+    }
+    QMutexLocker lock(&m_mutex);
+    if (m_sample) { gst_sample_unref(m_sample); m_sample = nullptr; }
+    if (m_lastCaps) { gst_caps_unref(m_lastCaps); m_lastCaps = nullptr; }
+    m_videoDecoder.clear();
+    m_audioDecoder.clear();
+    m_videoDecoderHw = false;
+    m_framePending = false;
+    m_lastFrameStreamTime = -1;
+    m_fpsN = 0; m_fpsD = 1;
+}
+
+void Player::close()
+{
+    teardown();
+    m_uri.clear();
+    m_duration = -1;
+    m_audioTracks.clear();
+    m_textTracks.clear();
+    setState(State::Idle);
+    emit tracksChanged();
+    emit decoderChanged();
+}
+
+void Player::setState(State s)
+{
+    if (m_state == s) return;
+    m_state = s;
+    emit stateChanged(s);
+}
+
+void Player::play()
+{
+    if (!m_pipe) return;
+    m_targetPlaying = true;
+    gst_element_set_state(m_pipe, GST_STATE_PLAYING);
+}
+
+void Player::pause()
+{
+    if (!m_pipe) return;
+    m_targetPlaying = false;
+    gst_element_set_state(m_pipe, GST_STATE_PAUSED);
+}
+
+void Player::togglePause()
+{
+    if (!m_pipe) return;
+    if (m_targetPlaying) pause(); else play();
+}
+
+qint64 Player::position() const
+{
+    if (!m_pipe) return 0;
+    if (m_seekInFlight) return m_hasPendingSeek ? m_pendingSeek : m_seekTarget;
+    gint64 pos = 0;
+    if (gst_element_query_position(m_pipe, GST_FORMAT_TIME, &pos)) return pos;
+    return 0;
+}
+
+void Player::seek(qint64 posNs, SeekMode mode)
+{
+    if (!m_pipe || !m_loaded) { m_startPos = posNs; return; }
+    if (m_duration > 0) posNs = std::clamp<qint64>(posNs, 0, m_duration);
+    else posNs = std::max<qint64>(posNs, 0);
+    if (m_seekInFlight) {
+        // Coalesce: while a seek is being processed only remember the newest target,
+        // so dragging the seek bar never queues up a backlog of flushes.
+        m_hasPendingSeek = true;
+        m_pendingSeek = posNs;
+        if (mode == SeekMode::Accurate || m_pendingMode != SeekMode::Accurate) m_pendingMode = mode;
+        return;
+    }
+    doSeek(posNs, mode);
+}
+
+void Player::doSeek(qint64 posNs, SeekMode mode)
+{
+    int flags = GST_SEEK_FLAG_FLUSH;
+    if (mode == SeekMode::Accurate) flags |= GST_SEEK_FLAG_ACCURATE;
+    else flags |= GST_SEEK_FLAG_KEY_UNIT | GST_SEEK_FLAG_SNAP_NEAREST;
+    m_seekTarget = posNs;
+    m_seekInFlight = true;
+    m_seekWatchdog.start();
+    if (!gst_element_seek(m_pipe, m_rate, GST_FORMAT_TIME, GstSeekFlags(flags), GST_SEEK_TYPE_SET, posNs,
+                          GST_SEEK_TYPE_NONE, GST_CLOCK_TIME_NONE)) {
+        m_seekInFlight = false;
+        m_seekWatchdog.stop();
+    }
+}
+
+void Player::setTapeParams(const TapeParams& p)
+{
+    const float v[7] = {p.hiss, p.wow, p.saturation, p.tone, p.speaker, p.crackle, p.dropouts};
+    std::copy(std::begin(v), std::end(v), m_tapeValues);
+    if (m_tape) crtTapeSetParams(m_tape, p);
+}
+
+void Player::setExternalSubtitle(const QString& in)
+{
+    if (in.isEmpty()) { m_subUri.clear(); return; }
+    m_subUri = in.contains(QStringLiteral("://")) ? in
+                                                  : QUrl::fromLocalFile(QFileInfo(in).absoluteFilePath()).toString(QUrl::FullyEncoded);
+}
+
+void Player::setRate(double rate)
+{
+    rate = std::clamp(rate, 0.25, 4.0);
+    if (std::abs(rate - m_rate) < 1e-6) return;
+    m_rate = rate;
+    // A flushing seek to the current position applies the new rate.
+    if (m_pipe && m_loaded) doSeek(position(), SeekMode::Accurate);
+}
+
+void Player::readToc(GstToc* toc)
+{
+    m_chapters.clear();
+    std::function<void(GList*)> walk = [&](GList* entries) {
+        for (GList* l = entries; l; l = l->next) {
+            auto* e = static_cast<GstTocEntry*>(l->data);
+            if (gst_toc_entry_get_entry_type(e) == GST_TOC_ENTRY_TYPE_CHAPTER) {
+                gint64 start = 0, stop = 0;
+                gst_toc_entry_get_start_stop_times(e, &start, &stop);
+                ChapterInfo c;
+                c.startNs = std::max<gint64>(0, start);
+                if (const GstTagList* tags = gst_toc_entry_get_tags(e)) {
+                    gchar* title = nullptr;
+                    if (gst_tag_list_get_string(tags, GST_TAG_TITLE, &title)) { c.title = QString::fromUtf8(title); g_free(title); }
+                }
+                m_chapters.push_back(c);
+            }
+            walk(gst_toc_entry_get_sub_entries(e));
+        }
+    };
+    walk(gst_toc_get_entries(toc));
+    std::sort(m_chapters.begin(), m_chapters.end(), [](const ChapterInfo& a, const ChapterInfo& b) { return a.startNs < b.startNs; });
+    for (int i = 0; i < m_chapters.size(); ++i)
+        if (m_chapters[i].title.isEmpty()) m_chapters[i].title = tr("Chapter %1").arg(i + 1);
+    emit chaptersChanged();
+}
+
+void Player::seekRelative(qint64 deltaNs)
+{
+    seek(position() + deltaNs, SeekMode::Accurate);
+}
+
+double Player::frameRate() const
+{
+    const int n = m_fpsN, d = m_fpsD;
+    return (n > 0 && d > 0) ? double(n) / d : 0.0;
+}
+
+void Player::stepFrame(bool forward)
+{
+    if (!m_pipe || !m_loaded) return;
+    if (m_targetPlaying) pause();
+    if (forward) {
+        gst_element_send_event(m_pipe, gst_event_new_step(GST_FORMAT_BUFFERS, 1, 1.0, TRUE, FALSE));
+    } else {
+        const double fps = frameRate() > 0 ? frameRate() : 25.0;
+        const qint64 frame = qint64(1e9 / fps);
+        qint64 cur = m_lastFrameStreamTime;
+        if (cur < 0) cur = position();
+        // After an accurate seek the decoder clips the shown frame's timestamp to the
+        // seek position, so snap to the start of the frame interval first; otherwise
+        // repeated steps back would land on the same frame.
+        const qint64 frameStart = qint64(std::floor(double(cur) / frame + 1e-3)) * frame;
+        // Land in the middle of the previous frame's display interval.
+        seek(std::max<qint64>(0, frameStart - frame / 2), SeekMode::Accurate);
+    }
+}
+
+void Player::setVolume(double v)
+{
+    m_volume = std::clamp(v, 0.0, 1.0);
+    if (m_pipe) gst_stream_volume_set_volume(GST_STREAM_VOLUME(m_pipe), GST_STREAM_VOLUME_FORMAT_CUBIC, m_volume);
+}
+
+void Player::setMuted(bool m)
+{
+    m_muted = m;
+    if (m_pipe) g_object_set(m_pipe, "mute", m ? TRUE : FALSE, nullptr);
+}
+
+int Player::currentAudioTrack() const
+{
+    if (!m_pipe) return -1;
+    gint cur = -1;
+    g_object_get(m_pipe, "current-audio", &cur, nullptr);
+    return cur;
+}
+
+int Player::currentSubtitleTrack() const
+{
+    if (!m_pipe) return -1;
+    gint flags = 0, cur = -1;
+    g_object_get(m_pipe, "flags", &flags, "current-text", &cur, nullptr);
+    return (flags & kFlagText) ? cur : -1;
+}
+
+void Player::setAudioTrack(int idx)
+{
+    if (!m_pipe || idx < 0 || idx >= m_audioTracks.size()) return;
+    g_object_set(m_pipe, "current-audio", idx, nullptr);
+}
+
+void Player::setSubtitleTrack(int idx)
+{
+    if (!m_pipe) return;
+    gint flags = 0;
+    g_object_get(m_pipe, "flags", &flags, nullptr);
+    if (idx < 0 || idx >= m_textTracks.size()) {
+        flags &= ~kFlagText;
+        g_object_set(m_pipe, "flags", flags, nullptr);
+    } else {
+        flags |= kFlagText;
+        g_object_set(m_pipe, "flags", flags, "current-text", idx, nullptr);
+    }
+}
+
+QString Player::videoDecoder() const { QMutexLocker l(&m_mutex); return m_videoDecoder; }
+bool Player::videoDecoderIsHardware() const { QMutexLocker l(&m_mutex); return m_videoDecoderHw; }
+QString Player::audioDecoder() const { QMutexLocker l(&m_mutex); return m_audioDecoder; }
+
+QString Player::clockName() const
+{
+    if (!m_pipe) return {};
+    GstClock* c = gst_element_get_clock(m_pipe);
+    if (!c) return {};
+    QString n = QString::fromUtf8(GST_OBJECT_NAME(c));
+    gst_object_unref(c);
+    return n;
+}
+
+GstSample* Player::latestSample(quint64* serial)
+{
+    QMutexLocker lock(&m_mutex);
+    m_framePending = false;
+    if (serial) *serial = m_serial;
+    return m_sample ? gst_sample_ref(m_sample) : nullptr;
+}
+
+bool Player::frameLateness(GstSample* s, qint64* out) const
+{
+    if (!m_pipe || !s) return false;
+    GstClock* clock = gst_element_get_clock(m_pipe);
+    if (!clock) return false;
+    const GstClockTime now = gst_clock_get_time(clock);
+    gst_object_unref(clock);
+    const GstClockTime base = gst_element_get_base_time(m_pipe);
+    GstBuffer* b = gst_sample_get_buffer(s);
+    const GstSegment* seg = gst_sample_get_segment(s);
+    if (!b || !seg || !GST_BUFFER_PTS_IS_VALID(b)) return false;
+    const guint64 rt = gst_segment_to_running_time(seg, GST_FORMAT_TIME, GST_BUFFER_PTS(b));
+    if (rt == GST_CLOCK_TIME_NONE) return false;
+    *out = qint64(now - base) - qint64(rt);
+    return true;
+}
+
+// ---- streaming-thread callbacks ------------------------------------------
+
+void Player::storeSample(GstSample* s)
+{
+    GstBuffer* b = gst_sample_get_buffer(s);
+    const GstSegment* seg = gst_sample_get_segment(s);
+    GstCaps* caps = gst_sample_get_caps(s);
+    bool emitNow = false;
+    {
+        QMutexLocker lock(&m_mutex);
+        if (b && seg && GST_BUFFER_PTS_IS_VALID(b)) {
+            const guint64 st = gst_segment_to_stream_time(seg, GST_FORMAT_TIME, GST_BUFFER_PTS(b));
+            if (st != GST_CLOCK_TIME_NONE) m_lastFrameStreamTime = qint64(st);
+        }
+        if (caps && caps != m_lastCaps) {
+            gst_caps_replace(&m_lastCaps, caps);
+            const GstStructure* st = gst_caps_get_structure(caps, 0);
+            gint n = 0, d = 1;
+            if (gst_structure_get_fraction(st, "framerate", &n, &d)) { m_fpsN = n; m_fpsD = d; }
+        }
+        if (m_sample) gst_sample_unref(m_sample);
+        m_sample = s;
+        ++m_serial;
+        emitNow = !m_framePending.exchange(true);
+    }
+    if (emitNow) emit frameReady();   // queued to the GUI thread
+}
+
+GstFlowReturn Player::onNewSample(GstElement* sink, gpointer self)
+{
+    GstSample* s = gst_app_sink_pull_sample(GST_APP_SINK(sink));
+    if (s) static_cast<Player*>(self)->storeSample(s);
+    return GST_FLOW_OK;
+}
+
+GstFlowReturn Player::onNewPreroll(GstElement* sink, gpointer self)
+{
+    GstSample* s = gst_app_sink_pull_preroll(GST_APP_SINK(sink));
+    if (s) static_cast<Player*>(self)->storeSample(s);
+    return GST_FLOW_OK;
+}
+
+void Player::onDeepElementAdded(GstBin*, GstBin*, GstElement* el, gpointer self)
+{
+    auto* p = static_cast<Player*>(self);
+    GstElementFactory* f = gst_element_get_factory(el);
+    if (!f || !klassHas(f, "Decoder")) return;
+    const QString name = QString::fromUtf8(gst_plugin_feature_get_name(GST_PLUGIN_FEATURE(f)));
+    {
+        QMutexLocker lock(&p->m_mutex);
+        if (klassHas(f, "Video")) { p->m_videoDecoder = name; p->m_videoDecoderHw = isHwVideoDecoderFactory(f); }
+        else if (klassHas(f, "Audio")) p->m_audioDecoder = name;
+        else return;
+    }
+    emit p->decoderChanged();
+}
+
+void Player::setHttpHeaders(const QList<QPair<QByteArray, QByteArray>>& headers)
+{
+    QMutexLocker lock(&m_mutex);
+    m_httpHeaders = headers;
+}
+
+void Player::onSourceSetup(GstElement*, GstElement* source, gpointer self)
+{
+    auto* p = static_cast<Player*>(self);
+    GObjectClass* klass = G_OBJECT_GET_CLASS(source);
+    if (g_object_class_find_property(klass, "user-agent"))
+        g_object_set(source, "user-agent", "CRT-Player", nullptr);
+    QList<QPair<QByteArray, QByteArray>> headers;
+    {
+        QMutexLocker lock(&p->m_mutex);
+        headers = p->m_httpHeaders;
+    }
+    if (headers.isEmpty() || !g_object_class_find_property(klass, "extra-headers")) return;
+    GstStructure* st = gst_structure_new_empty("extra-headers");
+    for (const auto& h : headers) gst_structure_set(st, h.first.constData(), G_TYPE_STRING, h.second.constData(), nullptr);
+    g_object_set(source, "extra-headers", st, nullptr);
+    gst_structure_free(st);
+}
+
+void Player::onStreamsChanged(GstElement*, gpointer self)
+{
+    auto* p = static_cast<Player*>(self);
+    QMetaObject::invokeMethod(p, [p] { p->refreshTracks(); }, Qt::QueuedConnection);
+}
+
+GstBusSyncReply Player::busSyncHandler(GstBus*, GstMessage* m, gpointer self)
+{
+    auto* p = static_cast<Player*>(self);
+    switch (GST_MESSAGE_TYPE(m)) {
+    case GST_MESSAGE_ERROR: case GST_MESSAGE_WARNING: case GST_MESSAGE_EOS:
+    case GST_MESSAGE_STATE_CHANGED: case GST_MESSAGE_ASYNC_DONE: case GST_MESSAGE_DURATION_CHANGED:
+    case GST_MESSAGE_TAG: case GST_MESSAGE_ELEMENT: case GST_MESSAGE_STEP_DONE: case GST_MESSAGE_TOC:
+        break;
+    default:
+        return GST_BUS_DROP;
+    }
+    if (GST_MESSAGE_TYPE(m) == GST_MESSAGE_STATE_CHANGED && GST_MESSAGE_SRC(m) != GST_OBJECT(p->m_pipe))
+        return GST_BUS_DROP;
+    gst_message_ref(m);
+    const quint64 gen = p->m_generation;
+    QPointer<Player> guard(p);
+    QMetaObject::invokeMethod(p, [guard, m, gen] {
+        if (guard) guard->handleMessage(m, gen);
+        gst_message_unref(m);
+    }, Qt::QueuedConnection);
+    return GST_BUS_DROP;
+}
+
+// ---- GUI-thread message handling ------------------------------------------
+
+QString Player::describeMissing() const
+{
+    if (m_missing.isEmpty()) return {};
+    QString s = tr("GStreamer on this system has no plugin for:\n");
+    for (const QString& m : m_missing) s += QStringLiteral("  • ") + m + '\n';
+    s += tr("\nThe usual full set of GStreamer plugins for %1 installs with:\n  %2\n")
+             .arg(Distro::prettyName(), Distro::fullCodecCommand());
+    const QString note = Distro::codecNote();
+    if (!note.isEmpty()) s += '\n' + note + '\n';
+    s += tr("\nTo see what is installed: gst-inspect-1.0 | grep -i -E 'dec|demux'");
+    return s;
+}
+
+void Player::retryInSoftware()
+{
+    const qint64 pos = position();
+    const bool play = m_targetPlaying;
+    const QString dec = videoDecoder();
+    m_hwRetried = true;
+    applyDecoderPolicy(false);   // for this media only; the next open() restores the policy
+    openInternal(m_uri, play, pos, true);
+    emit warningOccurred(tr("Hardware decoder %1 failed; switched to software decoding.").arg(dec));
+}
+
+void Player::handleMessage(GstMessage* m, quint64 generation)
+{
+    if (generation != m_generation || !m_pipe) return;
+    switch (GST_MESSAGE_TYPE(m)) {
+    case GST_MESSAGE_ERROR: {
+        GError* err = nullptr;
+        gchar* dbg = nullptr;
+        gst_message_parse_error(m, &err, &dbg);
+        const QString msg = err ? QString::fromUtf8(err->message) : tr("Unknown error");
+        const QString debug = dbg ? QString::fromUtf8(dbg) : QString();
+        g_clear_error(&err);
+        g_free(dbg);
+        bool hwInvolved = videoDecoderIsHardware();
+        if (GST_IS_ELEMENT(GST_MESSAGE_SRC(m))) {
+            GstElementFactory* f = gst_element_get_factory(GST_ELEMENT(GST_MESSAGE_SRC(m)));
+            if (f && isHwVideoDecoderFactory(f)) hwInvolved = true;
+        }
+        if (m_hwEnabled && hwInvolved && !m_hwRetried) {
+            qWarning() << "Hardware decoding error, retrying in software:" << msg;
+            retryInSoftware();
+            return;
+        }
+        QString details = msg;
+        const QString missing = describeMissing();
+        if (!missing.isEmpty()) details = missing + QStringLiteral("\n\nGStreamer said: ") + msg;
+        if (!debug.isEmpty()) details += QStringLiteral("\n\nDetails: ") + debug;
+        const QString title = missing.isEmpty() ? tr("Cannot play this file") : tr("Missing codec or GStreamer plugin");
+        gst_element_set_state(m_pipe, GST_STATE_NULL);
+        setState(State::Error);
+        emit errorOccurred(title, details);
+        break;
+    }
+    case GST_MESSAGE_TOC: {
+        GstToc* toc = nullptr;
+        gst_message_parse_toc(m, &toc, nullptr);
+        if (toc) { readToc(toc); gst_toc_unref(toc); }
+        break;
+    }
+    case GST_MESSAGE_WARNING: {
+        GError* err = nullptr;
+        gchar* dbg = nullptr;
+        gst_message_parse_warning(m, &err, &dbg);
+        qWarning() << "GStreamer warning:" << (err ? err->message : "") << (dbg ? dbg : "");
+        g_clear_error(&err);
+        g_free(dbg);
+        break;
+    }
+    case GST_MESSAGE_ELEMENT:
+        if (gst_is_missing_plugin_message(m)) {
+            gchar* d = gst_missing_plugin_message_get_description(m);
+            const QString desc = QString::fromUtf8(d ? d : "unknown capability");
+            g_free(d);
+            if (!m_missing.contains(desc)) m_missing << desc;
+        }
+        break;
+    case GST_MESSAGE_EOS:
+        emit endOfStream();
+        break;
+    case GST_MESSAGE_STATE_CHANGED: {
+        GstState oldS, newS, pending;
+        gst_message_parse_state_changed(m, &oldS, &newS, &pending);
+        if (newS == GST_STATE_PLAYING) setState(State::Playing);
+        else if (newS == GST_STATE_PAUSED && m_loaded) setState(State::Paused);
+        break;
+    }
+    case GST_MESSAGE_STEP_DONE:
+        break;
+    case GST_MESSAGE_ASYNC_DONE: {
+        if (!m_loaded) {
+            m_loaded = true;
+            gint64 dur = -1;
+            if (gst_element_query_duration(m_pipe, GST_FORMAT_TIME, &dur)) m_duration = dur;
+            emit durationChanged(m_duration);
+            refreshTracks();
+            emit mediaLoaded();
+            if (m_startPos <= 0 && std::abs(m_rate - 1.0) > 1e-6) doSeek(position(), SeekMode::Accurate);   // keep the speed
+            if (!m_missing.isEmpty())
+                emit warningOccurred(tr("Playing without: %1 (GStreamer plugin not installed)").arg(m_missing.join(QStringLiteral(", "))));
+            if (m_nVideo == 0)
+                emit warningOccurred(tr("This file has no video stream the player can show."));
+            if (m_startPos > 0) {
+                doSeek(m_startPos, SeekMode::Accurate);
+                m_startPos = 0;
+            }
+            if (m_targetPlaying) gst_element_set_state(m_pipe, GST_STATE_PLAYING);
+            else setState(State::Paused);
+            break;
+        }
+        m_seekWatchdog.stop();
+        m_seekInFlight = false;
+        if (m_hasPendingSeek) {
+            m_hasPendingSeek = false;
+            doSeek(m_pendingSeek, m_pendingMode);
+        } else {
+            emit seekFinished();
+        }
+        break;
+    }
+    case GST_MESSAGE_DURATION_CHANGED: {
+        gint64 dur = -1;
+        if (gst_element_query_duration(m_pipe, GST_FORMAT_TIME, &dur) && dur != m_duration) {
+            m_duration = dur;
+            emit durationChanged(dur);
+        }
+        break;
+    }
+    case GST_MESSAGE_TAG: {
+        GstTagList* tags = nullptr;
+        gst_message_parse_tag(m, &tags);
+        if (!tags) break;
+        const QString orient = tagString(tags, GST_TAG_IMAGE_ORIENTATION);
+        if (!orient.isEmpty() && orient != m_orientationTag) {
+            m_orientationTag = orient;
+            emit orientationChanged(orient);
+        }
+        const QString vc = tagString(tags, GST_TAG_VIDEO_CODEC);
+        if (!vc.isEmpty()) m_videoCodec = vc;
+        const QString ac = tagString(tags, GST_TAG_AUDIO_CODEC);
+        if (!ac.isEmpty() && m_audioCodec.isEmpty()) m_audioCodec = ac;
+        const QString cf = tagString(tags, GST_TAG_CONTAINER_FORMAT);
+        if (!cf.isEmpty()) m_container = cf;
+        gst_tag_list_unref(tags);
+        break;
+    }
+    default:
+        break;
+    }
+}
+
+void Player::refreshTracks()
+{
+    if (!m_pipe) return;
+    gint nA = 0, nT = 0, nV = 0;
+    g_object_get(m_pipe, "n-audio", &nA, "n-text", &nT, "n-video", &nV, nullptr);
+    m_nVideo = nV;
+    QVector<TrackInfo> a, t;
+    for (int i = 0; i < nA; ++i) {
+        GstTagList* tags = nullptr;
+        g_signal_emit_by_name(m_pipe, "get-audio-tags", i, &tags);
+        a.push_back({i, trackLabel(i, tags, GST_TAG_AUDIO_CODEC)});
+        if (tags) gst_tag_list_unref(tags);
+    }
+    for (int i = 0; i < nT; ++i) {
+        GstTagList* tags = nullptr;
+        g_signal_emit_by_name(m_pipe, "get-text-tags", i, &tags);
+        t.push_back({i, trackLabel(i, tags, GST_TAG_SUBTITLE_CODEC)});
+        if (tags) gst_tag_list_unref(tags);
+    }
+    for (int i = 0; i < nV && m_orientationTag == QLatin1String("rotate-0"); ++i) {
+        GstTagList* tags = nullptr;
+        g_signal_emit_by_name(m_pipe, "get-video-tags", i, &tags);
+        const QString orient = tagString(tags, GST_TAG_IMAGE_ORIENTATION);
+        if (tags) gst_tag_list_unref(tags);
+        if (!orient.isEmpty() && orient != m_orientationTag) {
+            m_orientationTag = orient;
+            emit orientationChanged(orient);
+        }
+    }
+    m_audioTracks = a;
+    m_textTracks = t;
+    emit tracksChanged();
+}

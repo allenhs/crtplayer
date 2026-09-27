@@ -1,0 +1,111 @@
+# Deeper simulation: colour depth, dither, PAL, persistence, set moments, VCR OSD.
+# The effect clock is pinned (rendertime) so every capture is deterministic.
+open @M@/fhd_16x9_60fps.mp4
+waitstate playing 15000
+seek 3
+wait 800
+pause
+wait 500
+preset Clean Broadcast Monitor
+param curvature 0
+param cornerRadius 0
+param maskStrength 0
+param bloom 0
+param glow 0
+param vignette 0
+param scanStrength 0
+param brightness 1
+param contrast 1
+rendertime 10.0
+report sim-base
+screenshot filtered @O@/cd_0.png
+param colorDepth 3
+screenshot filtered @O@/cd_3.png
+param colorDepth 6
+screenshot filtered @O@/cd_6.png
+param dither 1
+screenshot filtered @O@/cd_6_dither.png
+param dither 0
+param colorDepth 7
+screenshot filtered @O@/cd_7.png
+param colorDepth 8
+screenshot filtered @O@/cd_8.png
+param colorDepth 9
+screenshot filtered @O@/cd_9.png
+param colorDepth 0
+# PAL: fields at 50 Hz. 10.000 s and 10.017 s are different NTSC fields but the same PAL field.
+param scanType 3
+param scanStrength 0.8
+param scanLines 240
+param videoStandard 0
+rendertime 10.0
+screenshot filtered @O@/ntsc_f1.png
+rendertime 10.017
+screenshot filtered @O@/ntsc_f2.png
+param videoStandard 1
+rendertime 10.0
+screenshot filtered @O@/pal_f1.png
+rendertime 10.017
+screenshot filtered @O@/pal_f2.png
+param scanStrength 0
+param scanType 0
+param scanLines 0
+param rainbow 1
+param videoStandard 0
+screenshot filtered @O@/hanover_ntsc.png
+param videoStandard 1
+screenshot filtered @O@/hanover_pal.png
+param rainbow 0
+param videoStandard 0
+# Persistence: frame N, step to N+1, 20 ms later: N's highlights linger (only brightening).
+param persistence 0
+rendertime 20.0
+grabwindow @O@/pers0_a.png
+step fwd
+wait 800
+rendertime 20.02
+grabwindow @O@/pers0_b.png
+screenshot filtered @O@/pers0_b_now.png
+step back
+wait 800
+param persistence 1
+rendertime 30.0
+grabwindow @O@/pers1_a.png
+step fwd
+wait 800
+rendertime 30.02
+grabwindow @O@/pers1_b.png
+# a screenshot never includes the afterglow: the same moment without it
+screenshot filtered @O@/pers1_b_now.png
+param persistence 0
+# Set moments
+param powerEffects 1
+rendertime 40.0
+moment poweron
+rendertime 40.15
+screenshot filtered @O@/on_020.png
+rendertime 41.0
+screenshot filtered @O@/on_done.png
+rendertime 50.0
+moment poweroff
+rendertime 50.10
+screenshot filtered @O@/off_011.png
+rendertime 50.40
+screenshot filtered @O@/off_044.png
+rendertime 51.0
+screenshot filtered @O@/off_done.png
+report sim-off
+param powerEffects 0
+moment static
+screenshot filtered @O@/static.png
+report sim-static
+moment none
+# VCR on-screen display (on a clean preset, so nothing else changes between captures)
+param vcrOsd 1
+rendertime 60.0
+osd
+screenshot filtered @O@/osd_off.png
+osd PLAY ▶
+screenshot filtered @O@/osd_on.png
+rendertime off
+quit

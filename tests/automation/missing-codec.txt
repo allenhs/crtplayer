@@ -1,0 +1,5 @@
+open @M@/hevc_only.mp4
+wait 4000
+report missing-hevc
+grabwindow @O@/w07_missing_codec.png
+quit

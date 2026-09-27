@@ -1,0 +1,7 @@
+1
+00:00:00,500 --> 00:00:09,000
+English subtitle track
+
+2
+00:00:09,000 --> 00:00:30,000
+Second English line

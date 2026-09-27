@@ -1,0 +1,25 @@
+# Windows smoke test (packaging/windows/smoke-test.sh): the packaged player on its own.
+open @M@/test.mkv
+waitstate playing 30000
+wait 2500
+report playing
+screenshot filtered @O@/playing.png
+preset Worn VHS TV
+wait 600
+report vhs
+subfile @M@/test.srt
+wait 2000
+screenshot original @O@/subtitle.png
+preset Clean Broadcast Monitor
+desk on
+wait 2500
+deskcabinet arcade
+wait 2000
+deskgrab @O@/desk.png
+report desk
+desk off
+wait 1500
+pause
+wait 800
+report paused
+quit

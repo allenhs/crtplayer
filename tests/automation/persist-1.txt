@@ -1,0 +1,6 @@
+preset Arcade Display
+mode fill
+bypass on
+compare off
+param curvature 0.2
+quit

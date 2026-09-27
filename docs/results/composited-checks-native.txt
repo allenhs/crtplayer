@@ -1,0 +1,1 @@
+PASS  composited screen shows the video (wayland): picture after 2 s

@@ -1,0 +1,8 @@
+# Second launch: the 90 s clip resumes where it was left (45 s); then park it near the end.
+open @M@/resume_clip.mp4
+waitstate playing 15000
+wait 1000
+report resumed
+seek 85
+wait 1200
+quit

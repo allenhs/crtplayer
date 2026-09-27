@@ -1,0 +1,24 @@
+PASS  [10.10.3] wrong password is rejected and leaves the player signed out: 1 rejected attempt(s)
+PASS  [10.10.3] correct password signs in: home shows 3 entries
+PASS  [10.10.3] every authenticated request carries the Authorization header: 54 requests
+PASS  [10.10.3] the token never appears in a URL: no api_key/token query parameters
+PASS  [10.10.3] no request failed: all 2xx
+PASS  [10.10.3] closed streams had started successfully first: 0 closed
+PASS  [10.10.3] uses the route set matching the server version: ['/UserViews']
+PASS  [10.10.3] streams the original file and seeks with HTTP ranges: 7 stream requests, 3 mid-file range requests
+PASS  [10.10.3] stream request marks the file as static (no server transcoding): static=true
+PASS  [10.10.3] seek moved playback to ~12 s: 14474 ms
+PASS  [10.10.3] continue-watching item resumed at its saved position: 12285 ms (saved: 12000)
+PASS  [10.10.3] playback start reported: 3 start reports
+PASS  [10.10.3] pause/unpause reported: 10 progress reports
+PASS  [10.10.3] stop reports the position (resume point) for the first movie: 15.8 s
+PASS  [10.10.3] TV show navigation reaches episodes: S01E01 · Pilot
+PASS  [10.10.3] external subtitle fetched from the server, authenticated: 1 subtitle request(s): /Videos/m1/m1/Subtitles/2/0/Stream.srt
+PASS  [10.10.3] session restored on the next launch: signed in without the password
+PASS  [10.10.3] signing out revokes the token on the server: 1 logout request(s)
+PASS  [10.10.3] no password is ever written to the automation logs: checked
+PASS  [10.10.3] session file is private (0600): 0o600
+PASS  [10.10.3] session file never holds a password: no password field or value
+PASS  [10.10.3] after sign-out the stored token is gone: token cleared
+
+All Jellyfin checks passed

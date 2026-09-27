@@ -1,0 +1,154 @@
+# ---------- 4:3 SD, H.264/AAC ----------
+open @M@/sd_4x3_h264.mp4
+waitstate playing 15000
+resetsync
+wait 4000
+expect displayAspect 1.3333
+expect pictureAspectOnScreen 1.3333
+report 4x3-fit-playing
+screenshot filtered @O@/s01_4x3_consumer_tv.png
+preset Clean Broadcast Monitor
+wait 400
+screenshot filtered @O@/s02_4x3_broadcast.png
+preset Arcade Display
+wait 400
+screenshot filtered @O@/s03_4x3_arcade.png
+preset Worn VHS TV
+wait 400
+screenshot filtered @O@/s04_4x3_vhs.png
+preset Sharp PC Monitor
+expect preset Sharp PC Monitor
+preset Consumer Television
+bypass on
+wait 300
+expect bypass true
+screenshot filtered @O@/s05_4x3_bypass.png
+bypass off
+compare on 0.5
+wait 300
+grabwindow @O@/w01_compare.png
+compare off
+param includeBars on
+wait 300
+screenshot filtered @O@/s06_4x3_include_bars.png
+param includeBars off
+mode fill
+wait 300
+expect pictureAspectOnScreen 1.8028
+report 4x3-fill
+screenshot filtered @O@/s07_4x3_fill.png
+mode crop
+crop 0.1 0.05 0.1 0.05
+wait 300
+report 4x3-crop
+screenshot filtered @O@/s08_4x3_crop.png
+crop 0 0 0 0
+mode original
+wait 300
+expect pictureAspectOnScreen 1.3333
+report 4x3-original
+mode fit
+# ---------- seeking responsiveness ----------
+resetsync
+scrub 1 17 25 40
+wait 1500
+report after-scrub
+seek 5
+wait 1500
+report after-seek-5s
+pause
+wait 500
+report paused-before-step
+step fwd
+wait 600
+report after-step-fwd
+step fwd
+wait 600
+report after-step-fwd2
+step back
+wait 800
+report after-step-back
+play
+# ---------- fullscreen + auto-hide ----------
+fullscreen on
+wait 3500
+expect fullscreen true
+expect controlsVisible false
+report fullscreen-idle
+grabwindow @O@/w02_fullscreen_hidden.png
+mousemove
+wait 200
+expect controlsVisible true
+report fullscreen-after-mouse
+grabwindow @O@/w03_fullscreen_controls.png
+fullscreen off
+wait 500
+expect fullscreen false
+expect controlsVisible true
+# ---------- 16:9 HD, multiple audio + subtitle tracks ----------
+open @M@/hd_16x9_multitrack.mkv
+waitstate playing 15000
+wait 1500
+expect displayAspect 1.7778
+expect pictureAspectOnScreen 1.7778
+report 16x9-tracks
+sub 0
+wait 800
+screenshot filtered @O@/s09_16x9_sub_eng.png
+sub 1
+audio 1
+wait 1200
+expect currentAudio 1
+expect currentSubtitle 1
+screenshot original @O@/s10_16x9_sub_fre_original.png
+sub -1
+wait 300
+expect currentSubtitle -1
+report 16x9-tracks-switched
+# ---------- vertical 9:16 ----------
+open @M@/vertical_9x16_h264.mp4
+waitstate playing 15000
+wait 2500
+expect displayAspect 0.5625
+expect pictureAspectOnScreen 0.5625
+report vertical
+grabwindow @O@/w04_vertical.png
+# ---------- rotation metadata (stored 1280x720, rotate 90) ----------
+open @M@/rotated_phone_h264.mp4
+waitstate playing 15000
+wait 2500
+expect rotation 90
+expect displayAspect 0.5625
+expect pictureAspectOnScreen 0.5625
+report rotated
+screenshot original @O@/s11_rotated_original.png
+grabwindow @O@/w05_rotated.png
+# ---------- ultrawide 64:27 VP9/Opus ----------
+open @M@/ultrawide_64x27_vp9.webm
+waitstate playing 15000
+wait 2500
+expect displayAspect 2.3704
+expect pictureAspectOnScreen 2.3704
+report ultrawide
+grabwindow @O@/w06_ultrawide.png
+# ---------- anamorphic 720x480, PAR 32:27 (MPEG-2/AC-3) ----------
+open @M@/anamorphic_dvd_mpeg2.mkv
+waitstate playing 15000
+wait 2500
+expect par 32:27
+expect displayAspect 1.7778
+expect pictureAspectOnScreen 1.7778
+report anamorphic
+screenshot original @O@/s12_anamorphic_original.png
+# ---------- 1080p60 sync under load ----------
+open @M@/fhd_16x9_60fps.mp4
+waitstate playing 15000
+resetsync
+wait 5000
+report fhd60-crt
+bypass on
+resetsync
+wait 4000
+report fhd60-bypass
+bypass off
+quit

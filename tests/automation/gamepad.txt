@@ -1,0 +1,74 @@
+# Game controller via SDL's virtual controller (same event path as a real pad).
+open @M@/resume_clip.mp4
+waitstate playing 15000
+seek 5
+wait 800
+gamepad attach
+wait 600
+report gp-attached
+gamepad tap a
+wait 500
+report gp-a1
+gamepad tap a
+wait 500
+report gp-a2
+seek 5
+wait 700
+gamepad tap right
+wait 900
+report gp-right
+gamepad press right
+wait 1500
+gamepad release right
+wait 800
+report gp-hold
+gamepad tap rb
+wait 500
+report gp-rb
+gamepad tap up
+wait 400
+report gp-up
+gamepad tap back
+wait 1500
+report gp-desk-on
+gamepad axis lx 1.0
+wait 1000
+gamepad axis lx 0
+wait 300
+report gp-stick
+gamepad tap y
+deskwait full 8000
+wait 300
+report gp-flown-in
+gamepad tap b
+deskwait desk 8000
+wait 300
+report gp-flown-out
+gamepad tap back
+wait 1200
+report gp-desk-off
+sysreport @O@/gp-sysreport.txt
+# Room backdrop (the Game Mode look): opaque, and the flight still lands on the exact frame
+seek 5
+wait 800
+pause
+preset Clean Broadcast Monitor
+fullscreen on
+wait 1500
+screenshot filtered @O@/room_ref.png
+fullscreen off
+wait 800
+desk on
+wait 1500
+deskbackdrop room
+wait 500
+expect deskBackdrop room
+deskgrab @O@/room_desk.png
+deskfly in
+deskwait full 8000
+wait 400
+deskgrab @O@/room_full.png
+deskfly out
+deskwait desk 8000
+desk off
+quit

@@ -1,0 +1,65 @@
+# 2.0 desk-mode scenes: the desk scene's moods, screen light, fog, persistence, landing.
+open @M@/sd_4x3_h264.mp4
+waitstate playing 15000
+seek 5
+wait 800
+pause
+wait 400
+preset Clean Broadcast Monitor
+fullscreen on
+wait 1500
+screenshot filtered @O@/scene_ref_full.png
+fullscreen off
+wait 800
+desk on
+wait 1500
+deskpose -24 12 0.42 0.5 0.55
+scene desk
+scenemood evening
+wait 800
+expect deskScene desk
+deskgrab @O@/scene_evening.png
+scenemood night
+wait 600
+deskgrab @O@/scene_night.png
+scenemood dark
+wait 600
+deskgrab @O@/scene_dark.png
+scenemood night
+scenefog thick
+wait 800
+deskgrab @O@/scene_fog.png
+scenemood dark
+deskfly in
+deskwait full 8000
+wait 400
+deskgrab @O@/scene_full.png
+deskfly out
+deskwait desk 8000
+report scene-a
+desk off
+wait 800
+desk on
+wait 1500
+report scene-b
+scenefog off
+open @M@/solid_black.mp4
+waitstate playing 15000
+wait 500
+pause
+wait 900
+deskgrab @O@/solid_black.png
+open @M@/solid_white.mp4
+waitstate playing 15000
+wait 500
+pause
+wait 900
+deskgrab @O@/solid_white.png
+open @M@/solid_red.mp4
+waitstate playing 15000
+wait 500
+pause
+wait 900
+deskgrab @O@/solid_red.png
+desk off
+quit

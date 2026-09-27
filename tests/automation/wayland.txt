@@ -1,0 +1,41 @@
+# Short Wayland pass (run with QT_QPA_PLATFORM=wayland)
+open @M@/vertical_9x16_h264.mp4
+waitstate playing 20000
+wait 3000
+expect platform wayland
+expect pictureAspectOnScreen 0.5625
+report wayland-vertical
+open @M@/sd_4x3_h264.mp4
+waitstate playing 20000
+resetsync
+wait 3000
+expect pictureAspectOnScreen 1.3333
+report wayland-4x3
+preset Worn VHS TV
+expect preset Worn VHS TV
+preset LaserDisc with Laser Rot
+expect preset LaserDisc with Laser Rot
+param scanType 3
+wait 500
+screenshot filtered @O@/wl_laserdisc_interlaced.png
+report wayland-effects
+preset Worn VHS TV
+bypass on
+expect bypass true
+bypass off
+compare on 0.5
+wait 300
+screenshot filtered @O@/wl_compare.png
+compare off
+fullscreen on
+wait 3500
+expect fullscreen true
+expect controlsVisible false
+report wayland-fullscreen
+mousemove
+wait 200
+expect controlsVisible true
+fullscreen off
+wait 500
+expect fullscreen false
+quit
