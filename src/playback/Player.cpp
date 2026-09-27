@@ -120,12 +120,23 @@ QList<Player::Gap> Player::missingRecommended()
     return gaps;
 }
 
-// Without autoaudiosink (gst-plugins-good), playbin has no automatic audio output: pick
+// Without a working autoaudiosink (missing, or no sound device), playbin has no audio output: pick
 // the first sink that can actually open, and fall back to silent (but timed) playback.
 static GstElement* fallbackAudioSink(QString* name)
 {
-    if (GstElementFactory* f = gst_element_factory_find("autoaudiosink")) { gst_object_unref(f); *name = QStringLiteral("automatic"); return nullptr; }
+    // The automatic output is used when it can open a device; with no sound device at all (no
+    // speakers, audio service stopped) it would stop playback with an error instead.
+    if (GstElement* a = gst_element_factory_make("autoaudiosink", nullptr)) {
+        const bool ok = gst_element_set_state(a, GST_STATE_READY) != GST_STATE_CHANGE_FAILURE;
+        gst_element_set_state(a, GST_STATE_NULL);
+        gst_object_unref(a);
+        if (ok) { *name = QStringLiteral("automatic"); return nullptr; }
+    }
+#ifdef _WIN32
+    for (const char* n : {"wasapi2sink", "wasapisink", "directsoundsink"}) {
+#else
     for (const char* n : {"pipewiresink", "pulsesink", "alsasink", "osssink"}) {
+#endif
         GstElement* e = gst_element_factory_make(n, nullptr);
         if (!e) continue;
         const bool ok = gst_element_set_state(e, GST_STATE_READY) != GST_STATE_CHANGE_FAILURE;
