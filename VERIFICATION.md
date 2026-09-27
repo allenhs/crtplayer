@@ -1,6 +1,6 @@
 # Verification report
 
-This report covers the build delivered alongside it (CRT Player 2.6.0).
+This report covers the build delivered alongside it (CRT Player 2.7.0).
 
 The final X11 and Wayland suites were run against the exact stripped `crtplayer` binary
 that is delivered, and **again against the AppImage with the system's Qt libraries
@@ -286,6 +286,73 @@ was **not measured**, because there is no GPU in this environment.
 - GPU performance;
 - the interlaced style's look at real refresh rates (only its field alternation was
   measured).
+
+## 2.7: Windows 10 and 11 (preview)
+
+**What it is:** the same player built for 64-bit Windows, as a self-contained folder
+(`CRT_Player-2.7.0-windows-x64.zip`).
+
+- **Built** on GitHub's Windows Server machines with MSYS2 (UCRT64: Qt 6, GStreamer 1.28)
+  by `.github/workflows/windows.yml`.
+- **Packaged** by `packaging/windows/package.sh`:
+  - `windeployqt` for Qt;
+  - 219 GStreamer plugins, the plugin scanner and GIO's TLS module;
+  - every library they need, found by following `ldd` until nothing new turns up;
+  - SDL2 for game controllers.
+- **Bundled GStreamer:** on start the player points GStreamer at its own folder, so an
+  installed GStreamer (or none) makes no difference (`main.cpp`,
+  `useBundledGStreamer`).
+- **Platform parts:**
+  - keeping the screen awake uses `SetThreadExecutionState`;
+  - SDL is loaded with `LoadLibrary`;
+  - MPRIS and D-Bus are left out;
+  - the install hints say to reinstall CRT Player rather than name a Linux package.
+- **Graceful failures, found by the test machine:**
+  - **OpenGL below 3.3** (Windows' own 1.1 renderer, used when no graphics driver is
+    installed) crashed the player. Both renderers now check the version first and the
+    player shows *"OpenGL 3.3 is required"* with what the system offers.
+  - **No sound device** stopped playback with an error from Windows' audio sinks, which
+    open without a device and fail only once playing starts. The player now asks
+    GStreamer's device monitor for outputs and, with none, plays silently but still
+    timed. The Linux version also checks that the automatic output can open.
+
+**The smoke test** (`packaging/windows/smoke-test.sh`, `smoke.txt`, `check-smoke.py`)
+runs the packaged folder on its own:
+
+- **Isolation:** with only `C:\Windows\System32` on `PATH`, so nothing from MSYS2 can
+  stand in for a missing file.
+- **Graphics:** Mesa's CPU renderer (llvmpipe), supplied as Qt's software OpenGL
+  (`opengl32sw.dll`), since the machine has no graphics card. This is for the test only;
+  it is not shipped.
+- **If it fails:** a crash is re-run under gdb for a backtrace. The results reach this
+  report through the run's annotations.
+
+Results (run 36353664992, commit b30b82c; `docs/results/windows-smoke-checks.txt`):
+
+| Check | Result |
+|---|---|
+| The packaged player starts on its own | PASS: `CRTPlayer 2.7.0` |
+| Its own GStreamer is complete | PASS: GStreamer 1.28.7, nothing missing, "Everything for common formats is installed" |
+| It plays (H.264 video, Vorbis audio) | PASS: playing at 4.8 s, `avdec_h264`, `vorbisdec`, audio output `none` (no sound device) |
+| The picture is drawn with the CRT look | PASS: mean 108, contrast 120 |
+| A subtitle file is drawn (text plugin bundled) | PASS: 22.3% white pixels in the bottom quarter |
+| Keep awake while playing / released when paused | PASS: `SetThreadExecutionState` / `none` |
+| The look's sound switches on | PASS |
+| Desk mode draws the arcade cabinet | PASS: 13% of the view drawn |
+
+**Linux is unaffected:** the full suites passed again for 2.7.0 (native X11 261 checks,
+native Wayland 18, and the same on the AppImage with the system's Qt removed), with no
+failures.
+
+**Not tested here** (for a real Windows PC):
+
+- a real graphics driver;
+- Direct3D 11 hardware decoding (the test machine registers no hardware decoders);
+- real audio output;
+- game controllers;
+- high-DPI scaling;
+- fullscreen on multiple monitors;
+- the "unrecognised app" warning.
 
 ## 2.6: the arcade cabinet
 

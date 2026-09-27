@@ -1,0 +1,9 @@
+PASS  a subtitle file is drawn (the text plugin is bundled): 22.28% white text pixels in the bottom quarter
+PASS  desk mode draws the arcade cabinet: arcade, 13% of the view drawn
+PASS  it plays (H.264 video, Vorbis audio): playing, 4837 ms, video avdec_h264, audio vorbisdec to none; error: 
+PASS  its own GStreamer is complete (nothing missing, every format covered): GStreamer 1.28.7 | Missing essential elements: none | Hardware video decoders: none registered | System: Windows Server 2025 Version 24H2 (Windows) | Everything for common formats is installed.
+PASS  keep awake: Windows keeps the display on while playing: SetThreadExecutionState
+PASS  released when paused: none
+PASS  the look's sound switches on: True
+PASS  the packaged player starts on its own: CRTPlayer 2.7.0
+PASS  the picture is drawn (with the CRT look): mean 108, contrast 120
