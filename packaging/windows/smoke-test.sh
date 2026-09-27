@@ -34,7 +34,8 @@ export LOCALAPPDATA="$(cygpath -w "$WORK/localappdata")"; mkdir -p "$WORK/locala
 env PATH="$CLEAN_PATH" "$APP" --version > "$WORK/out/version.txt" 2>&1; echo "version rc=$?"
 env PATH="$CLEAN_PATH" "$APP" --check-gstreamer > "$WORK/out/gstreamer.txt" 2>&1; echo "check-gstreamer rc=$?"
 cat "$WORK/out/version.txt" "$WORK/out/gstreamer.txt"
-env PATH="$CLEAN_PATH" QT_OPENGL=desktop timeout 300 "$APP" --automation "$(cygpath -m "$WORK/smoke.txt")" \
+# (MSYS2's timeout, by its full path: with the stripped PATH, "timeout" would be Windows' TIMEOUT.EXE)
+/usr/bin/timeout 300 env PATH="$CLEAN_PATH" QT_OPENGL=desktop "$APP" --automation "$(cygpath -m "$WORK/smoke.txt")" \
   --automation-log "$O/smoke.json" > "$WORK/out/app.log" 2>&1
 echo "automation rc=$?"
 echo "---- the player's output:"
