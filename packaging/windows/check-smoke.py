@@ -16,7 +16,8 @@ except Exception as e:
 rep = {e['label']: e for e in log if e['cmd'] == 'report'}
 p = rep.get('playing', {})
 check('it plays (H.264 video, Vorbis audio)', p.get('state') == 'playing' and p.get('positionMs', 0) > 500,
-      f"{p.get('state')}, {p.get('positionMs')} ms, video {p.get('videoDecoder')}, audio {p.get('audioDecoder')}")
+      f"{p.get('state')}, {p.get('positionMs')} ms, video {p.get('videoDecoder')}, audio {p.get('audioDecoder')}"
+      f" to {p.get('audioOutput')}; error: {p.get('lastError')}")
 check('keep awake: Windows keeps the display on while playing', p.get('sleepInhibitMethod') == 'SetThreadExecutionState',
       p.get('sleepInhibitMethod'))
 check('the look\'s sound switches on', rep.get('vhs', {}).get('tapeSoundActive') is True, rep.get('vhs', {}).get('tapeSoundActive'))

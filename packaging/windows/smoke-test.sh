@@ -38,7 +38,7 @@ env PATH="$CLEAN_PATH" "$APP" --version > "$WORK/out/version.txt" 2>&1; echo "ve
 env PATH="$CLEAN_PATH" "$APP" --check-gstreamer > "$WORK/out/gstreamer.txt" 2>&1; echo "check-gstreamer rc=$?"
 cat "$WORK/out/version.txt" "$WORK/out/gstreamer.txt"
 # (MSYS2's timeout, by its full path: with the stripped PATH, "timeout" would be Windows' TIMEOUT.EXE)
-export QT_FORCE_STDERR_LOGGING=1 QT_LOGGING_RULES="qt.qpa.gl=true" GST_DEBUG="${GST_DEBUG:-2}"
+export QT_FORCE_STDERR_LOGGING=1 QT_LOGGING_RULES="qt.qpa.gl=true" GST_DEBUG="${GST_DEBUG:-2,wasapi*:1,waveform*:1,video-info:1}"
 # Mesa's plain CPU renderer: the runner's D3D12 "Basic Render Driver" path is not dependable.
 export GALLIUM_DRIVER=llvmpipe
 /usr/bin/timeout 300 env PATH="$CLEAN_PATH" QT_OPENGL=software "$APP" --automation "$(cygpath -m "$WORK/smoke.txt")" \
