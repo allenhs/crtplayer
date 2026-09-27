@@ -868,7 +868,7 @@ void DeskRenderer::draw(unsigned targetFbo, const Frame& f)
     glDisable(GL_SCISSOR_TEST);
     glDisable(GL_CULL_FACE);
     glClearColor(0.f, 0.f, 0.f, f.clearAlpha);   // premultiplied black
-    glClearDepth(1.0);
+    glClearDepthf(1.0f);   // (through Qt's function table: plain glClearDepth isn't exported on Windows)
     glDepthMask(GL_TRUE);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
     glEnable(GL_DEPTH_TEST);
