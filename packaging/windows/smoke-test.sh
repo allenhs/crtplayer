@@ -10,7 +10,15 @@ PREFIX=${MINGW_PREFIX:-/ucrt64}
 rm -rf "$WORK"; mkdir -p "$WORK/app" "$WORK/media" "$WORK/out"
 cp -r "$PKG"/. "$WORK/app/"
 # Software OpenGL (test only; users have their graphics card's driver).
-for f in opengl32.dll libgallium_wgl.dll libglapi.dll; do [ -e "$PREFIX/bin/$f" ] && cp "$PREFIX/bin/$f" "$WORK/app/"; done
+for f in opengl32.dll libgallium_wgl.dll libglapi.dll; do [ -e "$PREFIX/bin/$f" ] && cp "$PREFIX/bin/$f" "$WORK/app/" && echo "software OpenGL: $f"; done
+pacman -Ql mingw-w64-ucrt-x86_64-mesa 2>/dev/null | grep -i '\.dll$' | sed 's/^/mesa package: /' | head -20
+# Mesa's own libraries' dependencies (LLVM and so on), so software OpenGL loads in the test copy.
+for f in opengl32.dll libgallium_wgl.dll; do
+  [ -e "$WORK/app/$f" ] || continue
+  ldd "$WORK/app/$f" 2>/dev/null | awk -v p="$PREFIX/bin/" 'index($3, p) == 1 { print $3 }' | while read -r d; do
+    [ -e "$WORK/app/$(basename "$d")" ] || { cp "$d" "$WORK/app/"; echo "software OpenGL needs: $(basename "$d")"; }
+  done
+done
 
 # Test media, made with MSYS2's GStreamer (the packaged player never sees it).
 gst-launch-1.0 -q -e videotestsrc num-buffers=240 pattern=smpte ! video/x-raw,width=640,height=480,framerate=30/1 \
@@ -29,5 +37,6 @@ cat "$WORK/out/version.txt" "$WORK/out/gstreamer.txt"
 env PATH="$CLEAN_PATH" QT_OPENGL=desktop timeout 300 "$APP" --automation "$(cygpath -m "$WORK/smoke.txt")" \
   --automation-log "$O/smoke.json" > "$WORK/out/app.log" 2>&1
 echo "automation rc=$?"
-tail -20 "$WORK/out/app.log"
+echo "---- the player's output:"
+cat "$WORK/out/app.log"
 python "$(dirname "$0")/check-smoke.py" "$WORK/out"
