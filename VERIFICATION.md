@@ -1,6 +1,6 @@
 # Verification report
 
-This report covers the build delivered alongside it (CRT Player 2.7.0).
+This report covers the build delivered alongside it (CRT Player 2.8.0).
 
 The final X11 and Wayland suites were run against the exact stripped `crtplayer` binary
 that is delivered, and **again against the AppImage with the system's Qt libraries
@@ -286,6 +286,81 @@ was **not measured**, because there is no GPU in this environment.
 - GPU performance;
 - the interlaced style's look at real refresh rates (only its field alternation was
   measured).
+
+## 2.8: Jellyfin: big libraries and conversion on the server
+
+**Big libraries:**
+
+- **Before:** a folder showed at most its first 500 items.
+- **Now:** folders load 100 at a time (`StartIndex`, `Limit`, `TotalRecordCount`). The next
+  page is requested when the list is scrolled within two rows of its end, or when the
+  loaded items don't fill the list yet. The heading shows *Movies — 300 of 1,234*.
+- A stale page is ignored: one for a folder you have left, or one already loaded.
+
+**Original file or converted** (`JellyfinClient::requestPlayback`):
+
+- **Asking the server:** every Jellyfin play first posts `/Items/{id}/PlaybackInfo` with a
+  device profile.
+  - The profile's direct-play list is what this computer's GStreamer can open and decode
+    (`Player::localFormats`: demuxers present, and decoders accepting each codec's caps).
+  - Its transcoding profile is H.264 + AAC in HLS.
+  - It also carries the *Quality* limit.
+- **The server's answer decides:**
+  - *SupportsDirectPlay* → the original file, as before.
+  - Otherwise its `TranscodingUrl` (HLS). Its playlists and segments carry `api_key`,
+    because GStreamer's HLS reader fetches segments without the player's headers.
+  - Reasons are read from the source (10.9+) or the URL (10.8).
+- **Fallbacks:**
+  - If an original fails to play here, the player asks again once with direct play
+    turned off, from the same position.
+  - If PlaybackInfo itself fails (an old or unusual server), the original file plays as
+    before.
+- **Reporting:** start, progress and stop use the server's play session and
+  `PlayMethod: Transcode`. The conversion is ended (`DELETE /Videos/ActiveEncodings`) when
+  playback moves on, including for a conversion that never started playing.
+- **Subtitles:** a converted video's embedded text subtitles are offered as files the
+  server extracts.
+- **Where it shows:** the technical info overlay and the report show which method is in
+  use and why. The address is never shown or logged.
+
+**The mock server** (`tests/jellyfin_mock.py`) now pages listings and makes a
+PlaybackInfo decision from the posted profile. Items declare their format:
+
+- *Studio Master* claims ProRes;
+- *Multitrack HD* claims 25 Mbit/s;
+- *Damaged Upload* serves a broken file, with a good one for the server to convert.
+
+Conversions are real HLS made with ffmpeg (H.264/AAC, 2-second segments). The mock
+refuses them without the `api_key`. A *Big Library* holds 1,234 items. The new script
+`tests/automation/jellyfin-transcode.txt` runs against 10.8 and 10.10 APIs, after the
+existing two.
+
+| Check (both 10.8.13 and 10.10.3) | Result |
+|---|---|
+| A big library opens with its first page only | PASS: 100 shown of 1,234 |
+| Scrolling loads the rest a page at a time, each page once | PASS: 1,234 items from 13 requests (StartIndex 0..1200, Limit 100) |
+| The last item plays (beyond the old 500 limit) | PASS: *Clip 1234* |
+| Every play asks the server how, with this computer's formats | PASS: 10 PlaybackInfo requests; H.264, HEVC, VP8/9, AV1, MPEG-2/4, VC-1… (no ProRes) |
+| A codec this computer can't decode is converted | PASS: Transcode, `VideoCodecNotSupported` |
+| The conversion streams as HLS segments, authenticated by their address | PASS: ~50 segments, all 200 |
+| Seeking works in a converted video | PASS: 15.1 s after seeking to 12 s |
+| An original that fails here is retried converted, once | PASS: "the original didn't play here"; one forced request; no error dialog |
+| Over the quality limit is converted; the limit reaches the server | PASS: `ContainerBitrateExceedsLimit`, MaxStreamingBitrate 4,000,000 |
+| A converted video resumes at its saved position | PASS: 16–18 s after its 2 s wait (saved 12 s) |
+| Its embedded subtitle is offered as a file from the server | PASS: *English (embedded)* |
+| *Play converted by the server* converts a playable file; back at *Original file* it plays directly | PASS |
+| Converted playback is reported as such, with the server's play session | PASS: 4 `Transcode` start reports |
+| Each conversion is ended on the server | PASS: 4 ended for 4 |
+| The token: only in HLS and its subtitle addresses, never on original streams, never in the logs | PASS |
+
+The earlier Jellyfin checks still pass (40 checks per server version; `docs/results/jellyfin-10.8-checks.txt`,
+`jellyfin-10.10-checks.txt`). The header check now leaves out HLS playlists and segments, for the reason above.
+The full suites passed for 2.8.0 with no failures: native X11 (261) and Wayland (18), and the same on the AppImage
+with the system's Qt removed.
+
+**Not tested here:** a real Jellyfin server's ffmpeg conversions, hardware transcoding
+on the server, and conversions over a slow link. The mock follows the documented API
+and real HLS, but it is not Jellyfin.
 
 ## 2.7: Windows 10 and 11 (preview)
 

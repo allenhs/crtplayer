@@ -83,6 +83,7 @@ void AppSettings::load()
     sceneQuality = std::clamp(s.value("scene/quality", 1).toInt(), 0, 2);
     keepAwake = s.value("playback/keepAwake", true).toBool();
     lookSound = s.value("playback/lookSound", true).toBool();
+    jfMaxBitrateMbps = std::clamp(s.value("jellyfin/maxBitrateMbps", 0).toInt(), 0, 1000);
     noiseVolume = std::clamp(s.value("playback/noiseVolume", 1.0).toDouble(), 0.0, 2.0);
     effectStrength = std::clamp(s.value("playback/effectStrength", 1.0).toDouble(), 0.0, 1.0);
     hiddenPluginNotice = s.value("ui/hiddenPluginNotice").toString();
@@ -149,6 +150,7 @@ void AppSettings::save() const
     s.setValue("cg/modelsFolder", cgModelsFolder); s.setValue("cg/models", cgModels); s.setValue("cg/modelFinish", cgModelFinish);
     s.setValue("playback/keepAwake", keepAwake);
     s.setValue("playback/lookSound", lookSound);
+    s.setValue("jellyfin/maxBitrateMbps", jfMaxBitrateMbps);
     s.setValue("playback/noiseVolume", noiseVolume);
     s.setValue("playback/effectStrength", effectStrength);
     s.setValue("ui/hiddenPluginNotice", hiddenPluginNotice);

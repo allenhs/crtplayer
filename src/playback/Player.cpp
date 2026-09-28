@@ -120,6 +120,48 @@ QList<Player::Gap> Player::missingRecommended()
     return gaps;
 }
 
+void Player::localFormats(QStringList* containers, QStringList* videoCodecs, QStringList* audioCodecs)
+{
+    GList* decoders = gst_element_factory_list_get_elements(GST_ELEMENT_FACTORY_TYPE_DECODER, GST_RANK_MARGINAL);
+    auto canDecode = [decoders](const char* capsStr) {
+        GstCaps* caps = gst_caps_from_string(capsStr);
+        bool ok = false;
+        for (GList* l = decoders; l && !ok; l = l->next)
+            ok = gst_element_factory_can_sink_any_caps(GST_ELEMENT_FACTORY(l->data), caps);
+        gst_caps_unref(caps);
+        return ok;
+    };
+    auto have = [](const char* name) {
+        GstElementFactory* f = gst_element_factory_find(name);
+        if (f) gst_object_unref(f);
+        return f != nullptr;
+    };
+    static const std::pair<const char*, const char*> video[] = {
+        {"h264", "video/x-h264"}, {"hevc", "video/x-h265"}, {"vp8", "video/x-vp8"}, {"vp9", "video/x-vp9"},
+        {"av1", "video/x-av1"}, {"mpeg2video", "video/mpeg, mpegversion=(int)2, systemstream=(boolean)false"},
+        {"mpeg1video", "video/mpeg, mpegversion=(int)1, systemstream=(boolean)false"},
+        {"mpeg4", "video/mpeg, mpegversion=(int)4, systemstream=(boolean)false"},
+        {"msmpeg4v3", "video/x-msmpeg, msmpegversion=(int)43"}, {"vc1", "video/x-wmv, wmvversion=(int)3"},
+        {"wmv3", "video/x-wmv, wmvversion=(int)3"}, {"mjpeg", "image/jpeg"}, {"theora", "video/x-theora"},
+        {"h263", "video/x-h263"}};
+    static const std::pair<const char*, const char*> audio[] = {
+        {"aac", "audio/mpeg, mpegversion=(int)4"}, {"mp3", "audio/mpeg, mpegversion=(int)1, layer=(int)3"},
+        {"mp2", "audio/mpeg, mpegversion=(int)1, layer=(int)2"}, {"ac3", "audio/x-ac3"}, {"eac3", "audio/x-eac3"},
+        {"dts", "audio/x-dts"}, {"truehd", "audio/x-true-hd"}, {"flac", "audio/x-flac"}, {"opus", "audio/x-opus"},
+        {"vorbis", "audio/x-vorbis"}, {"alac", "audio/x-alac"}, {"wmav2", "audio/x-wma, wmaversion=(int)2"},
+        {"wmapro", "audio/x-wma, wmaversion=(int)3"}, {"amr_nb", "audio/AMR"}};
+    for (const auto& v : video) if (canDecode(v.second)) videoCodecs->append(QString::fromLatin1(v.first));
+    for (const auto& a : audio) if (canDecode(a.second)) audioCodecs->append(QString::fromLatin1(a.first));
+    // Uncompressed PCM always plays.
+    *audioCodecs << QStringLiteral("pcm_s16le") << QStringLiteral("pcm_s24le") << QStringLiteral("pcm_s16be") << QStringLiteral("pcm_s24be");
+    static const std::pair<const char*, const char*> demux[] = {
+        {"matroskademux", "mkv,webm"}, {"qtdemux", "mp4,m4v,mov,3gp"}, {"avidemux", "avi"},
+        {"tsdemux", "ts,mpegts,m2ts"}, {"mpegpsdemux", "mpeg,mpg,vob"}, {"oggdemux", "ogg,ogv"},
+        {"flvdemux", "flv"}, {"asfdemux", "asf,wmv"}};
+    for (const auto& d : demux) if (have(d.first)) *containers << QString::fromLatin1(d.second).split(',');
+    gst_plugin_feature_list_free(decoders);
+}
+
 // Without a working autoaudiosink (missing, or no sound device), playbin has no audio output: pick
 // the first sink that can actually open, and fall back to silent (but timed) playback.
 static GstElement* fallbackAudioSink(QString* name)

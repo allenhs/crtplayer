@@ -1,0 +1,56 @@
+# Jellyfin: paged big libraries and conversion on the server (tests/jellyfin_mock.py)
+jfsignin @JF@ demo crt
+jfwait signedin 8000
+jfwait listing 8000
+jfopen Big Library
+jfwait listing 8000
+report jf-big-first
+jfwait count 1234 90000
+report jf-big-all
+jfopen Clip 1234
+waitstate playing 20000
+wait 1000
+report jf-big-last
+jfhome
+jfwait listing 8000
+jfopen Movies
+jfwait listing 8000
+# A codec this computer can't decode (declared ProRes): converted by the server
+jfopen Studio Master
+waitstate playing 60000
+wait 2500
+expect source jellyfin
+report jf-converted-codec
+seek 12
+wait 3000
+report jf-converted-seek
+# Looks playable but won't play here: the player asks the server to convert it
+jfopen Damaged Upload
+# (it fails first, then the conversion starts)
+wait 4000
+waitstate playing 60000
+wait 2000
+report jf-fallback
+# Over the quality limit (declared 25 Mbit/s, limit 4): converted, embedded subtitle offered as a file
+jfquality 4
+jfopen Multitrack HD
+waitstate playing 60000
+wait 2000
+report jf-quality-limit
+subfile offer 0
+waitstate playing 20000
+wait 1500
+report jf-converted-subtitle
+# Back to the original file, and "Play converted by the server" on a playable one
+jfquality 0
+jfconverted Test Pattern 4x3
+waitstate playing 60000
+wait 1500
+report jf-forced
+jfopen Test Pattern 4x3
+waitstate playing 20000
+wait 1500
+report jf-direct-again
+jfsignout
+jfwait signedout 3000
+quit

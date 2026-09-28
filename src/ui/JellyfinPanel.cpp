@@ -7,6 +7,10 @@
 #include <QLabel>
 #include <QLineEdit>
 #include <QListWidget>
+#include <QLocale>
+#include <QScrollBar>
+#include <QTimer>
+#include <QComboBox>
 #include <QMenu>
 #include <QPainter>
 #include <QPainterPath>
@@ -45,7 +49,8 @@ JellyfinPanel::JellyfinPanel(JellyfinClient* client, QWidget* parent) : QWidget(
     auto* sv = new QVBoxLayout(signInPage);
     sv->setContentsMargins(14, 14, 14, 14);
     auto* intro = new QLabel(tr("Sign in to your Jellyfin server to browse and stream its videos. "
-                                "Videos play in their original format and are decoded by this computer."));
+                                "Videos play in their original format and are decoded by this computer; the "
+                                "server converts only what this computer can't play, or what is over the quality limit."));
     intro->setWordWrap(true);
     intro->setObjectName("paramValue");
     sv->addWidget(intro);
@@ -108,6 +113,16 @@ JellyfinPanel::JellyfinPanel(JellyfinClient* client, QWidget* parent) : QWidget(
     m_list->setContextMenuPolicy(Qt::CustomContextMenu);
     m_list->setSpacing(4);
     bv->addWidget(m_list, 1);
+    auto* qrow = new QHBoxLayout();
+    auto* ql = new QLabel(tr("Quality"));
+    m_quality = new QComboBox;
+    m_quality->addItem(tr("Original file"), 0);
+    for (int mbps : {40, 20, 10, 8, 4, 2, 1}) m_quality->addItem(tr("Up to %1 Mbit/s (convert larger)").arg(mbps), mbps);
+    m_quality->setToolTip(tr("The original file plays as it is when this computer can decode it. With a limit, the server "
+                             "converts videos above it: for a slow connection or a server far away."));
+    qrow->addWidget(ql);
+    qrow->addWidget(m_quality, 1);
+    bv->addLayout(qrow);
     auto* foot = new QHBoxLayout();
     m_who = new QLabel;
     m_who->setObjectName("paramValue");
@@ -151,16 +166,36 @@ JellyfinPanel::JellyfinPanel(JellyfinClient* client, QWidget* parent) : QWidget(
     });
     connect(m_client, &JellyfinClient::searchResults, this, [this](const QString& term, const QVector<JfItem>& items) {
         m_stack = {{QStringLiteral("search:") + term, tr("Results for “%1”").arg(term)}};
+        m_pendingParent.clear();
         showItems(m_stack.last().title, items);
     });
     connect(m_client, &JellyfinClient::homeLoaded, this, [this](const QVector<JfItem>& resume, const QVector<JfItem>& libs) {
         m_stack = {{QString(), tr("Home")}};
+        m_pendingParent.clear();
         showItems(tr("Home"), libs, resume);
     });
-    connect(m_client, &JellyfinClient::itemsLoaded, this, [this](const QString& parentId, const QVector<JfItem>& items) {
+    connect(m_client, &JellyfinClient::itemsLoaded, this,
+            [this](const QString& parentId, const QVector<JfItem>& items, int startIndex, int total) {
         if (parentId != m_pendingParent) return;   // a newer navigation happened
-        showItems(m_stack.isEmpty() ? QString() : m_stack.last().title, items);
+        if (startIndex == 0) {
+            showItems(m_stack.isEmpty() ? QString() : m_stack.last().title, items);
+        } else {
+            if (!m_loadingMore || startIndex != m_loaded) return;   // stale page
+            appendItems(items);
+        }
+        m_loadingMore = false;
+        m_loaded = startIndex + items.size();
+        m_total = std::max(total, m_loaded);
+        updateTitle();
+        emit listingChanged();
+        // A list too short to scroll yet: the next page. (After the view has laid the items
+        // out; before that its scroll range still reads empty.)
+        QTimer::singleShot(250, this, [this] { maybeLoadMore(); });
     });
+    // Near the end of the list: the next page.
+    connect(m_list->verticalScrollBar(), &QScrollBar::valueChanged, this, [this] { maybeLoadMore(); });
+    connect(m_list->verticalScrollBar(), &QScrollBar::rangeChanged, this, [this] { maybeLoadMore(); });
+    connect(m_quality, &QComboBox::currentIndexChanged, this, [this] { emit maxBitrateChanged(maxBitrateMbps()); });
     connect(m_client, &JellyfinClient::requestFailed, this, [this](const QString& msg) { m_title->setText(msg); });
     connect(m_client, &JellyfinClient::imageReady, this, [this](const QString& id, const QPixmap& pm) {
         const auto& items = itemsOf(m_list);
@@ -240,8 +275,20 @@ QIcon JellyfinPanel::placeholderIcon(const JfItem& it) const
 void JellyfinPanel::showItems(const QString& title, const QVector<JfItem>& items, const QVector<JfItem>& resume)
 {
     m_list->clear();
+    itemsOf(m_list).clear();
+    m_listTitle = title;
+    m_loaded = m_total = items.size();   // a paged folder sets these after
+    m_loadingMore = false;
+    appendItems(resume, QStringLiteral("▶ "));
+    appendItems(items);
+    m_title->setText(items.isEmpty() && resume.isEmpty() ? tr("%1 — nothing here").arg(title) : title);
+    m_back->setEnabled(m_stack.size() > 1);
+    emit listingChanged();
+}
+
+void JellyfinPanel::appendItems(const QVector<JfItem>& items, const QString& prefix)
+{
     auto& store = itemsOf(m_list);
-    store.clear();
     auto add = [&](const JfItem& it, const QString& prefix) {
         store.push_back(it);
         QString label = it.displayName();
@@ -256,12 +303,59 @@ void JellyfinPanel::showItems(const QString& title, const QVector<JfItem>& items
         m_list->addItem(li);
         m_client->fetchImage(it, 300);
     };
-    for (const JfItem& it : resume) add(it, QStringLiteral("▶ "));
-    for (const JfItem& it : items) add(it, QString());
-    m_title->setText(items.isEmpty() && resume.isEmpty() ? tr("%1 — nothing here").arg(title) : title);
-    m_back->setEnabled(m_stack.size() > 1);
-    emit listingChanged();
+    for (const JfItem& it : items) add(it, prefix);
 }
+
+void JellyfinPanel::updateTitle()
+{
+    if (m_loaded == 0) { m_title->setText(tr("%1 — nothing here").arg(m_listTitle)); return; }
+    if (m_total <= JellyfinClient::kPageSize && m_loaded >= m_total) { m_title->setText(m_listTitle); return; }
+    const QLocale loc;
+    m_title->setText(m_loaded < m_total ? tr("%1 — %2 of %3").arg(m_listTitle, loc.toString(m_loaded), loc.toString(m_total))
+                                        : tr("%1 — %2").arg(m_listTitle, loc.toString(m_total)));
+}
+
+void JellyfinPanel::maybeLoadMore()
+{
+    const QScrollBar* sb = m_list->verticalScrollBar();
+    // Within about two rows of the end (or no scroll bar at all yet).
+    if (sb->maximum() - sb->value() <= 2 * m_list->gridSize().height()) loadMore();
+}
+
+bool JellyfinPanel::loadMore()
+{
+    if (m_loadingMore || m_loaded >= m_total || m_pendingParent.isEmpty() || m_stack.isEmpty() ||
+        m_stack.last().parentId != m_pendingParent)
+        return false;
+    m_loadingMore = true;
+    m_title->setText(tr("%1 — loading more…").arg(m_listTitle));
+    m_client->loadChildren(m_pendingParent, m_loaded);
+    return true;
+}
+
+void JellyfinPanel::setMaxBitrateMbps(int mbps, bool notify)
+{
+    const int i = m_quality->findData(mbps);
+    QSignalBlocker b(m_quality);
+    m_quality->setCurrentIndex(i >= 0 ? i : 0);
+    if (notify) emit maxBitrateChanged(maxBitrateMbps());
+}
+
+void JellyfinPanel::scrollToEnd()
+{
+    m_list->scrollToBottom();
+    maybeLoadMore();
+}
+
+bool JellyfinPanel::playConvertedByName(const QString& name)
+{
+    const auto& store = itemsOf(m_list);
+    for (const JfItem& it : store)
+        if (it.isVideo() && (it.name == name || it.displayName() == name)) { emit convertedPlayRequested(it); return true; }
+    return false;
+}
+
+int JellyfinPanel::maxBitrateMbps() const { return m_quality->currentData().toInt(); }
 
 void JellyfinPanel::navigateInto(const JfItem& folder)
 {
@@ -306,6 +400,8 @@ void JellyfinPanel::contextMenu(const QPoint& pos)
             menu.addAction(tr("Resume at %1").arg(ticksToTime(it.positionTicks)), this, [this, it] { emit playRequested(it, false); });
         menu.addAction(tr("Play from the beginning"), this, [this, it] { emit playRequested(it, true); });
         menu.addAction(tr("Add to playlist"), this, [this, it] { emit enqueueRequested(it); });
+        menu.addSeparator();
+        menu.addAction(tr("Play converted by the server"), this, [this, it] { emit convertedPlayRequested(it); });
     } else {
         menu.addAction(tr("Open"), this, [this, it] { navigateInto(it); });
     }

@@ -467,10 +467,24 @@ void Automation::next()
         const bool ok = m_w->jellyfinPanel()->openByName(rest);
         if (!ok) ++m_failures;
         log(line, {{"ok", ok}});
+    } else if (cmd == "jfconverted") {
+        // jfconverted NAME: play a video in the listing converted by the server
+        const bool ok = m_w->jellyfinPanel()->playConvertedByName(rest);
+        if (!ok) ++m_failures;
+        log(line, {{"ok", ok}});
+    } else if (cmd == "jfquality") {
+        // jfquality MBPS: the streaming quality limit (0 = the original file)
+        m_w->jellyfinPanel()->setMaxBitrateMbps(a.value(1).toInt(), true);
+        log(line, {{"maxBitrateMbps", m_w->jellyfinPanel()->maxBitrateMbps()}});
+    } else if (cmd == "jfscroll") {
+        // jfscroll end: scroll the listing to its end (loads the next page)
+        m_w->jellyfinPanel()->scrollToEnd();
+        log(line, {{"count", m_w->jellyfinPanel()->itemCount()}});
     } else if (cmd == "jfwait") {
-        // jfwait signedin|signedout|listing TIMEOUT_MS
+        // jfwait signedin|signedout|listing TIMEOUT_MS  |  jfwait count N TIMEOUT_MS (scrolls to the end meanwhile)
         const QString want = a.value(1);
-        const int timeout = a.value(2, "8000").toInt();
+        const int wantCount = want == "count" ? a.value(2).toInt() : 0;
+        const int timeout = want == "count" ? a.value(3, "30000").toInt() : a.value(2, "8000").toInt();
         const qint64 t0 = m_clock.elapsed();
         auto* poll = new QTimer(this);
         poll->setInterval(20);
@@ -481,10 +495,12 @@ void Automation::next()
             if (want == "signedin") ok = jf->isSignedIn();
             else if (want == "signedout") ok = !jf->isSignedIn();
             else if (want == "listing") ok = jp->itemCount() > 0 && !jp->currentTitle().startsWith("Loading");
+            else if (want == "count") { ok = jp->itemCount() >= wantCount; if (!ok) jp->scrollToEnd(); }
             if (ok || m_clock.elapsed() - t0 > timeout) {
                 poll->deleteLater();
                 if (!ok) ++m_failures;
-                log(line, {{"ok", ok}, {"listing", jp->currentTitle()}, {"count", jp->itemCount()}, {"waitedMs", double(m_clock.elapsed() - t0)}});
+                log(line, {{"ok", ok}, {"listing", jp->currentTitle()}, {"count", jp->itemCount()}, {"total", jp->totalCount()},
+                           {"waitedMs", double(m_clock.elapsed() - t0)}});
                 QTimer::singleShot(10, this, &Automation::next);
             }
         });

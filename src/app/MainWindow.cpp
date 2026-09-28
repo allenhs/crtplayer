@@ -120,6 +120,19 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent)
         }
     });
     connect(m_player, &Player::errorOccurred, this, [this](const QString& title, const QString& details) {
+        // A Jellyfin original that won't play here (a codec this computer lacks, a damaged
+        // file): once, the server is asked to convert it instead.
+        if (!m_jfItemId.isEmpty() && !m_jfTranscoding && !m_jfRetried && m_jf->isSignedIn()) {
+            m_jfRetried = true;
+            m_jfForceNext = true;
+            m_lastWarning = title + ": " + details.section("\n\nDetails:", 0, 0);
+            const qint64 pos = m_player->position();
+            m_pendingStartNs = pos > 0 ? pos : m_jfStartNs;
+            showOsd(tr("The original file won't play here — asking the server to convert it"), 5000);
+            const int idx = m_playlist->currentIndex();
+            QTimer::singleShot(0, this, [this, idx] { playIndex(idx); });
+            return;
+        }
         m_lastError = title + ": " + details;
         m_emptyHint->setText(title + tr("\nDetails are in the error dialog. Drop another file to continue."));
         m_emptyHint->show();
@@ -225,6 +238,13 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent)
     // Jellyfin
     connect(m_jfPanel, &JellyfinPanel::playRequested, this, &MainWindow::playJellyfin);
     connect(m_jfPanel, &JellyfinPanel::enqueueRequested, this, &MainWindow::enqueueJellyfin);
+    connect(m_jfPanel, &JellyfinPanel::convertedPlayRequested, this, &MainWindow::playJellyfinConverted);
+    m_jfPanel->setMaxBitrateMbps(m_settings.jfMaxBitrateMbps);
+    connect(m_jfPanel, &JellyfinPanel::maxBitrateChanged, this, [this](int mbps) {
+        m_settings.jfMaxBitrateMbps = mbps;
+        showOsd(mbps > 0 ? tr("Jellyfin quality: up to %1 Mbit/s, from the next video").arg(mbps)
+                         : tr("Jellyfin quality: the original file, from the next video"));
+    });
     connect(m_controls->jellyfinButton, &QToolButton::clicked, this, [this](bool on) { showJellyfin(on); });
     connect(m_jfDock, &QDockWidget::visibilityChanged, this, [this](bool) {
         QSignalBlocker b(m_controls->jellyfinButton);
@@ -251,6 +271,7 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent)
         if (!m_jfItemId.isEmpty() && m_jfStarted) {
             m_jf->reportStopped(m_jfItemId, m_player->duration());   // at the end: the server marks it played
             m_jfStarted = false;
+            m_jfPlaySession.clear();   // the report ended the conversion
             m_jfTimer.stop();
         }
     });
@@ -625,14 +646,63 @@ void MainWindow::playIndex(int i)
         }
         m_mediaTitle = QUrl::fromPercentEncoding(path.section('#', 1).toUtf8());
         m_currentLocal.clear();
-        m_jf->fetchSubtitles(id);   // external subtitle files on the server, offered in the menu
+        // A conversion that never got as far as playing is ended here.
+        if (m_jfTranscoding && !m_jfPlaySession.isEmpty()) m_jf->stopTranscode(m_jfPlaySession);
+        m_jfTranscoding = false;
+        m_jfPlaySession.clear();
+        m_jfReasons.clear();
         m_jfItemId = id;
         m_jfStarted = false;
         const QByteArray auth = m_jf->authorizationHeader();
         m_player->setHttpHeaders({{"Authorization", auth}, {"X-Emby-Authorization", auth}});
-        uri = m_jf->streamUrl(id).toString(QUrl::FullyEncoded);
         if (m_pendingStartNs >= 0) start = m_pendingStartNs;
         else if (const JfItem* it = m_jf->cachedItem(id); it && !it->played) start = it->positionTicks * 100;
+        const bool force = m_jfForceNext;
+        m_jfForceNext = false;
+        if (!force) m_jfRetried = false;
+        // Ask the server how: the original file when this computer can decode it (and it is
+        // within the quality limit), otherwise converted on the server.
+        JellyfinClient::Capabilities caps;
+        Player::localFormats(&caps.containers, &caps.videoCodecs, &caps.audioCodecs);
+        caps.h264 = caps.videoCodecs.contains(QStringLiteral("h264"));
+        const int req = ++m_jfRequest;
+        m_pendingStartNs = -1;
+        m_playlist->setCurrentIndex(i);
+        const QString shown = m_mediaTitle;
+        m_jf->requestPlayback(id, qint64(m_settings.jfMaxBitrateMbps) * 1000000, force, caps,
+                              [this, req, id, i, start, shown, force](const JfPlayback& pb) {
+            if (req != m_jfRequest || id != m_jfItemId) {   // something else was opened meanwhile
+                if (pb.transcode) m_jf->stopTranscode(pb.playSessionId);
+                return;
+            }
+            QString note;
+            if (!pb.error.isEmpty()) {
+                if (force) {   // a conversion was needed and the server can't make one
+                    m_lastError = tr("Cannot play this item: %1").arg(pb.error);
+                    showOsd(m_lastError, 6000);
+                    return;
+                }
+                // Older servers, or PlaybackInfo refused: the original file, as before.
+                qWarning() << "Jellyfin PlaybackInfo failed, playing the original file:" << pb.error;
+                m_jf->setPlayMethod(QStringLiteral("DirectPlay"), QString(), id);
+                m_jf->fetchSubtitles(id);
+            } else {
+                m_jfTranscoding = pb.transcode;
+                m_jfPlaySession = pb.playSessionId;
+                m_jfReasons = pb.transcodeReasons;
+                m_jf->setPlayMethod(pb.transcode ? QStringLiteral("Transcode") : QStringLiteral("DirectPlay"),
+                                    pb.playSessionId, pb.mediaSourceId);
+                for (const auto& s : pb.subtitles) m_extSubs.append({s.first, s.second.toString(QUrl::FullyEncoded)});
+                rebuildSubtitleMenu();
+                if (pb.transcode) note = tr("converted by the server");
+            }
+            m_jfStartNs = start;
+            openResolved(i, pb.url.toString(QUrl::FullyEncoded), start, shown, note);
+        });
+        m_lastError.clear();
+        m_emptyHint->hide();
+        updateTitle();
+        return;
     } else {
         m_player->setHttpHeaders({});
         m_jfItemId.clear();
@@ -654,6 +724,11 @@ void MainWindow::playIndex(int i)
         }
     }
     m_pendingStartNs = -1;
+    openResolved(i, uri, start, m_mediaTitle.isEmpty() ? QFileInfo(path).fileName() : m_mediaTitle, QString());
+}
+
+void MainWindow::openResolved(int i, const QString& uri, qint64 start, const QString& shown, const QString& note)
+{
     m_playlist->setCurrentIndex(i);
     m_lastError.clear();
     m_emptyHint->hide();
@@ -665,15 +740,35 @@ void MainWindow::playIndex(int i)
     }
     m_player->open(uri, true, start);
     updateTitle();
-    const QString shown = m_mediaTitle.isEmpty() ? QFileInfo(path).fileName() : m_mediaTitle;
-    showOsd(start > 0 ? tr("%1 — resuming at %2 (Home: start over)").arg(shown, formatTime(start / 1000000)) : shown);
+    QString msg = start > 0 ? tr("%1 — resuming at %2 (Home: start over)").arg(shown, formatTime(start / 1000000)) : shown;
+    if (!note.isEmpty()) msg += QStringLiteral(" · ") + note;
+    showOsd(msg);
+}
+
+QString MainWindow::jellyfinPlayDescription() const
+{
+    if (m_jfItemId.isEmpty()) return QString();
+    if (!m_jfTranscoding) return tr("original file");
+    QStringList why;
+    for (const QString& r : m_jfReasons) {
+        if (r.contains("Bitrate")) why << tr("over the quality limit");
+        else if (r.startsWith("VideoCodec") || r.startsWith("VideoProfile") || r.startsWith("VideoLevel") || r.startsWith("VideoBitDepth")) why << tr("video format");
+        else if (r.startsWith("AudioCodec") || r.startsWith("AudioChannels") || r.startsWith("AudioProfile")) why << tr("audio format");
+        else if (r.startsWith("Container")) why << tr("file type");
+        else if (r.startsWith("Subtitle")) why << tr("subtitles");
+        else why << r;
+    }
+    if (m_jfRetried) why.prepend(tr("the original didn't play here"));
+    why.removeDuplicates();
+    return why.isEmpty() ? tr("converted by the server") : tr("converted by the server: %1").arg(why.join(", "));
 }
 
 void MainWindow::jellyfinStopCurrent(bool waitForServer)
 {
     if (m_jfItemId.isEmpty() || !m_jfStarted) return;
-    QNetworkReply* r = m_jf->reportStopped(m_jfItemId, m_player->position());
+    QNetworkReply* r = m_jf->reportStopped(m_jfItemId, m_player->position());   // (also ends a conversion)
     m_jfStarted = false;
+    m_jfPlaySession.clear();
     m_jfTimer.stop();
     if (waitForServer && r && !r->isFinished()) {
         // On quit, give the final position a moment to reach the server.
@@ -702,6 +797,12 @@ void MainWindow::playJellyfin(const JfItem& item, bool fromStart)
     const int idx = m_playlist->addItems({ref});
     m_pendingStartNs = fromStart ? 0 : (item.played ? 0 : item.positionTicks * 100);
     playIndex(idx);
+}
+
+void MainWindow::playJellyfinConverted(const JfItem& item)
+{
+    m_jfForceNext = true;
+    playJellyfin(item, false);
 }
 
 void MainWindow::enqueueJellyfin(const JfItem& item)
@@ -1838,7 +1939,12 @@ void MainWindow::updateInfoOverlay()
     const LayoutResult L = m_video->currentLayout();
     const SyncStats st = m_video->syncStats();
     QStringList lines;
-    lines << tr("File        %1").arg(QFileInfo(m_player->currentPath()).fileName());
+    if (!m_jfItemId.isEmpty()) {   // (a network address, possibly with a token: never shown)
+        lines << tr("File        %1").arg(mediaTitle());
+        lines << tr("Jellyfin    %1").arg(jellyfinPlayDescription());
+    } else {
+        lines << tr("File        %1").arg(QFileInfo(m_player->currentPath()).fileName());
+    }
     lines << tr("Container   %1").arg(m_player->containerFormat());
     lines << tr("Video       %1 via %2 [%3]").arg(m_player->videoCodec(), m_player->videoDecoder(),
                                                   m_player->videoDecoderIsHardware() ? "HW" : "SW");
@@ -1874,6 +1980,12 @@ QJsonObject MainWindow::stateReport() const
     o["file"] = m_mediaTitle.isEmpty() ? QFileInfo(m_player->currentPath()).fileName() : m_mediaTitle;
     o["source"] = m_jfItemId.isEmpty() ? QStringLiteral("file") : QStringLiteral("jellyfin");
     o["jellyfinSignedIn"] = m_jf->isSignedIn();
+    o["jellyfinPlayMethod"] = m_jfItemId.isEmpty() ? QString() : m_jfTranscoding ? QStringLiteral("Transcode") : QStringLiteral("DirectPlay");
+    o["jellyfinTranscodeReasons"] = QJsonArray::fromStringList(m_jfReasons);
+    o["jellyfinConvertedAfterFailure"] = m_jfRetried;
+    o["jellyfinPlayDescription"] = jellyfinPlayDescription();
+    o["jellyfinMaxBitrateMbps"] = m_settings.jfMaxBitrateMbps;
+    o["jellyfinListingTotal"] = m_jfPanel->totalCount();
     o["jellyfinUser"] = m_jf->userName();
     o["jellyfinServerVersion"] = m_jf->serverVersion();
     o["jellyfinItem"] = m_jfItemId;

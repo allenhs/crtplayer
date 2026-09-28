@@ -1,24 +1,42 @@
 PASS  [10.8.13] wrong password is rejected and leaves the player signed out: 1 rejected attempt(s)
-PASS  [10.8.13] correct password signs in: home shows 3 entries
-PASS  [10.8.13] every authenticated request carries the Authorization header: 55 requests
-PASS  [10.8.13] the token never appears in a URL: no api_key/token query parameters
+PASS  [10.8.13] correct password signs in: home shows 4 entries
+PASS  [10.8.13] every authenticated request carries the Authorization header (except HLS segments): 1368 requests, 56 HLS playlist/segment requests by address
+PASS  [10.8.13] the token appears in no address except a conversion's (HLS) and its subtitle files: 62 such requests, all HLS or its subtitles
+PASS  [10.8.13] original-file streams never carry the token: header only
 PASS  [10.8.13] no request failed: all 2xx
 PASS  [10.8.13] closed streams had started successfully first: 0 closed
 PASS  [10.8.13] uses the route set matching the server version: ['/Users/u1/Views']
-PASS  [10.8.13] streams the original file and seeks with HTTP ranges: 8 stream requests, 4 mid-file range requests
+PASS  [10.8.13] streams the original file and seeks with HTTP ranges: 12 stream requests, 5 mid-file range requests
 PASS  [10.8.13] stream request marks the file as static (no server transcoding): static=true
-PASS  [10.8.13] seek moved playback to ~12 s: 14625 ms
-PASS  [10.8.13] continue-watching item resumed at its saved position: 12393 ms (saved: 12000)
-PASS  [10.8.13] playback start reported: 3 start reports
-PASS  [10.8.13] pause/unpause reported: 10 progress reports
-PASS  [10.8.13] stop reports the position (resume point) for the first movie: 15.9 s
+PASS  [10.8.13] seek moved playback to ~12 s: 14700 ms
+PASS  [10.8.13] continue-watching item resumed at its saved position: 12665 ms (saved: 12000)
+PASS  [10.8.13] playback start reported: 9 start reports
+PASS  [10.8.13] pause/unpause reported: 24 progress reports
+PASS  [10.8.13] stop reports the position (resume point) for the first movie: 16.3 s
 PASS  [10.8.13] TV show navigation reaches episodes: S01E01 · Pilot
-PASS  [10.8.13] external subtitle fetched from the server, authenticated: 1 subtitle request(s): /Videos/m1/m1/Subtitles/2/0/Stream.srt
+PASS  [10.8.13] external subtitle fetched from the server, authenticated: 2 subtitle request(s): /Videos/m1/m1/Subtitles/2/0/Stream.srt
 PASS  [10.8.13] session restored on the next launch: signed in without the password
-PASS  [10.8.13] signing out revokes the token on the server: 1 logout request(s)
+PASS  [10.8.13] signing out revokes the token on the server: 2 logout request(s)
 PASS  [10.8.13] no password is ever written to the automation logs: checked
 PASS  [10.8.13] session file is private (0600): 0o600
 PASS  [10.8.13] session file never holds a password: no password field or value
 PASS  [10.8.13] after sign-out the stored token is gone: token cleared
+PASS  [10.8.13] the paging and conversion script ran without a failed step: all steps ok
+PASS  [10.8.13] a big library (1,234 items) opens with its first page only: 100 shown of 1234
+PASS  [10.8.13] scrolling loads the rest a page at a time, each page once: 1234 items from 13 requests (StartIndex 0..1200)
+PASS  [10.8.13] the last item of the big library plays (beyond the old 500 limit): Clip 1234 (2009)
+PASS  [10.8.13] every play asks the server how (PlaybackInfo) with this computer's formats: 10 requests; video codecs: h264,hevc,vp8,vp9,av1,mpeg2video,mpeg1video,mpeg4,msmpeg4v3,vc1,wmv3,mjpeg,theora,h263
+PASS  [10.8.13] a codec this computer can't decode is converted by the server: Transcode, ['VideoCodecNotSupported']
+PASS  [10.8.13] the conversion streams as HLS segments, authenticated by their address: 51 segments, all 200
+PASS  [10.8.13] seeking works in a converted video: 15230 ms
+PASS  [10.8.13] an original that fails here is retried converted, once: converted by the server: the original didn't play here; 1 conversion request(s)
+PASS  [10.8.13] over the quality limit is converted; the limit reaches the server: ['ContainerBitrateExceedsLimit'], MaxStreamingBitrate 4000000
+PASS  [10.8.13] a converted video resumes at its saved position: 16053 ms (saved: 12000)
+PASS  [10.8.13] its embedded subtitle is offered as a file from the server: English (embedded)
+PASS  [10.8.13] "Play converted by the server" converts a playable file: converted by the server
+PASS  [10.8.13] back at the original quality, the same file plays directly again: original file
+PASS  [10.8.13] converted playback is reported as such, with the server's play session: 4 'Transcode' start reports
+PASS  [10.8.13] each conversion is ended on the server when playback moves on: 4 ended, for 4 converted plays
+PASS  [10.8.13] the token is never written to the logs: automation log and output checked
 
 All Jellyfin checks passed

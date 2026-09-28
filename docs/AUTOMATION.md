@@ -72,7 +72,11 @@ buttons and shortcuts use.
 | `deskmouse X Y` | Send a mouse-move event to the desk view (wakes the control strip) |
 | `jfsignin URL USER PASSWORD` | Sign in to a Jellyfin server (the password is never logged) |
 | `jfwait signedin\|signedout\|listing TIMEOUT_MS` | Wait for the Jellyfin sign-in state, or for a listing to finish loading |
+| `jfwait count N TIMEOUT_MS` | Wait until the listing holds N items, scrolling to its end meanwhile (pages load as you scroll) |
 | `jfopen NAME` | In the current Jellyfin listing, open a folder, or play a video, by name |
+| `jfconverted NAME` | Play a video in the listing converted by the server (its context menu's *Play converted by the server*) |
+| `jfquality MBPS` | The Jellyfin quality limit in Mbit/s; 0 = the original file |
+| `jfscroll end` | Scroll the Jellyfin listing to its end |
 | `jfhome` / `jfsignout` | Jellyfin home view / sign out (revokes the token) |
 | `quit` | Exit |
 

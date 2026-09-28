@@ -144,9 +144,10 @@ QString JellyfinClient::describeError(QNetworkReply* r) const
     return r->errorString();
 }
 
-QVector<JfItem> JellyfinClient::parseItems(const QByteArray& json)
+QVector<JfItem> JellyfinClient::parseItems(const QByteArray& json, int* total)
 {
     const QJsonDocument doc = QJsonDocument::fromJson(json);
+    if (total) *total = doc.isObject() && doc.object().contains("TotalRecordCount") ? doc.object().value("TotalRecordCount").toInt(-1) : -1;
     const QJsonArray arr = doc.isObject() ? doc.object().value("Items").toArray() : doc.array();
     QVector<JfItem> out;
     out.reserve(arr.size());
@@ -321,19 +322,25 @@ void JellyfinClient::loadHome()
     });
 }
 
-void JellyfinClient::loadChildren(const QString& parentId)
+void JellyfinClient::loadChildren(const QString& parentId, int startIndex)
 {
     auto q = userQuery();
     q << qMakePair(QStringLiteral("ParentId"), parentId)
       << qMakePair(QStringLiteral("SortBy"), QStringLiteral("ParentIndexNumber,IndexNumber,SortName"))
       << qMakePair(QStringLiteral("SortOrder"), QStringLiteral("Ascending"))
       << qMakePair(QStringLiteral("Fields"), QStringLiteral("Overview"))
-      << qMakePair(QStringLiteral("Limit"), QStringLiteral("500"));
+      << qMakePair(QStringLiteral("StartIndex"), QString::number(startIndex))
+      << qMakePair(QStringLiteral("Limit"), QString::number(kPageSize))
+      << qMakePair(QStringLiteral("EnableTotalRecordCount"), QStringLiteral("true"));
     QNetworkReply* r = get(itemsPath(), q);
-    connect(r, &QNetworkReply::finished, this, [this, r, parentId] {
+    connect(r, &QNetworkReply::finished, this, [this, r, parentId, startIndex] {
         r->deleteLater();
         if (r->error() != QNetworkReply::NoError) { emit requestFailed(describeError(r)); return; }
-        emit itemsLoaded(parentId, parseItems(r->readAll()));
+        int total = -1;
+        const QVector<JfItem> items = parseItems(r->readAll(), &total);
+        // A server that leaves the total out: a short page is the last one.
+        if (total < 0) total = startIndex + items.size() + (items.size() == kPageSize ? 1 : 0);
+        emit itemsLoaded(parentId, items, startIndex, std::max(total, startIndex + int(items.size())));
     });
 }
 
@@ -435,23 +442,132 @@ QUrl JellyfinClient::streamUrl(const QString& itemId) const
                {{"static", "true"}, {"mediaSourceId", itemId}, {"deviceId", m_deviceId}});
 }
 
+// ---- how to play: PlaybackInfo ------------------------------------------------------
+
+QJsonObject JellyfinClient::deviceProfile(const Capabilities& caps, qint64 maxBitrate)
+{
+    const qint64 cap = maxBitrate > 0 ? maxBitrate : 1000000000;   // "no limit"
+    QJsonArray direct{QJsonObject{{"Type", "Video"}, {"Container", caps.containers.join(',')},
+                                  {"VideoCodec", caps.videoCodecs.join(',')}, {"AudioCodec", caps.audioCodecs.join(',')}}};
+    // What the server converts to: H.264 with AAC (or MP3/AC-3) in HLS segments, which
+    // GStreamer plays and seeks through. VP9 in fMP4 if H.264 can't be decoded here.
+    QJsonObject tp{{"Type", "Video"}, {"Context", "Streaming"}, {"Protocol", "hls"}, {"MaxAudioChannels", "6"},
+                   {"MinSegments", 1}, {"BreakOnNonKeyFrames", true}};
+    if (caps.h264) { tp.insert("Container", "ts"); tp.insert("VideoCodec", "h264"); tp.insert("AudioCodec", "aac,mp3,ac3"); }
+    else { tp.insert("Container", "mp4"); tp.insert("VideoCodec", "vp9,hevc,h264"); tp.insert("AudioCodec", "opus,aac,mp3"); }
+    QJsonArray subs;
+    for (const char* f : {"srt", "subrip", "ass", "ssa", "vtt", "webvtt"}) subs.append(QJsonObject{{"Format", f}, {"Method", "External"}});
+    for (const char* f : {"srt", "subrip", "ass", "ssa", "pgssub", "dvdsub", "vobsub", "dvbsub"}) subs.append(QJsonObject{{"Format", f}, {"Method", "Embed"}});
+    return QJsonObject{{"Name", "CRT Player"}, {"MaxStreamingBitrate", double(cap)}, {"MaxStaticBitrate", double(cap)},
+                       {"MusicStreamingTranscodingBitrate", 384000}, {"DirectPlayProfiles", direct},
+                       {"TranscodingProfiles", QJsonArray{tp}}, {"ContainerProfiles", QJsonArray{}},
+                       {"CodecProfiles", QJsonArray{}}, {"SubtitleProfiles", subs}};
+}
+
+void JellyfinClient::requestPlayback(const QString& itemId, qint64 maxBitrate, bool forceTranscode, const Capabilities& caps,
+                                     std::function<void(const JfPlayback&)> done)
+{
+    const qint64 cap = maxBitrate > 0 ? maxBitrate : 1000000000;
+    const QJsonObject body{{"UserId", m_userId}, {"MaxStreamingBitrate", double(cap)}, {"StartTimeTicks", 0},
+                           {"MediaSourceId", itemId}, {"AutoOpenLiveStream", false},
+                           {"EnableDirectPlay", !forceTranscode}, {"EnableDirectStream", !forceTranscode},
+                           {"EnableTranscoding", true}, {"AllowVideoStreamCopy", !forceTranscode},
+                           {"AllowAudioStreamCopy", !forceTranscode}, {"DeviceProfile", deviceProfile(caps, maxBitrate)}};
+    QNetworkReply* r = request(QStringLiteral("POST"), url(QStringLiteral("/Items/%1/PlaybackInfo").arg(itemId), {{"userId", m_userId}}),
+                               QJsonDocument(body).toJson(QJsonDocument::Compact));
+    connect(r, &QNetworkReply::finished, this, [this, r, itemId, forceTranscode, done] {
+        r->deleteLater();
+        JfPlayback pb;
+        pb.itemId = itemId;
+        pb.url = streamUrl(itemId);
+        pb.mediaSourceId = itemId;
+        if (r->error() != QNetworkReply::NoError) { pb.error = describeError(r); done(pb); return; }
+        const QJsonObject o = QJsonDocument::fromJson(r->readAll()).object();
+        const QJsonArray sources = o.value("MediaSources").toArray();
+        if (sources.isEmpty()) {
+            pb.error = o.value("ErrorCode").toString(tr("The server offered no way to play this item."));
+            done(pb);
+            return;
+        }
+        const QJsonObject src = sources.first().toObject();
+        pb.playSessionId = o.value("PlaySessionId").toString();
+        pb.mediaSourceId = src.value("Id").toString(itemId);
+        const QString tUrl = src.value("TranscodingUrl").toString();
+        const bool direct = !forceTranscode && src.value("SupportsDirectPlay").toBool();
+        if (!direct && !tUrl.isEmpty()) {
+            QUrl u(m_server + (tUrl.startsWith('/') ? tUrl : '/' + tUrl));
+            QUrlQuery q(u);
+            // The segments are fetched without our request headers: the token must be in the address.
+            if (!q.hasQueryItem("api_key") && !q.hasQueryItem("ApiKey")) q.addQueryItem("api_key", m_token);
+            u.setQuery(q);
+            pb.url = u;
+            pb.transcode = true;
+            pb.tokenInUrl = true;
+            const QJsonValue reasons = src.value("TranscodeReasons");
+            if (reasons.isArray()) for (const QJsonValue& v : reasons.toArray()) pb.transcodeReasons << v.toString();
+            else if (reasons.isString()) pb.transcodeReasons = reasons.toString().split(',', Qt::SkipEmptyParts);
+            if (pb.transcodeReasons.isEmpty())
+                pb.transcodeReasons = QUrlQuery(u).queryItemValue("TranscodeReasons", QUrl::FullyDecoded).split(',', Qt::SkipEmptyParts);
+        } else if (!direct) {
+            pb.error = tr("The server can neither send the original file nor convert it.");
+        }
+        // Subtitle files: the item's external ones; when converted, also embedded text
+        // subtitles, which the server extracts (the conversion leaves them out).
+        for (const QJsonValue& v : src.value("MediaStreams").toArray()) {
+            const QJsonObject st = v.toObject();
+            if (st.value("Type").toString() != QLatin1String("Subtitle")) continue;
+            QString label = st.value("DisplayTitle").toString();
+            if (label.isEmpty()) label = st.value("Language").toString(tr("Subtitle"));
+            const QString delivery = st.value("DeliveryUrl").toString();
+            if (pb.transcode && !delivery.isEmpty() && st.value("DeliveryMethod").toString() == QLatin1String("External")) {
+                pb.subtitles.append({label, QUrl(m_server + (delivery.startsWith('/') ? delivery : '/' + delivery))});
+            } else if (st.value("IsExternal").toBool()) {
+                const QString codec = st.value("Codec").toString().toLower();
+                const QString fmt = (codec == "ass" || codec == "ssa") ? "ass" : (codec == "webvtt" || codec == "vtt") ? "vtt" : "srt";
+                pb.subtitles.append({label, url(QStringLiteral("/Videos/%1/%2/Subtitles/%3/0/Stream.%4")
+                                                   .arg(itemId, pb.mediaSourceId).arg(st.value("Index").toInt()).arg(fmt))});
+            }
+        }
+        done(pb);
+    });
+}
+
+void JellyfinClient::stopTranscode(const QString& playSessionId)
+{
+    if (!isSignedIn() || playSessionId.isEmpty()) return;
+    QNetworkRequest req(url(QStringLiteral("/Videos/ActiveEncodings"), {{"deviceId", m_deviceId}, {"playSessionId", playSessionId}}));
+    req.setRawHeader("Authorization", authorizationHeader());
+    req.setRawHeader("X-Emby-Authorization", authorizationHeader());
+    QNetworkReply* r = m_net->deleteResource(req);
+    connect(r, &QNetworkReply::finished, r, &QObject::deleteLater);
+}
+
+void JellyfinClient::setPlayMethod(const QString& playMethod, const QString& playSessionId, const QString& mediaSourceId)
+{
+    m_playMethod = playMethod.isEmpty() ? QStringLiteral("DirectPlay") : playMethod;
+    m_serverPlaySession = playSessionId;
+    m_mediaSourceId = mediaSourceId;
+}
+
 // ---- playback reporting --------------------------------------------------------------
 
 void JellyfinClient::reportStart(const QString& itemId, qint64 positionNs, bool paused)
 {
     if (!isSignedIn()) return;
-    m_playSession = QUuid::createUuid().toString(QUuid::WithoutBraces);
+    m_playSession = !m_serverPlaySession.isEmpty() ? m_serverPlaySession : QUuid::createUuid().toString(QUuid::WithoutBraces);
+    const QString source = m_mediaSourceId.isEmpty() ? itemId : m_mediaSourceId;
     QNetworkReply* r = post(QStringLiteral("/Sessions/Playing"),
-                            {{"ItemId", itemId}, {"MediaSourceId", itemId}, {"PositionTicks", double(nsToTicks(positionNs))},
-                             {"IsPaused", paused}, {"CanSeek", true}, {"PlayMethod", "DirectPlay"}, {"PlaySessionId", m_playSession}});
+                            {{"ItemId", itemId}, {"MediaSourceId", source}, {"PositionTicks", double(nsToTicks(positionNs))},
+                             {"IsPaused", paused}, {"CanSeek", true}, {"PlayMethod", m_playMethod}, {"PlaySessionId", m_playSession}});
     connect(r, &QNetworkReply::finished, r, &QObject::deleteLater);
 }
 
 void JellyfinClient::reportProgress(const QString& itemId, qint64 positionNs, bool paused, const QString& event)
 {
     if (!isSignedIn()) return;
-    QJsonObject o{{"ItemId", itemId}, {"MediaSourceId", itemId}, {"PositionTicks", double(nsToTicks(positionNs))},
-                  {"IsPaused", paused}, {"CanSeek", true}, {"PlayMethod", "DirectPlay"}, {"PlaySessionId", m_playSession}};
+    QJsonObject o{{"ItemId", itemId}, {"MediaSourceId", m_mediaSourceId.isEmpty() ? itemId : m_mediaSourceId},
+                  {"PositionTicks", double(nsToTicks(positionNs))}, {"IsPaused", paused}, {"CanSeek", true},
+                  {"PlayMethod", m_playMethod}, {"PlaySessionId", m_playSession}};
     if (!event.isEmpty()) o.insert("EventName", event);
     QNetworkReply* r = post(QStringLiteral("/Sessions/Playing/Progress"), o);
     connect(r, &QNetworkReply::finished, r, &QObject::deleteLater);
@@ -462,8 +578,10 @@ QNetworkReply* JellyfinClient::reportStopped(const QString& itemId, qint64 posit
 {
     if (!isSignedIn()) return nullptr;
     QNetworkReply* r = post(QStringLiteral("/Sessions/Playing/Stopped"),
-                            {{"ItemId", itemId}, {"MediaSourceId", itemId}, {"PositionTicks", double(nsToTicks(positionNs))},
-                             {"PlaySessionId", m_playSession}});
+                            {{"ItemId", itemId}, {"MediaSourceId", m_mediaSourceId.isEmpty() ? itemId : m_mediaSourceId},
+                             {"PositionTicks", double(nsToTicks(positionNs))}, {"PlaySessionId", m_playSession}});
+    // A conversion on the server ends with the playback.
+    if (m_playMethod == QLatin1String("Transcode")) stopTranscode(m_playSession);
     connect(r, &QNetworkReply::finished, r, &QObject::deleteLater);
     if (m_items.contains(itemId)) m_items[itemId].positionTicks = nsToTicks(positionNs);
     return r;

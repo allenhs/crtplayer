@@ -45,6 +45,9 @@ public:
     // Raise hardware video decoders above software ones (or disable them).
     static void applyDecoderPolicy(bool allowHardware);
     static QStringList availableHardwareDecoders();
+    // What this computer's GStreamer can open and decode, in Jellyfin's names
+    // ("mkv", "h264", "aac"...), for the device profile sent to a Jellyfin server.
+    static void localFormats(QStringList* containers, QStringList* videoCodecs, QStringList* audioCodecs);
 
     bool open(const QString& pathOrUri, bool autoplay = true, qint64 startNs = 0);
     // Extra request headers for http(s) sources (e.g. Jellyfin's Authorization), applied to

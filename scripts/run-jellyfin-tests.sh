@@ -10,9 +10,9 @@ for VER in 10.8.13 10.10.3; do
   CFG=$(mktemp -d); PORT=$((18000 + RANDOM % 900))
   python3 "$HERE/tests/jellyfin_mock.py" --media "$M" --port $PORT --version $VER --log "$D/requests.jsonl" > "$D/mock.log" 2>&1 &
   MOCK=$!; sleep 1
-  for t in jellyfin jellyfin-restore; do
+  for t in jellyfin jellyfin-restore jellyfin-transcode; do
     sed -e "s#@JF@#http://127.0.0.1:$PORT#g" "$HERE/tests/automation/$t.txt" > "$D/$t.txt"
-    XDG_CONFIG_HOME="$CFG" timeout 200 "$BIN" --automation "$D/$t.txt" --automation-log "$D/$t.json" > "$D/$t.log" 2>&1
+    XDG_CONFIG_HOME="$CFG" timeout 400 "$BIN" --automation "$D/$t.txt" --automation-log "$D/$t.json" > "$D/$t.log" 2>&1
   done
   kill $MOCK 2>/dev/null
   python3 "$HERE/scripts/check-jellyfin.py" "$D" "$VER" "$CFG/CRTPlayer/CRTPlayer/jellyfin.json" | tee "$D/checks.txt" || rc=1

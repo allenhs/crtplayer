@@ -1078,6 +1078,10 @@ your `https://` address), your user name and password.
 libraries. Folders, series and seasons open with a double-click; the search field
 searches all libraries.
 
+Big libraries load **100 items at a time**: the next 100 arrive as you scroll near the
+end, and the heading shows how many are loaded (*Movies — 300 of 1,234*). There's no upper
+limit.
+
 **Playing:**
 
 | Action | Result |
@@ -1085,14 +1089,38 @@ searches all libraries.
 | Double-click a video | Plays it, resuming where you left off |
 | Right-click → *Play from the beginning* | Plays from the start |
 | Right-click → *Add to playlist* | Queues it; Jellyfin items and local files can be mixed |
+| Right-click → *Play converted by the server* | Has the server convert it, even though this computer could play the original |
 
-- **Videos stream in their original format** (Jellyfin's "direct play"). *This computer's*
-  GStreamer decodes them, so everything works on them: every CRT effect, lower
-  resolution, desk mode, screenshots, audio and subtitle tracks embedded in the file,
-  and seeking (via HTTP range requests).
-- **The token travels in a request header,** not in the URL, so it never shows up in the
-  window title, playlist, screenshots or logs. Playlist entries store only the item's ID
-  and title, and become an authenticated stream when played.
+**Original file or converted by the server.** Before each video the player asks the
+server how to play it. It sends the list of formats this computer's GStreamer can open
+and decode.
+
+- **Original file** ("direct play") whenever this computer can decode it. Everything
+  works on it: every CRT effect, lower resolution, desk mode, screenshots, all audio and
+  subtitle tracks in the file, and seeking (via HTTP range requests).
+- **Converted by the server** when this computer can't decode the file (a codec it
+  lacks), or when the file is over the **Quality** limit at the bottom of the Jellyfin
+  panel. The server sends H.264 video with AAC audio as HLS, which plays and seeks
+  normally, with every CRT effect. Subtitles in the file are offered as files from the
+  server (*Subtitles* menu). Only one audio track comes with a conversion.
+- **Quality:** *Original file* (the default) never limits. *Up to 40 … 1 Mbit/s* has the
+  server convert anything above the limit: for a slow connection, or a server away
+  from home.
+- **If an original won't play here** (a codec GStreamer reports only once it opens the
+  file, or a damaged file), the player asks the server for a conversion instead, once,
+  and carries on from the same point.
+- The technical info overlay (**I**) shows which it is: *Jellyfin — original file* or
+  *converted by the server: video format*.
+
+**The token:**
+
+- For original files it travels in a request header, not in the address.
+- A conversion's HLS segments are fetched separately, without the player's headers, so
+  their addresses carry the token, as with Jellyfin's own apps.
+- Either way it never shows up in the window title, playlist, info overlay, screenshots or
+  logs. Playlist entries store only the item's ID and title, and become an authenticated
+  stream when played.
+- The server's conversion is ended when playback moves on.
 - **Progress syncs back to the server.** Start, pause/resume, position every 10 seconds,
   and stop are all reported. Your resume points and *watched* marks stay in step with
   Jellyfin's other apps.
@@ -1103,8 +1131,8 @@ supported.
 
 **Current limitations:**
 
-- **No server-side transcoding.** If this computer lacks a codec for a file, the usual
-  "missing codec" message explains which one.
+- **A conversion carries one audio track** (the file's default) and no embedded image
+  subtitles (PGS/DVD). Text subtitles are offered as files.
 - **HTTPS needs a certificate your system trusts.** A certificate from a public authority
   (for example Let's Encrypt behind a reverse proxy) works. Untrusted self-signed
   certificates are refused. Plain `http://` works on a home network.

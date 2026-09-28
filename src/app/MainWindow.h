@@ -70,6 +70,7 @@ public:
     JellyfinClient* jellyfin() const { return m_jf; }
     JellyfinPanel* jellyfinPanel() const { return m_jfPanel; }
     void playJellyfin(const JfItem& item, bool fromStart);
+    void playJellyfinConverted(const JfItem& item);
     void enqueueJellyfin(const JfItem& item);
     void showJellyfin(bool on);
     DeskWindow* deskWindow() const { return m_desk; }
@@ -152,6 +153,13 @@ private:
     QDockWidget* m_jfDock = nullptr;
     QString m_jfItemId;          // Jellyfin item currently playing
     bool m_jfStarted = false;    // start reported to the server
+    int m_jfRequest = 0;         // PlaybackInfo requests: only the latest one's answer is used
+    bool m_jfTranscoding = false;        // the server converts the current item
+    QString m_jfPlaySession;             // the server's play session (its conversion)
+    QStringList m_jfReasons;             // why it converts
+    bool m_jfForceNext = false;          // the next Jellyfin open asks for a conversion
+    bool m_jfRetried = false;            // the original failed and a conversion was tried
+    qint64 m_jfStartNs = 0;              // where the current item was opened
     qint64 m_pendingStartNs = -1;
     QString m_mediaTitle;        // shown instead of a file name (network items)
     QTimer m_jfTimer;
@@ -226,6 +234,8 @@ private:
     qint64 m_loopA = -1, m_loopB = -1;          // ns
     QTimer m_resumeTimer;
     void jellyfinStopCurrent(bool waitForServer);
+    void openResolved(int index, const QString& uri, qint64 start, const QString& shown, const QString& note);
+    QString jellyfinPlayDescription() const;   // "original file" / "converted by the server (…)"
     void vcr(const QString& text, double seconds);   // VCR on-screen display, when enabled
     bool m_deskActive = false;
 };

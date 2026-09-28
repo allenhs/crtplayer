@@ -48,6 +48,7 @@ struct AppSettings {
     bool cgModels = true;
     int cgModelFinish = 0;   // picture in the theater: 0 35mm print, 1 worn 16mm, 2 drive-in, 3 keep the current look
     bool keepAwake = true;  // no screen dimming / sleep while a video plays
+    int jfMaxBitrateMbps = 0;   // Jellyfin quality limit, Mbit/s (0 = the original file)
     bool lookSound = true;  // the look's sound: tape hiss, TV speaker, film crackle
     double noiseVolume = 1.0;     // how loud the hiss and crackle are (0 .. 2)
     double effectStrength = 1.0;  // how strongly the sound is changed (0 .. 1)
