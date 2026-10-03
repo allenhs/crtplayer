@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(CRTPlayer VERSION 2.10.0 LANGUAGES CXX)
+project(CRTPlayer VERSION 2.11.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -39,6 +39,7 @@ target_link_libraries(crtcore PUBLIC Qt6::Core Qt6::Gui)
 add_executable(crtplayer
   src/main.cpp
   src/app/MainWindow.cpp      src/app/MainWindow.h
+  src/app/Everyday.cpp
   src/app/Automation.cpp      src/app/Automation.h
   src/app/DeskWindow.cpp      src/app/DeskWindow.h
   src/playback/Player.cpp     src/playback/Player.h

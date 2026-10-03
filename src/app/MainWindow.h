@@ -183,6 +183,53 @@ private:
     QTimer m_jfTimer;
     QVector<JfItem> m_jfResume;   // Continue watching, for the desk-mode menu
 
+    // 2.11: everyday playback (Everyday.cpp)
+public:
+    void setSubtitlesWanted(bool on, bool announce = true);   // off until asked for; then it stays as set
+    void chooseSubtitleTrack(int index);                       // -1: off
+    void chooseAudioTrack(int index);
+    void setAudioDelay(int ms, bool announce = true);
+    void setSubtitleDelay(int ms, bool announce = true);
+    void setSubtitleStyle(const struct SubtitleStyle& st);
+    void setNightMode(bool on, bool announce = true);
+    void setDeinterlace(bool on);
+    void setShuffle(bool on);
+    void setRepeatMode(int mode);
+    void setAutoNext(bool on);
+    void setSleepTimer(int minutes);            // 0 off, -1 at the end of this video
+    void setSleepTimerSeconds(int seconds);     // (tests)
+    void cycleSleepTimer();
+    bool savePlaylistFile(const QString& path);
+    static QStringList readPlaylistFile(const QString& path);
+    static bool isPlaylistFile(const QString& path);
+    static QString nextInFolder(const QString& path);
+    QJsonObject everydayReport() const;
+    PlaylistPanel* playlistPanel() const { return m_playlist; }
+    void showPlaylist(bool on);
+private:
+    void applyEverydaySettings();
+    struct SubtitleStyle subtitleStyleFromSettings() const;
+    void maybeLoadOfferedSubtitle();
+    void refreshSubtitlesSoon(bool evenWhilePlaying);
+    void refreshSubtitlesNow();
+    bool m_gifBusy() const;
+    QTimer m_subRefresh;
+    bool m_subRefreshAlways = false;
+    int pickNext(int dir);
+    bool playAfterEnd();
+    void savePlaylistDialog();
+    int sleepRemainingSeconds() const;
+    void updateSleepStatus();
+    void sleepTick();
+    void goToSleep();
+    QStringList m_shufflePlayed, m_shuffleHistory;   // this round's videos; the way back
+    QTimer m_sleepTimer;
+    qint64 m_sleepAt = 0;              // wall clock ms; 0: no timer
+    bool m_sleepAtEnd = false, m_sleepWarned = false, m_sleepFading = false;
+    int m_sleepMinutes = 0, m_sleepCount = 0;
+    QStringList m_playLog;             // what was opened, in order (the checks read it)
+    QString m_autoSubTried;            // the Jellyfin item whose offered subtitles were already tried
+
     // 1.8: resume, recent files, external subtitles, speed, A-B loop, chapters, previews
 public:
     void setExternalSubtitleFile(const QString& uri, const QString& label);   // reloads at the current position

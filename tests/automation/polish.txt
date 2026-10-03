@@ -45,6 +45,8 @@ thumb 5000 @O@/thumb5.png
 seek 20
 wait 900
 screenshot original @O@/orig20.png
+# (2.11: subtitles are off until asked for)
+subs on
 open @M@/subs_clip.mp4
 waitstate playing 15000
 seek 5
@@ -63,6 +65,7 @@ waitstate paused 15000
 wait 1200
 screenshot original @O@/sub_en.png
 report sub-en
+subs off
 open @M@/resume_clip.mp4
 waitstate playing 15000
 seek 45

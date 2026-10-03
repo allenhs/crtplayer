@@ -1,0 +1,304 @@
+# 2.11: everyday playback. Subtitles are off until asked for and then stay as set; the
+# languages picked carry over; delays, subtitle style, night mode, deinterlacing, shuffle
+# and repeat, playlist files, carrying on in a folder, the sleep timer.
+# ---- subtitles: off by default
+open @M@/hd_16x9_multitrack.mkv
+waitstate playing 15000
+pause
+seek 3
+wait 1200
+screenshot original @O@/ev-sub-default.png
+report sub-default
+subs on
+# (a line already on screen at a seek point is not sent again by the file: play into it)
+seek 0
+wait 800
+play
+waitpos 3000
+pause
+wait 500
+screenshot original @O@/ev-sub-on.png
+report sub-on
+subtrack 1
+wait 800
+report sub-fr
+# English subtitles and Japanese sound: the choices from now on
+subtrack 0
+wait 400
+audiotrack 1
+wait 600
+report picked
+# changing the sound track while paused and then seeking (this used to freeze the player)
+play
+wait 1500
+report heard-ja
+pause
+wait 300
+audiotrack 0
+seek 5
+audiotrack 1
+seek 7
+wait 300
+play
+waitstate playing 8000
+wait 1500
+report paused-switch
+# the same languages in the other order: picked by language, not by place
+open @M@/multitrack_b.mkv
+waitstate playing 15000
+wait 1500
+report other-order
+# a video without subtitles in between changes nothing
+open @M@/sd_4x3_h264.mp4
+waitstate playing 15000
+wait 800
+report no-subs
+open @M@/hd_16x9_multitrack.mkv
+waitstate playing 15000
+wait 1500
+report back
+# off stays off
+subs off
+wait 300
+open @M@/multitrack_b.mkv
+waitstate playing 15000
+wait 1500
+report off-carried
+# a subtitle file next to the video is ready, but not shown until asked for
+open @M@/subs_clip.mp4
+waitstate playing 15000
+pause
+seek 3
+wait 1200
+screenshot original @O@/ev-sidecar-off.png
+report sidecar-off
+subs on
+seek 3
+wait 1200
+screenshot original @O@/ev-sidecar-on.png
+report sidecar-on
+# ---- subtitle delay (the line is stored from 4 to 6 s) and style
+open @M@/timed_subs.mkv
+waitstate playing 15000
+pause
+seek 3
+wait 1200
+screenshot original @O@/ev-timed-3.png
+# 1.5 s earlier: on screen from 2.5 s
+subdelay -1500
+seek 0
+wait 800
+play
+waitpos 3200
+pause
+wait 500
+report sub-early
+screenshot original @O@/ev-timed-early.png
+# 1.5 s later: not yet at 4.8 s, still there at 6.6 s
+subdelay 1500
+seek 0
+wait 800
+play
+waitpos 4700
+pause
+wait 500
+report sub-late-a
+screenshot original @O@/ev-timed-late-a.png
+play
+waitpos 6500
+pause
+wait 500
+report sub-late-b
+screenshot original @O@/ev-timed-late-b.png
+subdelay 0
+seek 4.5
+wait 1200
+screenshot original @O@/ev-style-normal.png
+substyle 3 0 0 0
+seek 4.5
+wait 1200
+screenshot original @O@/ev-style-large.png
+substyle 0 0 0 0
+seek 4.5
+wait 1200
+screenshot original @O@/ev-style-small.png
+substyle 1 1 0 0
+seek 4.5
+wait 1200
+screenshot original @O@/ev-style-yellow.png
+substyle 1 0 1 0
+seek 4.5
+wait 1200
+screenshot original @O@/ev-style-box.png
+substyle 1 0 0 2
+seek 4.5
+wait 1200
+screenshot original @O@/ev-style-top.png
+substyle 1 0 0 1
+seek 4.5
+wait 1200
+screenshot original @O@/ev-style-raised.png
+substyle 1 0 0 0
+subdelay 700
+report subdelay-set
+# ---- sound delay: it is remembered; a subtitle delay belongs to one video
+open @M@/sd_4x3_h264.mp4
+waitstate playing 15000
+wait 1500
+resetsync
+wait 3000
+report sync-base
+audiodelay 400
+wait 600
+report adelay-later
+audiodelay -400
+wait 1200
+resetsync
+wait 3000
+report adelay-earlier
+audiodelay 100
+# ---- deinterlacing
+open @M@/interlaced_mpeg2.mkv
+waitstate playing 15000
+wait 1200
+pause
+seek 2
+wait 1200
+screenshot original @O@/ev-deint-on.png
+report deint-on
+deinterlace off
+wait 2500
+seek 2
+wait 1200
+screenshot original @O@/ev-deint-off.png
+report deint-off
+deinterlace on
+wait 2500
+open @M@/sd_4x3_h264.mp4
+waitstate playing 15000
+wait 1000
+report progressive
+# ---- night mode: a quiet tone for 6 s, then a loud one
+open @M@/quiet_loud.mp4
+waitstate playing 15000
+seek 1
+wait 2500
+report quiet
+night on
+wait 1800
+report quiet-night
+seek 7.5
+wait 2500
+report loud-night
+night off
+wait 1500
+report loud
+# ---- shuffle: every video once, then the end
+playlist clear
+open @M@/short_a.mp4
+enqueue @M@/short_b.mp4
+enqueue @M@/short_c.mp4
+enqueue @M@/short_d.mp4
+enqueue @M@/short_e.mp4
+shuffle on
+waitstate playing 15000
+report shuffle-start
+wait 30000
+report shuffle-end
+# ---- repeat the playlist: after the last, the first
+shuffle off
+repeat all
+playlist play 4
+waitstate playing 15000
+wait 6500
+report repeat-all
+# ---- repeat this video
+repeat one
+wait 7500
+report repeat-one
+repeat off
+# ---- playlist files
+playlist save @O@/everyday-media/five.m3u8
+playlist clear
+open @O@/everyday-media/five.m3u8
+waitstate playing 15000
+wait 500
+report m3u-loaded
+# ---- carrying on with the next video in the folder (Episode 1, 2, 10)
+playlist clear
+autonext on
+open @O@/everyday-media/Episodes/Episode 1.mp4
+waitstate playing 15000
+wait 15500
+report autonext
+playlist save @O@/everyday-media/Episodes/episodes.m3u
+autonext off
+playlist clear
+open @O@/everyday-media/Episodes/Episode 1.mp4
+waitstate playing 15000
+wait 6500
+report autonext-off
+# ---- sleep timer
+playlist clear
+open @M@/sd_4x3_h264.mp4
+waitstate playing 15000
+seek 1
+sleep seconds 12
+wait 2000
+report sleep-set
+wait 7200
+report sleep-fading
+wait 5000
+report sleep-done
+# ... at the end of this video: the playlist does not go on
+playlist clear
+open @M@/short_a.mp4
+enqueue @M@/short_b.mp4
+waitstate playing 15000
+sleep end
+report sleep-end-set
+wait 6500
+report sleep-end
+# ---- Cable TV: subtitles as set, from channel to channel; the sleep timer turns the TV off
+tvadd 2 order @O@/everyday-media/tv-a
+tvadd 3 order @O@/everyday-media/tv-b
+tvwait 30000
+tv on
+waitstate playing 20000
+wait 1800
+report tv-2
+tv up
+waitstate playing 20000
+wait 1800
+report tv-3
+subs off
+wait 300
+tv down
+waitstate playing 20000
+wait 1800
+report tv-2-off
+tv up
+waitstate playing 20000
+wait 1800
+report tv-3-off
+subs on
+wait 800
+report tv-3-on
+sleep seconds 9
+wait 11500
+report tv-sleep
+# ... and "at the end of this video" is the end of the programme (the channels here are one video each, on a loop)
+tv on
+waitstate playing 20000
+sleep end
+report tv-sleep-end-set
+wait 34000
+report tv-sleep-end
+# ---- what the next launch should find
+substyle 2 1 0 0
+night on
+shuffle on
+repeat all
+autonext on
+report before-quit
+quit

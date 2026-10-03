@@ -1,0 +1,12 @@
+# Second launch: everything is as it was left.
+report restored
+open @M@/multitrack_b.mkv
+waitstate playing 15000
+wait 1500
+report restored-playing
+subs off
+night off
+shuffle off
+repeat off
+autonext off
+quit

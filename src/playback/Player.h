@@ -7,6 +7,7 @@
 #include <QVector>
 #include <atomic>
 #include <gst/gst.h>
+#include "TapeAudio.h"
 
 struct ChapterInfo {
     qint64 startNs = 0;
@@ -16,6 +17,16 @@ struct ChapterInfo {
 struct TrackInfo {
     int index = 0;
     QString label;
+    QString lang;   // language code as short as it comes ("en", "ja"), lower case; empty when the file doesn't say
+};
+
+// How subtitle text is drawn (text subtitles; picture subtitles such as DVD's come as they are).
+struct SubtitleStyle {
+    int size = 1;         // 0 small, 1 normal, 2 large, 3 very large
+    int color = 0;        // 0 white, 1 yellow
+    int background = 0;   // 0 outline and shadow, 1 a dark box behind the text
+    int position = 0;     // 0 bottom, 1 raised, 2 top
+    bool operator==(const SubtitleStyle& o) const { return size == o.size && color == o.color && background == o.background && position == o.position; }
 };
 
 // Thin, thread-safe wrapper around GStreamer's playbin.
@@ -40,7 +51,7 @@ public:
     static QList<Gap> missingRecommended();
     QString audioOutput() const { return m_audioOutput; }   // "automatic", a sink name, or "none"
     // Tape and speaker sound (the look's sound settings); applied live.
-    void setTapeParams(const struct TapeParams& p);
+    void setTapeParams(const TapeParams& p);
     bool hasTapeSound() const { return m_tape != nullptr; }
     // Raise hardware video decoders above software ones (or disable them).
     static void applyDecoderPolicy(bool allowHardware);
@@ -54,7 +65,8 @@ public:
     // the next open(). Headers keep credentials out of URLs, logs and window titles.
     void setHttpHeaders(const QList<QPair<QByteArray, QByteArray>>& headers);
     // External subtitle file (path or URI) used by the next open(); empty = none.
-    void setExternalSubtitle(const QString& pathOrUri);
+    // chosenByViewer: picked by hand for this video (it is then shown whatever the language preference says).
+    void setExternalSubtitle(const QString& pathOrUri, bool chosenByViewer = false);
     QString externalSubtitle() const { return m_subUri; }
     // Playback speed (0.25 .. 4.0). Voices keep their pitch (scaletempo).
     void setRate(double rate);
@@ -90,6 +102,28 @@ public:
     int currentSubtitleTrack() const;   // -1 = off
     void setAudioTrack(int idx);
     void setSubtitleTrack(int idx);     // -1 = off
+
+    // What the viewer wants from every video, applied as each one opens: subtitles on or
+    // off, and which language to pick when there is a choice. (Picking a track by hand
+    // in a video holds for that video.)
+    void setSubtitlesWanted(bool on);
+    bool subtitlesWanted() const { return m_subsWanted; }
+    void setPreferredLanguages(const QString& audio, const QString& subtitle);
+    // Sound later (+) or earlier (-) than the picture; subtitles later (+) or earlier (-).
+    void setAudioDelay(int ms);
+    int audioDelay() const { return m_audioDelayMs; }
+    void setSubtitleDelay(int ms);
+    int subtitleDelay() const { return m_subDelayMs; }
+    void setSubtitleStyle(const SubtitleStyle& st);
+    SubtitleStyle subtitleStyle() const { return m_subStyle; }
+    // Interlaced video (DVDs, TV recordings) is deinterlaced; progressive video is never touched.
+    void setDeinterlace(bool on) { m_deinterlace = on; }   // from the next open()
+    bool deinterlace() const { return m_deinterlace; }
+    bool deinterlacing() const;   // the current video is interlaced and is being deinterlaced
+    // (for the checks) the delays as the sinks hold them, ms: sound, picture, subtitles; and the sound level going out (dB)
+    void appliedOffsets(int* audioSinkMs, int* videoSinkMs, int* textMs) const;
+    float soundLevelDb() const { return crtTapeLevelDb(m_tape); }
+    float soundPitchHz() const { return crtTapePitchHz(m_tape); }
 
     void setHardwareDecoding(bool enabled) { m_hwEnabled = enabled; }
     bool hardwareDecodingEnabled() const { return m_hwEnabled; }
@@ -145,11 +179,33 @@ private:
     static void onDeepElementAdded(GstBin*, GstBin*, GstElement*, gpointer self);
     static void onStreamsChanged(GstElement*, gpointer self);
     static void onSourceSetup(GstElement*, GstElement* source, gpointer self);
+    void applyTrackPreferences();
+    // A sound track is only switched while the video is running: switched while paused or
+    // while it opens, and then followed by a seek, GStreamer's playbin can lock up for good.
+    // Until then the choice waits here (and counts as the current track).
+    bool canSwitchAudioNow() const { return m_pipe && m_loaded && m_state == State::Playing && !m_seekInFlight; }
+    void switchPendingAudio();
+    int m_pendingAudio = -1;
+    bool m_prefMuted = false;      // silent until the preferred language is switched in (no burst of the other one)
+    void applyOffsets();
+    void applySubtitleStyle();
+    bool m_subsWanted = false;
+    QString m_prefAudioLang, m_prefSubLang;
+    bool m_audioPicked = false, m_subPicked = false;   // the viewer chose a track in this video
+    int m_audioDelayMs = 0, m_subDelayMs = 0;
+    SubtitleStyle m_subStyle;
+    bool m_deinterlace = true;
+    GstElement* m_textOverlay = nullptr;   // the element drawing subtitle text (a reference); guarded by m_mutex
+    GstElement* m_subOverlay = nullptr;    // playbin's subtitle overlay bin (a reference); guarded by m_mutex
+    bool m_subShown = false;               // subtitles are being shown in this video
+    void applySubtitleShown();
+    GstElement* m_deintEl = nullptr;       // playbin's deinterlacer (a reference); guarded by m_mutex
     QList<QPair<QByteArray, QByteArray>> m_httpHeaders;   // guarded by m_mutex
     QString m_subUri;
+    bool m_subUriChosen = false;
     QString m_audioOutput = QStringLiteral("automatic");
     GstElement* m_tape = nullptr;   // the "crttape" element in the audio chain (owned by the pipeline)
-    float m_tapeValues[8] = {0, 0, 0, 0, 0, 0, 0, 0};
+    TapeParams m_tapeParams;
     double m_rate = 1.0;
     QVector<ChapterInfo> m_chapters;
     void readToc(GstToc* toc);

@@ -81,6 +81,7 @@ QScrollBar::add-line, QScrollBar::sub-line { height: 0; }
 #controlBar QToolButton { background: transparent; border: 0; border-radius: 8px; padding: 5px; }
 #controlBar QToolButton:hover { background: rgba(255, 255, 255, 0.08); }
 #controlBar QToolButton:checked { background: rgba(242, 163, 58, 0.16); }
+QToolButton:checked { background: rgba(242, 163, 58, 0.22); border-radius: 6px; }
 #controlBar QToolButton::menu-indicator { image: none; width: 0; }
 #controlBar QLabel { color: #cfcabf; }
 #controlBar #timeLabel { color: #e8e4da; }

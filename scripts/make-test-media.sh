@@ -49,6 +49,29 @@ ffmpeg $F -f lavfi -i "smptebars=size=640x480:rate=30" -f lavfi -i "sine=f=500:d
   -t 20 -c:v libx264 -pix_fmt yuv420p -c:a aac -shortest subs_clip.mp4
 printf '1\n00:00:00,000 --> 00:01:00,000\nSIDECAR SUBTITLE TEST\n' > subs_clip.srt
 printf '1\n00:00:00,000 --> 00:01:00,000\nSECOND SUBTITLE FILE\n' > subs_clip.en.srt
+# 2.11: the same languages as hd_16x9_multitrack.mkv in the other order (Japanese sound first, French subtitles first),
+# to see that tracks are picked by language and not by their place.
+ffmpeg $F -f lavfi -i "testsrc2=size=640x360:rate=25:duration=20" -f lavfi -i "sine=f=880:duration=20" -f lavfi -i "sine=f=440:duration=20" \
+  -i fr.srt -i en.srt -map 0:v -map 1:a -map 2:a -map 3 -map 4 -c:v libx264 -pix_fmt yuv420p -g 25 -c:a aac -c:s srt \
+  -metadata:s:a:0 language=jpn -metadata:s:a:1 language=eng -metadata:s:s:0 language=fre -metadata:s:s:1 language=eng multitrack_b.mkv
+# A subtitle that is on screen from 4 to 6 seconds only, on a plain picture (subtitle delay, subtitle style).
+printf '1\n00:00:04,000 --> 00:00:06,000\nTIMED LINE\n' > timed.srt
+ffmpeg $F -f lavfi -i "color=c=0x305070:size=640x480:rate=25:duration=12" -f lavfi -i "sine=f=440:duration=12" -i timed.srt \
+  -map 0:v -map 1:a -map 2 -c:v libx264 -pix_fmt yuv420p -g 25 -c:a aac -c:s srt -metadata:s:s:0 language=eng timed_subs.mkv
+rm -f timed.srt
+# Interlaced video (MPEG-2, top field first): a bar that moves between the two fields of every frame, so it combs.
+ffmpeg $F -f lavfi -i "color=c=black:size=720x480:rate=60000/1001" -f lavfi -i "color=c=white:size=80x240:rate=60000/1001" \
+  -f lavfi -i "sine=f=440:duration=8" -t 8 -filter_complex "[0:v][1:v]overlay=x='mod(t*600,640)':y=120,interlace=scan=tff,setsar=8/9[v]" \
+  -map "[v]" -map 2:a -c:v mpeg2video -q:v 3 -flags +ildct+ilme -top 1 -c:a ac3 -shortest interlaced_mpeg2.mkv
+# Quiet, then loud (night mode): a tone at -40 dB for 6 seconds, then at -6 dB.
+ffmpeg $F -f lavfi -i "testsrc2=size=320x240:rate=25:duration=12" \
+  -f lavfi -i "sine=f=300:r=48000:duration=12,volume='if(lt(t,6),0.08,4.0)':eval=frame,aformat=channel_layouts=stereo" \
+  -c:v libx264 -pix_fmt yuv420p -c:a aac -b:a 160k -shortest quiet_loud.mp4
+# Short clips for playlists (shuffle, repeat, carrying on in a folder): each a different colour.
+for c in a:c03030 b:30c030 c:3030c0 d:c0c030 e:c030c0; do
+  ffmpeg $F -f lavfi -i "color=c=0x${c#*:}:size=320x240:rate=25:duration=3" -f lavfi -i "sine=f=440:duration=3" \
+    -c:v libx264 -pix_fmt yuv420p -c:a aac -shortest "short_${c%%:*}.mp4"
+done
 # Resume: long enough that a position in the middle is remembered (first/last 30 s are not).
 ffmpeg $F -f lavfi -i "testsrc2=size=320x240:rate=15" -f lavfi -i "sine=f=440:duration=90" \
   -t 90 -c:v libx264 -pix_fmt yuv420p -c:a aac -shortest resume_clip.mp4

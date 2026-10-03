@@ -64,7 +64,8 @@ def picture_box(path):
 t = rep['tuning']
 check('turning the TV on tunes the first channel, with static until the picture arrives', t['tv']['on'] and t['tv']['channel'] == 2 and t['staticMoment'] == 'static',
       f"channel {t['tv']['channel']}, {t['staticMoment']}")
-ok, d = live('ch2')
+# (The very first tune of a first run cannot know yet how long videos take to open on this computer.)
+ok, d = live('ch2', 5000)
 check('it comes on partway through, where the broadcast is', ok and rep['ch2']['tv']['channel'] == 2, d)
 ov = rep['badge']['tv']['overlay'].split('|')
 later = rep['plain']['tv']['overlay'].split('|')
@@ -77,7 +78,9 @@ check('channel up: the Jellyfin channel plays, in step with its schedule', ok an
 toons = [rep[f'toons-{i}'] for i in range(1, 6)]
 # In step with the schedule - or caught in a change-over, with the next programme just opening.
 changing = [-2000 < e['tv']['scheduleOffsetMs'] < 4500 and e['file'] == e['tv']['program'] for e in toons]
-oks = [live(f'toons-{i}')[0] for i in range(1, 6)]
+# (A programme up to 3 s late starts from its top rather than lose its beginning, and a bumper plays whole:
+# with this machine's 2 s to open a video, the player can run up to about 5 s behind for a while.)
+oks = [live(f'toons-{i}', 6500)[0] for i in range(1, 6)]
 progs = [e['tv']['program'] for e in toons]
 check('programmes follow one another on their own, as scheduled', all(a or b for a, b in zip(oks, changing)) and sum(oks) >= 3 and len(set(progs)) >= 2,
       ' → '.join(progs) + f" ({sum(oks)} of 5 looks in step, {5 - sum(oks)} during a change-over)")

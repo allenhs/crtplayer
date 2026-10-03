@@ -3,12 +3,12 @@ PASS  chapter next: to the third chapter (20 s): 20000 ms
 PASS  chapter previous: back to the second chapter: 10000 ms
 PASS  2x speed: position advances twice as fast as real time: 2.00x
 PASS  0.5x speed: position advances half as fast: 0.50x
-PASS  A-B loop keeps playback between 3 s and 5 s: 3523 ms, 3487 ms
+PASS  A-B loop keeps playback between 3 s and 5 s: 3427 ms, 3378 ms
 PASS  seek preview is 240 px wide with the video's shape: 240x135
 PASS  seek preview shows the frame at the hovered time: difference to the real 20 s frame 9.1; the 5 s preview differs by 17.3
-PASS  sidecar subtitle loads automatically and is drawn into the picture: bottom-third change 1.58 vs top half 0.00
-PASS  another sidecar file shows different text: subs_clip.en.srt, bottom-third change 1.58
-PASS  resume: the next launch continues where the file was left: 47272 ms (left at ~45 s)
+PASS  with subtitles on, the sidecar subtitle file is loaded by itself and drawn into the picture: bottom-third change 5.23 vs top half 0.00
+PASS  another sidecar file shows different text: subs_clip.en.srt, bottom-third change 3.55
+PASS  resume: the next launch continues where the file was left: 45949 ms (left at ~45 s)
 PASS  resume: a file left in its last 30 s starts from the beginning: 0 ms
 PASS  recent files list the played file: resume_clip.mp4, subs_clip.mp4, chapters.mkv
 PASS  system report covers the essentials: 20 lines

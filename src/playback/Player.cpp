@@ -20,6 +20,7 @@ namespace {
 constexpr int kFlagVideo = 1 << 0;
 constexpr int kFlagAudio = 1 << 1;
 constexpr int kFlagText = 1 << 2;
+constexpr int kFlagDeinterlace = 1 << 9;
 constexpr int kFlagSoftColorbalance = 1 << 10;
 
 bool klassHas(GstElementFactory* f, const char* a, const char* b = nullptr, const char* c = nullptr)
@@ -65,6 +66,16 @@ QString trackLabel(int idx, const GstTagList* tags, const char* codecTag)
     if (!parts.isEmpty()) label += QStringLiteral(": ") + parts.join(QStringLiteral(", "));
     if (!codec.isEmpty()) label += QStringLiteral(" (%1)").arg(codec);
     return label;
+}
+
+// The track's language as a short code ("en"; a three-letter code when there is no
+// two-letter one), lower case; empty when the file doesn't say.
+QString trackLang(const GstTagList* tags)
+{
+    const QString code = tagString(tags, GST_TAG_LANGUAGE_CODE).toLower();
+    if (code.isEmpty() || code == QLatin1String("und")) return QString();
+    const gchar* two = gst_tag_get_language_code_iso_639_1(code.toUtf8().constData());
+    return two ? QString::fromUtf8(two) : code;
 }
 } // namespace
 
@@ -345,10 +356,7 @@ bool Player::openInternal(const QString& uri, bool autoplay, qint64 startNs, boo
             gst_object_unref(in); gst_object_unref(out);
             g_object_set(m_pipe, "audio-filter", bin, nullptr);
             m_tape = tape;
-            TapeParams tp;
-            tp.hiss = m_tapeValues[0]; tp.wow = m_tapeValues[1]; tp.saturation = m_tapeValues[2]; tp.tone = m_tapeValues[3];
-            tp.speaker = m_tapeValues[4]; tp.crackle = m_tapeValues[5]; tp.dropouts = m_tapeValues[6]; tp.crush = m_tapeValues[7];
-            crtTapeSetParams(m_tape, tp);
+            crtTapeSetParams(m_tape, m_tapeParams);
         } else {
             gst_object_unref(bin);
             if (c1) gst_object_unref(c1);
@@ -360,9 +368,20 @@ bool Player::openInternal(const QString& uri, bool autoplay, qint64 startNs, boo
     }
     gint flags = 0;
     g_object_get(m_pipe, "flags", &flags, nullptr);
-    flags |= kFlagVideo | kFlagAudio | kFlagText;
+    flags |= kFlagVideo | kFlagAudio;
+    // The subtitle path is always built, so subtitles can come on at any moment; while they
+    // are not wanted the overlay is told to stay silent (applySubtitleShown).
+    flags |= kFlagText;
+    m_subShown = m_subsWanted;
+    if (m_deinterlace) flags |= kFlagDeinterlace; else flags &= ~kFlagDeinterlace;
     flags &= ~kFlagSoftColorbalance;  // colour controls live in the shader
     g_object_set(m_pipe, "flags", flags, nullptr);
+    m_audioPicked = false;
+    m_pendingAudio = -1;
+    m_prefMuted = false;
+    m_subPicked = m_subUriChosen;
+    applyOffsets();
+    applySubtitleStyle();
     gst_stream_volume_set_volume(GST_STREAM_VOLUME(m_pipe), GST_STREAM_VOLUME_FORMAT_CUBIC, m_volume);
     g_object_set(m_pipe, "mute", m_muted ? TRUE : FALSE, nullptr);
 
@@ -401,6 +420,9 @@ void Player::teardown()
         m_tape = nullptr;   // it belonged to the pipeline
     }
     QMutexLocker lock(&m_mutex);
+    if (m_textOverlay) { gst_object_unref(m_textOverlay); m_textOverlay = nullptr; }
+    if (m_subOverlay) { gst_object_unref(m_subOverlay); m_subOverlay = nullptr; }
+    if (m_deintEl) { gst_object_unref(m_deintEl); m_deintEl = nullptr; }
     if (m_sample) { gst_sample_unref(m_sample); m_sample = nullptr; }
     if (m_lastCaps) { gst_caps_unref(m_lastCaps); m_lastCaps = nullptr; }
     m_videoDecoder.clear();
@@ -509,13 +531,200 @@ void Player::seekKeyframe(bool forward)
 
 void Player::setTapeParams(const TapeParams& p)
 {
-    const float v[8] = {p.hiss, p.wow, p.saturation, p.tone, p.speaker, p.crackle, p.dropouts, p.crush};
-    std::copy(std::begin(v), std::end(v), m_tapeValues);
+    m_tapeParams = p;
     if (m_tape) crtTapeSetParams(m_tape, p);
 }
 
-void Player::setExternalSubtitle(const QString& in)
+// ---- what carries over from video to video ---------------------------------------------
+
+void Player::setSubtitlesWanted(bool on)
 {
+    m_subsWanted = on;
+    m_subPicked = false;
+    m_subShown = on;
+    if (!m_pipe) return;
+    applySubtitleShown();
+    if (on) applyTrackPreferences();
+}
+
+// Shows or hides the subtitles of the current video (the overlay draws them or stays silent).
+void Player::applySubtitleShown()
+{
+    GstElement* ov = nullptr;
+    {
+        QMutexLocker lock(&m_mutex);
+        if (m_subOverlay) ov = GST_ELEMENT(gst_object_ref(m_subOverlay));
+    }
+    if (!ov) return;
+    g_object_set(ov, "silent", m_subShown ? FALSE : TRUE, nullptr);
+    // The subtitle delay: an offset on the overlay's subtitle input, so it holds for every
+    // kind of subtitle (playbin's own text-offset misses subtitles stored inside the video).
+    if (GstPad* pad = gst_element_get_static_pad(ov, "subtitle_sink")) {
+        gst_pad_set_offset(pad, gint64(m_subDelayMs) * GST_MSECOND);
+        gst_object_unref(pad);
+    }
+    gst_object_unref(ov);
+}
+
+void Player::setPreferredLanguages(const QString& audio, const QString& subtitle)
+{
+    m_prefAudioLang = audio.toLower();
+    m_prefSubLang = subtitle.toLower();
+}
+
+// Called whenever the video's tracks become known: the preferred languages are picked,
+// unless the viewer has already chosen a track in this video.
+void Player::applyTrackPreferences()
+{
+    if (!m_pipe) return;
+    if (!m_audioPicked && !m_prefAudioLang.isEmpty() && m_audioTracks.size() > 1 && m_pendingAudio < 0) {
+        gint cur = -1;
+        g_object_get(m_pipe, "current-audio", &cur, nullptr);
+        const bool curMatches = cur >= 0 && cur < m_audioTracks.size() && m_audioTracks[cur].lang == m_prefAudioLang;
+        if (!curMatches)
+            for (const TrackInfo& t : m_audioTracks)
+                if (t.lang == m_prefAudioLang) {
+                    m_pendingAudio = t.index;
+                    if (!canSwitchAudioNow() && !m_prefMuted) {   // still opening: silent until it is switched in
+                        m_prefMuted = true;
+                        g_object_set(m_pipe, "mute", TRUE, nullptr);
+                    }
+                    switchPendingAudio();
+                    break;
+                }
+    }
+    if (!m_subPicked && m_subShown && !m_prefSubLang.isEmpty() && m_textTracks.size() > 1) {
+        gint cur = -1;
+        g_object_get(m_pipe, "current-text", &cur, nullptr);
+        const bool curMatches = cur >= 0 && cur < m_textTracks.size() && m_textTracks[cur].lang == m_prefSubLang;
+        if (!curMatches)
+            for (const TrackInfo& t : m_textTracks)
+                if (t.lang == m_prefSubLang) { g_object_set(m_pipe, "current-text", t.index, nullptr); break; }
+    }
+}
+
+void Player::setAudioDelay(int ms)
+{
+    m_audioDelayMs = std::clamp(ms, -10000, 10000);
+    applyOffsets();
+}
+
+void Player::setSubtitleDelay(int ms)
+{
+    m_subDelayMs = std::clamp(ms, -60000, 60000);
+    applyOffsets();
+}
+
+void Player::applyOffsets()
+{
+    if (!m_pipe) return;
+    // playbin's av-offset holds the picture back when positive, so the sound's delay is its negative.
+    g_object_set(m_pipe, "av-offset", -gint64(m_audioDelayMs) * GST_MSECOND, nullptr);
+    applySubtitleShown();   // (the subtitle delay lives on the overlay)
+}
+
+void Player::setSubtitleStyle(const SubtitleStyle& st)
+{
+    m_subStyle = st;
+    applySubtitleStyle();
+}
+
+void Player::applySubtitleStyle()
+{
+    if (!m_pipe) return;
+    // (Sizes are for a 640-wide picture; the overlay scales them with the video.)
+    static const int kSizes[4] = {13, 18, 24, 31};
+    const QByteArray font = QStringLiteral("Sans Bold %1").arg(kSizes[std::clamp(m_subStyle.size, 0, 3)]).toUtf8();
+    g_object_set(m_pipe, "subtitle-font-desc", font.constData(), nullptr);
+    GstElement* ov = nullptr;
+    {
+        QMutexLocker lock(&m_mutex);
+        if (m_textOverlay) ov = GST_ELEMENT(gst_object_ref(m_textOverlay));
+    }
+    if (!ov) return;
+    const guint color = m_subStyle.color == 1 ? 0xFFFFE94Du : 0xFFFFFFFFu;
+    const bool box = m_subStyle.background == 1;
+    g_object_set(ov, "font-desc", font.constData(), "color", color, "outline-color", 0xFF000000u, "draw-outline", TRUE,
+                 "draw-shadow", box ? FALSE : TRUE, "shaded-background", box ? TRUE : FALSE, "shading-value", 150u, nullptr);
+    // valignment: 1 bottom, 2 top, 3 a position down the picture (0..1)
+    if (m_subStyle.position == 2) g_object_set(ov, "valignment", 2, "ypad", 25, nullptr);
+    else if (m_subStyle.position == 1) g_object_set(ov, "valignment", 3, "ypos", 0.80, nullptr);
+    else g_object_set(ov, "valignment", 1, "ypad", 25, nullptr);
+    gst_object_unref(ov);
+}
+
+// The first element inside `e` (or `e` itself) that is a sink with a "ts-offset" property; its value in ms.
+static bool sinkOffsetMs(GstElement* e, int* ms)
+{
+    if (!e) return false;
+    if (GST_IS_BIN(e)) {
+        bool found = false;
+        GstIterator* it = gst_bin_iterate_sinks(GST_BIN(e));
+        GValue v = G_VALUE_INIT;
+        while (!found && gst_iterator_next(it, &v) == GST_ITERATOR_OK) {
+            found = sinkOffsetMs(GST_ELEMENT(g_value_get_object(&v)), ms);
+            g_value_reset(&v);
+        }
+        g_value_unset(&v);
+        gst_iterator_free(it);
+        return found;
+    }
+    if (!g_object_class_find_property(G_OBJECT_GET_CLASS(e), "ts-offset")) return false;
+    gint64 off = 0;
+    g_object_get(e, "ts-offset", &off, nullptr);
+    *ms = int(off / GST_MSECOND);
+    return true;
+}
+
+void Player::appliedOffsets(int* audioSinkMs, int* videoSinkMs, int* textMs) const
+{
+    *audioSinkMs = *videoSinkMs = *textMs = 0;
+    if (!m_pipe) return;
+    GstElement* as = nullptr;
+    g_object_get(m_pipe, "audio-sink", &as, nullptr);
+    {
+        QMutexLocker lock(&m_mutex);
+        if (m_subOverlay) {
+            if (GstPad* pad = gst_element_get_static_pad(m_subOverlay, "subtitle_sink")) {
+                *textMs = int(gst_pad_get_offset(pad) / GST_MSECOND);
+                gst_object_unref(pad);
+            }
+        }
+    }
+    if (as) { sinkOffsetMs(as, audioSinkMs); gst_object_unref(as); }
+    if (m_appsink) sinkOffsetMs(m_appsink, videoSinkMs);
+}
+
+bool Player::deinterlacing() const
+{
+    GstElement* el = nullptr;
+    {
+        QMutexLocker lock(&m_mutex);
+        if (m_deintEl) el = GST_ELEMENT(gst_object_ref(m_deintEl));
+    }
+    if (!el) return false;
+    // In its automatic mode the deinterlacer passes progressive video through untouched:
+    // it is at work when interlaced video goes in and progressive comes out.
+    auto mode = [el](const char* padName) {
+        QString m;
+        if (GstPad* pad = gst_element_get_static_pad(el, padName)) {
+            if (GstCaps* caps = gst_pad_get_current_caps(pad)) {
+                const gchar* v = gst_structure_get_string(gst_caps_get_structure(caps, 0), "interlace-mode");
+                m = v ? QString::fromUtf8(v) : QStringLiteral("progressive");
+                gst_caps_unref(caps);
+            }
+            gst_object_unref(pad);
+        }
+        return m;
+    };
+    const QString in = mode("sink"), out = mode("src");
+    gst_object_unref(el);
+    return !in.isEmpty() && in != QLatin1String("progressive") && out == QLatin1String("progressive");
+}
+
+void Player::setExternalSubtitle(const QString& in, bool chosenByViewer)
+{
+    m_subUriChosen = chosenByViewer && !in.isEmpty();
     if (in.isEmpty()) { m_subUri.clear(); return; }
     m_subUri = in.contains(QStringLiteral("://")) ? in
                                                   : QUrl::fromLocalFile(QFileInfo(in).absoluteFilePath()).toString(QUrl::FullyEncoded);
@@ -597,12 +806,13 @@ void Player::setVolume(double v)
 void Player::setMuted(bool m)
 {
     m_muted = m;
-    if (m_pipe) g_object_set(m_pipe, "mute", m ? TRUE : FALSE, nullptr);
+    if (m_pipe && !m_prefMuted) g_object_set(m_pipe, "mute", m ? TRUE : FALSE, nullptr);
 }
 
 int Player::currentAudioTrack() const
 {
     if (!m_pipe) return -1;
+    if (m_pendingAudio >= 0) return m_pendingAudio;   // chosen, and switched in as soon as the video runs
     gint cur = -1;
     g_object_get(m_pipe, "current-audio", &cur, nullptr);
     return cur;
@@ -610,30 +820,49 @@ int Player::currentAudioTrack() const
 
 int Player::currentSubtitleTrack() const
 {
-    if (!m_pipe) return -1;
-    gint flags = 0, cur = -1;
-    g_object_get(m_pipe, "flags", &flags, "current-text", &cur, nullptr);
-    return (flags & kFlagText) ? cur : -1;
+    if (!m_pipe || !m_subShown || m_textTracks.isEmpty()) return -1;
+    gint cur = -1;
+    g_object_get(m_pipe, "current-text", &cur, nullptr);
+    return cur;
 }
 
 void Player::setAudioTrack(int idx)
 {
     if (!m_pipe || idx < 0 || idx >= m_audioTracks.size()) return;
-    g_object_set(m_pipe, "current-audio", idx, nullptr);
+    m_audioPicked = true;
+    m_pendingAudio = idx;
+    switchPendingAudio();
+}
+
+void Player::switchPendingAudio()
+{
+    if (m_pendingAudio < 0 || !canSwitchAudioNow()) return;
+    gint cur = -1;
+    g_object_get(m_pipe, "current-audio", &cur, nullptr);
+    if (cur != m_pendingAudio) g_object_set(m_pipe, "current-audio", m_pendingAudio, nullptr);
+    m_pendingAudio = -1;
+    if (m_prefMuted) {   // the sound comes back once what was queued of the other track has played out
+        const quint64 gen = m_generation;
+        QTimer::singleShot(350, this, [this, gen] {
+            if (gen != m_generation || !m_prefMuted) return;
+            m_prefMuted = false;
+            if (m_pipe) g_object_set(m_pipe, "mute", m_muted ? TRUE : FALSE, nullptr);
+        });
+    }
+    emit tracksChanged();
 }
 
 void Player::setSubtitleTrack(int idx)
 {
     if (!m_pipe) return;
-    gint flags = 0;
-    g_object_get(m_pipe, "flags", &flags, nullptr);
-    if (idx < 0 || idx >= m_textTracks.size()) {
-        flags &= ~kFlagText;
-        g_object_set(m_pipe, "flags", flags, nullptr);
-    } else {
-        flags |= kFlagText;
-        g_object_set(m_pipe, "flags", flags, "current-text", idx, nullptr);
+    m_subPicked = true;
+    m_subShown = idx >= 0 && idx < m_textTracks.size();
+    if (m_subShown) {
+        gint cur = -1;
+        g_object_get(m_pipe, "current-text", &cur, nullptr);
+        if (cur != idx) g_object_set(m_pipe, "current-text", idx, nullptr);
     }
+    applySubtitleShown();
 }
 
 QString Player::videoDecoder() const { QMutexLocker l(&m_mutex); return m_videoDecoder; }
@@ -727,6 +956,35 @@ void Player::onDeepElementAdded(GstBin*, GstBin*, GstElement* el, gpointer self)
 {
     auto* p = static_cast<Player*>(self);
     GstElementFactory* f = gst_element_get_factory(el);
+    if (f) {   // the elements whose settings the player adjusts: the subtitle text drawer, the deinterlacer
+        const gchar* fname = gst_plugin_feature_get_name(GST_PLUGIN_FEATURE(f));
+        if (g_strcmp0(fname, "textoverlay") == 0) {
+            {
+                QMutexLocker lock(&p->m_mutex);
+                if (p->m_textOverlay) gst_object_unref(p->m_textOverlay);
+                p->m_textOverlay = GST_ELEMENT(gst_object_ref(el));
+            }
+            QMetaObject::invokeMethod(p, [p] { p->applySubtitleStyle(); }, Qt::QueuedConnection);
+            return;
+        }
+        if (g_strcmp0(fname, "subtitleoverlay") == 0) {
+            {
+                QMutexLocker lock(&p->m_mutex);
+                if (p->m_subOverlay) gst_object_unref(p->m_subOverlay);
+                p->m_subOverlay = GST_ELEMENT(gst_object_ref(el));
+            }
+            // Silent from the start when subtitles are not wanted: not even the first line shows.
+            g_object_set(el, "silent", p->m_subShown ? FALSE : TRUE, nullptr);
+            QMetaObject::invokeMethod(p, [p] { p->applySubtitleShown(); }, Qt::QueuedConnection);
+            return;
+        }
+        if (g_strcmp0(fname, "deinterlace") == 0) {
+            QMutexLocker lock(&p->m_mutex);
+            if (p->m_deintEl) gst_object_unref(p->m_deintEl);
+            p->m_deintEl = GST_ELEMENT(gst_object_ref(el));
+            return;
+        }
+    }
     if (!f || !klassHas(f, "Decoder")) return;
     const QString name = QString::fromUtf8(gst_plugin_feature_get_name(GST_PLUGIN_FEATURE(f)));
     {
@@ -878,7 +1136,7 @@ void Player::handleMessage(GstMessage* m, quint64 generation)
     case GST_MESSAGE_STATE_CHANGED: {
         GstState oldS, newS, pending;
         gst_message_parse_state_changed(m, &oldS, &newS, &pending);
-        if (newS == GST_STATE_PLAYING) setState(State::Playing);
+        if (newS == GST_STATE_PLAYING) { setState(State::Playing); switchPendingAudio(); }
         else if (newS == GST_STATE_PAUSED && m_loaded) setState(State::Paused);
         break;
     }
@@ -912,6 +1170,7 @@ void Player::handleMessage(GstMessage* m, quint64 generation)
             doSeek(m_pendingSeek, m_pendingMode);
         } else {
             emit seekFinished();
+            switchPendingAudio();
         }
         break;
     }
@@ -956,13 +1215,13 @@ void Player::refreshTracks()
     for (int i = 0; i < nA; ++i) {
         GstTagList* tags = nullptr;
         g_signal_emit_by_name(m_pipe, "get-audio-tags", i, &tags);
-        a.push_back({i, trackLabel(i, tags, GST_TAG_AUDIO_CODEC)});
+        a.push_back({i, trackLabel(i, tags, GST_TAG_AUDIO_CODEC), trackLang(tags)});
         if (tags) gst_tag_list_unref(tags);
     }
     for (int i = 0; i < nT; ++i) {
         GstTagList* tags = nullptr;
         g_signal_emit_by_name(m_pipe, "get-text-tags", i, &tags);
-        t.push_back({i, trackLabel(i, tags, GST_TAG_SUBTITLE_CODEC)});
+        t.push_back({i, trackLabel(i, tags, GST_TAG_SUBTITLE_CODEC), trackLang(tags)});
         if (tags) gst_tag_list_unref(tags);
     }
     for (int i = 0; i < nV && m_orientationTag == QLatin1String("rotate-0"); ++i) {
@@ -977,5 +1236,6 @@ void Player::refreshTracks()
     }
     m_audioTracks = a;
     m_textTracks = t;
+    applyTrackPreferences();
     emit tracksChanged();
 }

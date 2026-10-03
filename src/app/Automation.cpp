@@ -15,6 +15,7 @@
 #include "playback/Thumbnailer.h"
 #include "app/Gamepad.h"
 #include "ui/JellyfinPanel.h"
+#include "ui/PlaylistPanel.h"
 
 #include <QApplication>
 #include <QFile>
@@ -84,6 +85,25 @@ void Automation::next()
     } else if (cmd == "wait") {
         delay = a.value(1).toInt();
         log(line);
+    } else if (cmd == "waitpos") {
+        // waitpos MS [TIMEOUT_MS] : until the video has played to MS
+        const qint64 want = a.value(1).toLongLong();
+        const int timeout = a.value(2, "20000").toInt();
+        const qint64 t0 = m_clock.elapsed();
+        auto* poll = new QTimer(this);
+        poll->setInterval(10);
+        connect(poll, &QTimer::timeout, this, [=] {
+            const qint64 pos = p->position() / 1000000;
+            const bool ok = pos >= want && !p->isSeeking();
+            if (ok || m_clock.elapsed() - t0 > timeout) {
+                poll->deleteLater();
+                if (!ok) ++m_failures;
+                log(line, {{"ok", ok}, {"positionMs", double(pos)}, {"waitedMs", double(m_clock.elapsed() - t0)}});
+                QTimer::singleShot(0, this, &Automation::next);
+            }
+        });
+        poll->start();
+        return;
     } else if (cmd == "waitstate") {
         const QString want = a.value(1);
         const int timeout = a.value(2, "10000").toInt();
@@ -234,6 +254,42 @@ void Automation::next()
         log(line);
     } else if (cmd == "audio") { p->setAudioTrack(a.value(1).toInt()); log(line); }
     else if (cmd == "sub") { p->setSubtitleTrack(a.value(1).toInt()); log(line); }
+    else if (cmd == "subs") { m_w->setSubtitlesWanted(a.value(1) == "on"); log(line); }               // subs on|off : as the V key
+    else if (cmd == "subtrack") { m_w->chooseSubtitleTrack(a.value(1).toInt()); log(line); }           // as picking it in the menu (-1: off)
+    else if (cmd == "audiotrack") { m_w->chooseAudioTrack(a.value(1).toInt()); log(line); }
+    else if (cmd == "audiodelay") { m_w->setAudioDelay(a.value(1).toInt()); log(line); }               // ms
+    else if (cmd == "subdelay") { m_w->setSubtitleDelay(a.value(1).toInt()); log(line); }
+    else if (cmd == "substyle") {
+        // substyle SIZE(0-3) COLOUR(0 white, 1 yellow) BEHIND(0 outline, 1 box) POSITION(0 bottom, 1 raised, 2 top)
+        SubtitleStyle st;
+        st.size = a.value(1).toInt(); st.color = a.value(2).toInt(); st.background = a.value(3).toInt(); st.position = a.value(4).toInt();
+        m_w->setSubtitleStyle(st);
+        log(line);
+    }
+    else if (cmd == "night") { m_w->setNightMode(a.value(1) == "on"); log(line); }
+    else if (cmd == "deinterlace") { m_w->setDeinterlace(a.value(1) == "on"); log(line); delay = 300; }
+    else if (cmd == "shuffle") { m_w->setShuffle(a.value(1) == "on"); log(line); }
+    else if (cmd == "repeat") { m_w->setRepeatMode(a.value(1) == "all" ? 1 : a.value(1) == "one" ? 2 : 0); log(line); }
+    else if (cmd == "autonext") { m_w->setAutoNext(a.value(1) == "on"); log(line); }
+    else if (cmd == "sleep") {
+        // sleep MINUTES | end | off | seconds N
+        if (a.value(1) == "seconds") m_w->setSleepTimerSeconds(a.value(2).toInt());
+        else m_w->setSleepTimer(a.value(1) == "end" ? -1 : a.value(1) == "off" ? 0 : a.value(1).toInt());
+        log(line);
+    }
+    else if (cmd == "enqueue") { m_w->openFiles({rest}, false); log(line); }                           // add to the playlist without playing
+    else if (cmd == "item") { m_w->remoteAction(a.value(1) == "prev" ? "prev" : "next"); log(line); }       // next / previous playlist item
+    else if (cmd == "playlist") {
+        // playlist save PATH | clear | click shuffle|repeat
+        bool ok = true;
+        if (a.value(1) == "save") ok = m_w->savePlaylistFile(line.section(' ', 2));
+        else if (a.value(1) == "clear") m_w->playlistPanel()->click("clear");
+        else if (a.value(1) == "click") m_w->playlistPanel()->click(a.value(2));
+        else if (a.value(1) == "play") m_w->playIndex(a.value(2).toInt());
+        else if (a.value(1) == "show") m_w->showPlaylist(true);
+        if (!ok) ++m_failures;
+        log(line, {{"ok", ok}});
+    }
     else if (cmd == "hw") { p->setHardwareDecoding(a.value(1) == "on"); log(line); }
     else if (cmd == "moment") {
         // moment poweron|poweroff|static : start a set moment now (on the effect clock)

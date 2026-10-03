@@ -1,0 +1,44 @@
+PASS  both scripts ran without a failed step: all ok
+PASS  subtitles are off by default (a video with two subtitle tracks): track -1 of 2
+PASS  V turns them on: the text is drawn into the picture: track 0; bottom of the picture changed by 6.15, the top half by 0.00
+PASS  picking a track remembers its language: after French: fr; then English subtitles, Japanese sound: en / ja
+PASS  the sound heard is the track picked (its 880 Hz tone, not the other track's 440 Hz): 880 Hz
+PASS  changing the sound track while paused, then seeking, no longer freezes the player: playing at 8.9 s, track 2, 880 Hz
+PASS  the next video: the same languages, wherever they are in the file: subtitles: track 2 (en) of ['fr', 'en']; sound: track 1 (ja) of ['ja', 'en']
+PASS  a video without subtitles in between changes nothing: back at the first video: subtitles en, sound track 2 (ja, 880 Hz heard)
+PASS  turned off, they stay off in the next video: track -1; the sound is still ja
+PASS  a subtitle file next to the video is not shown while subtitles are off, and is there as soon as they are on: subs_clip.srt: off, then on (bottom of the picture changed by 6.10)
+PASS  subtitle delay −1.5 s: the line is on screen before its stored time: at 3.2 s the line shows (stored from 4 s; at 3 s without the delay: not shown)
+PASS  subtitle delay +1.5 s: the line comes later and stays later: at 4.7 s not yet shown (without the delay it is, at 4.5 s); at 6.5 s still shown (stored until 6 s)
+PASS  size: small, normal, very large: the text is 2.7%, 4.0% and 6.5% of the picture's height
+PASS  colour: yellow: 97% of the bright text pixels are yellow (0% when white)
+PASS  behind the text: a dark box: 71% of the text's rectangle is dark with the box, 14% with the outline
+PASS  position: bottom, raised, top: the text starts 89%, 77% and 6% of the way down
+PASS  sound delay +400 ms: the sound is held back: sound output delayed 400 ms, picture 0 ms
+PASS  sound delay −400 ms: the picture is held back instead (measured on the frames): picture output delayed 400 ms; frames arrive 400 ms later against the sound's clock than before
+PASS  the sound delay carries over to the next video; a subtitle delay does not: sound 100 ms; subtitles 700 ms -> 0 ms in the next video
+PASS  interlaced video is deinterlaced: combing -0.12 deinterlaced, 2.98 as stored
+PASS  switched off, the frames are shown as stored: deinterlacing: False
+PASS  progressive video is never touched: setting on, deinterlacing: False
+PASS  night mode lifts the quiet part and holds down the loud part: quiet -46.0 -> -32.0 dB, loud -13.6 -> -15.8 dB: 16.2 dB apart instead of 32.3
+PASS  shuffle: every video once, then the end: a → d → e → c → b; then paused
+PASS  repeat the playlist: after the last video, the first: e → a
+PASS  repeat this video: the same one again: a → a → a
+PASS  the playlist saves as an .m3u8 file and opens again: 5 entries loaded, playing short_a.mp4
+PASS  videos in the list's own folder are written relative to it: Episode 1.mp4, Episode 2.mp4, Episode 10.mp4
+PASS  carrying on in the folder: Episode 1, 2, 10 in that order, and it stops at the last: Episode 1.mp4 → Episode 2.mp4 → Episode 10.mp4; then paused
+PASS  switched off (the default), one video is one video: ['Episode 1.mp4'], paused
+PASS  sleep timer: counts down while the video plays: 10 s left of 12, volume 80%
+PASS  the sound fades out over the last seconds: 3 s left: volume 10%
+PASS  then it stops: paused, the volume back, the screen free to sleep: paused, volume 80%, keeping the screen awake: False
+PASS  "at the end of this video": it stops there instead of going on with the playlist: last played short_a.mp4 of ['short_a.mp4', 'short_b.mp4']; paused
+PASS  Cable TV: subtitles as set, from channel to channel: channel 2: track 1 (en); channel 3: track 2 (en)
+PASS  … and the sound's language too: channel 2: track 2, channel 3: track 1 (both ja; 880 and 880 Hz heard)
+PASS  turned off on one channel, they are off on the others; and on again: channel 2: -1, channel 3: -1; on again: en
+PASS  the sleep timer turns the TV off: TV on: False, idle
+PASS  in TV mode, "at the end of this video" waits for the programme to end, then turns the TV off: TV on: False, idle
+PASS  everything is as it was left on the next launch: subtitles on (en), sound ja, sound delay 100 ms, style [2, 1, 0, 0], night mode, shuffle, repeat, next-in-folder
+PASS  … and the first video opened gets them: subtitles en, sound ja, sound delayed 100 ms
+PASS  the sleep timer is not carried over: off
+
+All everyday checks passed

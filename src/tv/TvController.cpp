@@ -364,6 +364,7 @@ void TvController::load()
     QFile f(m_storePath);
     if (!f.open(QIODevice::ReadOnly)) return;
     const QJsonObject o = QJsonDocument::fromJson(f.readAll()).object();
+    if (o.contains("openLagMs")) m_openLagMs = std::clamp(o.value("openLagMs").toDouble(300), 50.0, 4000.0);
     const QJsonObject cache = o.value("lengths").toObject();
     for (auto it = cache.begin(); it != cache.end(); ++it) {
         const QJsonArray a = it.value().toArray();
@@ -420,6 +421,7 @@ void TvController::save() const
     o.insert("channels", chans);
     o.insert("lengths", cache);
     o.insert("last", m_current);
+    o.insert("openLagMs", m_openLagMs);   // how long videos take to open on this computer: known from the first tune next time
     QDir().mkpath(QFileInfo(m_storePath).absolutePath());
     QSaveFile f(m_storePath);
     if (f.open(QIODevice::WriteOnly)) {

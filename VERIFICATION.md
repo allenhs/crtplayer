@@ -1,6 +1,6 @@
 # Verification report
 
-This report covers the build delivered alongside it (CRT Player 2.10.0).
+This report covers the build delivered alongside it (CRT Player 2.11.0).
 
 The final X11 and Wayland suites were run against the exact stripped `crtplayer` binary
 that is delivered, and **again against the AppImage with the system's Qt libraries
@@ -286,6 +286,175 @@ was **not measured**, because there is no GPU in this environment.
 - GPU performance;
 - the interlaced style's look at real refresh rates (only its field alternation was
   measured).
+
+## 2.11: subtitles that stay as set, and everyday playback
+
+### What was built
+
+**Subtitles and languages that carry over** (`src/app/Everyday.cpp`, `Player`):
+
+- **Off by default.** Whether subtitles are wanted is a stored setting (off at first).
+  Every video opens with it, a TV channel included.
+- **The subtitle path is always built** and the overlay is told to stay silent while
+  subtitles are off, so they can come on at any moment without reopening the video, and
+  not even a first line flashes up when they are off.
+- **Languages.** Picking a track stores its language (the tag's short code, `en`, `ja`).
+  When a video's tracks become known, the track in that language is chosen; a track
+  picked by hand in a video holds for that video. A subtitle file picked by hand wins
+  over the language.
+- **Jellyfin:** with subtitles on and none in the video, the server's subtitle file in
+  the preferred language (else its first) is loaded, once per video.
+
+**A sound track is only switched while the video is running.** Switching one while
+paused, or while a video opens, and then seeking, locked GStreamer's playbin up for good
+(see the faults below). A track chosen at such a moment waits, counts as the current
+one, and is switched in when the video runs. While a video opens with a preferred
+language that is not its first track, the sound is held silent until the switch (about
+a third of a second), so the other language is never heard.
+
+**Delays:**
+
+- **Sound:** playbin's `av-offset` (its sign is the picture's delay, so the sound's
+  delay is its negative). Stored.
+- **Subtitles:** a time offset on the overlay's subtitle input, so it holds for every
+  kind of subtitle. Reset with each video.
+
+**Subtitle text:** playbin's font description (size) and the text overlay's own colour,
+outline, shaded box and position.
+
+**Night mode:** a compressor in the player's own sound element (`TapeAudio`): threshold
+−36 dB, 3:1 above it, 14 dB of lift, 4 ms attack, 350 ms release, one gain for all
+channels, and a soft limit just under full scale. At 0 the sound is untouched.
+
+**Deinterlacing:** playbin's deinterlace stage (GStreamer's `deinterlace`, automatic:
+only interlaced video is touched). The setting takes effect by opening the video again
+where it is.
+
+**Playlist:** shuffle (every entry once a round, a way back through what was played),
+repeat (off, all, one), `.m3u` / `.m3u8` reading and writing, and the next video in the
+folder in natural name order.
+
+**Sleep timer:** a deadline, a warning a minute before, a fade over the last 8 seconds,
+then pause (or TV off) with the volume restored. *At the end of this video* waits for
+the end instead.
+
+**For the checks,** the sound element measures what leaves it, half a second at a time:
+its level, and the pitch of a plain tone (zero crossings). The test videos' sound tracks
+are tones of different pitch (440 Hz and 880 Hz), so a check can tell which track is
+actually heard, not only which is selected.
+
+### Results
+
+| Check (`tests/automation/everyday.txt`, `everyday-restore.txt`, `scripts/check-everyday.py`) | Result |
+|---|---|
+| Both scripts ran without a failed step | PASS: all ok |
+| Subtitles are off by default (a video with two subtitle tracks) | PASS: track -1 of 2 |
+| V turns them on: the text is drawn into the picture | PASS: track 0; bottom of the picture changed by 6.15, the top half by 0.00 |
+| Picking a track remembers its language | PASS: after French: fr; then English subtitles, Japanese sound: en / ja |
+| The sound heard is the track picked (its 880 Hz tone, not the other track's 440 Hz) | PASS: 880 Hz |
+| Changing the sound track while paused, then seeking, no longer freezes the player | PASS: playing at 8.9 s, track 2, 880 Hz |
+| The next video | PASS: the same languages, wherever they are in the file: subtitles: track 2 (en) of ['fr', 'en']; sound: track 1 (ja) of ['ja', 'en'] |
+| A video without subtitles in between changes nothing | PASS: back at the first video: subtitles en, sound track 2 (ja, 880 Hz heard) |
+| Turned off, they stay off in the next video | PASS: track -1; the sound is still ja |
+| A subtitle file next to the video is not shown while subtitles are off, and is there as soon as they are on | PASS: subs_clip.srt: off, then on (bottom of the picture changed by 6.10) |
+| Subtitle delay −1.5 s: the line is on screen before its stored time | PASS: at 3.2 s the line shows (stored from 4 s; at 3 s without the delay: not shown) |
+| Subtitle delay +1.5 s: the line comes later and stays later | PASS: at 4.7 s not yet shown (without the delay it is, at 4.5 s); at 6.5 s still shown (stored until 6 s) |
+| Size: small, normal, very large | PASS: the text is 2.7%, 4.0% and 6.5% of the picture's height |
+| Colour: yellow | PASS: 97% of the bright text pixels are yellow (0% when white) |
+| Behind the text: a dark box | PASS: 71% of the text's rectangle is dark with the box, 14% with the outline |
+| Position: bottom, raised, top | PASS: the text starts 89%, 77% and 6% of the way down |
+| Sound delay +400 ms: the sound is held back | PASS: sound output delayed 400 ms, picture 0 ms |
+| Sound delay −400 ms: the picture is held back instead (measured on the frames) | PASS: picture output delayed 400 ms; frames arrive 400 ms later against the sound's clock than before |
+| The sound delay carries over to the next video; a subtitle delay does not | PASS: sound 100 ms; subtitles 700 ms -> 0 ms in the next video |
+| Interlaced video is deinterlaced | PASS: combing -0.12 deinterlaced, 2.98 as stored |
+| Switched off, the frames are shown as stored | PASS: deinterlacing: False |
+| Progressive video is never touched | PASS: setting on, deinterlacing: False |
+| Night mode lifts the quiet part and holds down the loud part | PASS: quiet -46.0 -> -32.0 dB, loud -13.6 -> -15.8 dB: 16.2 dB apart instead of 32.3 |
+| Shuffle: every video once, then the end | PASS: a → d → e → c → b; then paused |
+| Repeat the playlist: after the last video, the first | PASS: e → a |
+| Repeat this video: the same one again | PASS: a → a → a |
+| The playlist saves as an .m3u8 file and opens again | PASS: 5 entries loaded, playing short_a.mp4 |
+| Videos in the list's own folder are written relative to it | PASS: Episode 1.mp4, Episode 2.mp4, Episode 10.mp4 |
+| Carrying on in the folder: Episode 1, 2, 10 in that order, and it stops at the last | PASS: Episode 1.mp4 → Episode 2.mp4 → Episode 10.mp4; then paused |
+| Switched off (the default), one video is one video | PASS: ['Episode 1.mp4'], paused |
+| Sleep timer: counts down while the video plays | PASS: 10 s left of 12, volume 80% |
+| The sound fades out over the last seconds | PASS: 3 s left: volume 10% |
+| Then it stops: paused, the volume back, the screen free to sleep | PASS: paused, volume 80%, keeping the screen awake: False |
+| "at the end of this video": it stops there instead of going on with the playlist | PASS: last played short_a.mp4 of ['short_a.mp4', 'short_b.mp4']; paused |
+| Cable TV: subtitles as set, from channel to channel | PASS: channel 2: track 1 (en); channel 3: track 2 (en) |
+| … and the sound's language too | PASS: channel 2: track 2, channel 3: track 1 (both ja; 880 and 880 Hz heard) |
+| Turned off on one channel, they are off on the others; and on again | PASS: channel 2: -1, channel 3: -1; on again: en |
+| The sleep timer turns the TV off | PASS: TV on: False, idle |
+| In TV mode, "at the end of this video" waits for the programme to end, then turns the TV off | PASS: TV on: False, idle |
+| Everything is as it was left on the next launch | PASS: subtitles on (en), sound ja, sound delay 100 ms, style [2, 1, 0, 0], night mode, shuffle, repeat, next-in-folder |
+| … and the first video opened gets them | PASS: subtitles en, sound ja, sound delayed 100 ms |
+| The sleep timer is not carried over | PASS: off |
+
+Unit tests (`tests/test_tape.cpp`): night mode lifts a −43 dB tone by 14 dB and holds a
+−4 dB tone down by 9 dB (16 dB apart instead of 39); a sudden full-level bang after quiet
+stays within full scale; left and right keep their balance exactly; with night mode off
+the sound is bit-exact.
+
+Jellyfin (`scripts/check-jellyfin.py`, both API versions): with subtitles on, a video
+without its own gets the server's subtitle file by itself.
+
+**Full suites for 2.11.0:** native X11 (369 checks) and Wayland (18), and the same on
+the AppImage with the system's Qt removed (369 and 18). No failures. Results:
+`docs/results/everyday-checks.txt` and `everyday-checks-appimage.txt`.
+
+### Faults found on the way, and fixed
+
+- **The player could freeze for good** when the sound track was changed while paused and
+  the video was then moved (a seek). This was in every earlier version: GStreamer's
+  playbin deadlocks when a track switch is still waiting to happen and a seek arrives.
+  It showed up as Cable TV hanging on a channel change once a preferred sound language
+  existed (the switch happened while the channel opened, then the channel seeked to
+  where the broadcast was). Sound tracks are now switched only while the video runs.
+  Check: *changing the sound track while paused, then seeking, no longer freezes the
+  player*.
+- **Turning subtitles on did nothing in a video opened with them off.** The first
+  version left the subtitle path unbuilt while off. It is now always built and silenced.
+- **The subtitle delay had no effect on subtitles stored inside the video.** playbin's
+  own `text-offset` only reaches subtitle files that pass through a parser. The offset
+  is now set on the overlay's input.
+- **The sound delay went the wrong way** in the first version (playbin's value is the
+  picture's delay). Found by reading back which output was held.
+- **Episode 10 came before Episode 2.** The system's collation did not sort numbers in
+  this environment's locale; the order is now worked out by hand.
+- **The sleep timer's "end of this video" did nothing in TV mode.** It now waits for the
+  programme to end.
+- **Cable TV's first tune could start seconds behind its schedule** (a slow first open
+  that the player had no estimate for). The measured open time is now kept between
+  sessions. The TV checks' timing allowances were also widened to what the design
+  permits (a programme up to 3 s late starts from its top rather than lose its
+  beginning).
+- **A test clip that was not what it claimed:** the first interlaced clip did not move
+  between its fields, so it could not comb and the deinterlacing check could not tell on
+  from off. The clip was remade (combing 2.98 as stored, −0.12 deinterlaced).
+- **`polish.txt`** now turns subtitles on before its sidecar-file check (it relied on
+  them being on by default).
+
+### Known limits and what was not tested
+
+- **A subtitle line already on screen at the point you jump to** is not shown until the
+  next line: the file does not send it again. This is as before.
+- **A new subtitle delay** holds from the next line on. With a large delay, the first
+  line after a jump can be mistimed.
+- **Subtitle style** applies to text drawn by GStreamer's text overlay. Picture
+  subtitles (DVD, Blu-ray) and styled ASS subtitles drawn by another renderer keep their
+  own look; neither was tested.
+- **The sound delay's "later" direction** is checked by reading the delay the sound
+  output holds, not by measuring the sound against the picture. "Earlier" is measured on
+  the frames (400 ms for 400 in the final run).
+- **Night mode** is measured with tones. How it sounds on real film sound is for your
+  ears.
+- **Deinterlacing** uses GStreamer's default method. It was checked on one MPEG-2 clip;
+  real DVD and broadcast material, and video from a hardware decoder, were not tested.
+- **A converted Jellyfin stream** carries one sound track, so the language preference
+  cannot apply to it.
+- **Playlist files from other players** were not tested beyond the format itself
+  (comments, relative and absolute paths, addresses).
+- **Speed.** As always here: software OpenGL, no GPU, no real sound device.
 
 ## 2.10: GIFs up to 4K, the Sega CD FMV look, Cable TV
 

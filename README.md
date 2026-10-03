@@ -21,7 +21,11 @@ configurable, GPU-rendered CRT presentation that respects every aspect ratio:
   and mask like real content.
 - **Everyday playback:** resume where you left off, recent files, external subtitle
   files, playback speed (pitch preserved), A–B loop, chapters, and preview thumbnails on
-  the seek bar.
+  the seek bar. Subtitles are off until you ask for them and then stay as you set them,
+  in the language you picked, from video to video and channel to channel. Also: sound
+  and subtitle delay, subtitle size and colour, night mode, deinterlacing, shuffle and
+  repeat, playlist files, carrying on with the next video in a folder, and a sleep
+  timer.
 - **Made for Bazzite:** game controllers (Xbox, PlayStation, Switch, Steam Deck), media
   keys and KDE's media widget / KDE Connect (MPRIS), and Steam Game Mode, with a room
   backdrop for desk mode.
@@ -377,7 +381,13 @@ Hover any button to see its shortcut.
 | Z | Cycle scaling: Original → Fit → Fill → Crop |
 | A | Cycle audio track |
 | J | Cycle subtitle track (…→ off) |
-| V | Subtitles on/off |
+| V | Subtitles on/off. They stay as set, from video to video |
+| H / Shift+H | Subtitles 0.1 s later / earlier |
+| Ctrl+= / Ctrl+− | Sound 50 ms later / earlier |
+| D | Night mode: even out loud and quiet |
+| Shift+Z | Sleep timer: 15, 30, 45, 60, 90, 120 minutes, end of this video, off |
+| Ctrl+H | Shuffle on/off |
+| Ctrl+R | Repeat: off → the whole playlist → this video |
 | S | Screenshot of the default type |
 | Shift+S | Screenshot of the original frame |
 | Ctrl+S | Screenshot of the filtered frame |
@@ -810,16 +820,87 @@ starts over.
 **Recent files.** Click the small arrow on the **Open** button, or in desk mode
 right-click → *Recent files*. Each entry shows where you'd resume.
 
-**Subtitle files.** Subtitle files next to the video load automatically: `Movie.srt`
-first, then others such as `Movie.en.srt`. The subtitle button's menu lists them, along
-with *Load subtitle file…* and *No subtitle file*.
+**Subtitles are off until you ask for them, and then they stay as you set them.**
+Press **V** (or pick a track from the subtitle button's menu) and subtitles are on for
+this video, the next one, every TV channel, and the next time the player starts. Turn
+them off and they stay off the same way.
+
+- **The language carries over too.** Pick English subtitles once and the English track
+  is chosen in every video that has one, wherever it is in the file. The same goes for
+  the sound: pick the Japanese track and videos with Japanese sound play it. A video
+  without that language plays its own first track.
+- **Picking by hand always wins** for the video you are watching.
+- **Turning subtitles on in the middle of a line** shows the line straight away. After
+  a jump, a line that was already on screen appears with the next one (video files don't
+  repeat it).
+
+**Subtitle files.** Subtitle files next to the video are loaded automatically:
+`Movie.srt` first, then others such as `Movie.en.srt`. They show when subtitles are on.
+The subtitle button's menu lists them, along with *Load subtitle file…* and *No subtitle
+file*; picking one turns subtitles on.
 
 - For Jellyfin videos, the server's external subtitle files appear in the same menu.
+  When subtitles are on and the video has none of its own, the server's file in your
+  language (or its first) is loaded by itself.
 - Subtitles are drawn into the picture, so they get the CRT look (and appear in desk
   mode).
 - SRT, ASS/SSA, WebVTT and SUB are supported.
 - Short SRT files are handled too. GStreamer can't recognise very short SRT files on its
   own, so the player plays subtitles from a padded local copy.
+
+**How subtitles look** (*Settings → Playback → Subtitles*):
+
+| Setting | Choices |
+|---|---|
+| Size | Small, Normal, Large, Very large |
+| Colour | White, Yellow |
+| Behind the text | Outline, or a dark box |
+| Position | Bottom, Raised (clear of a curved tube's edge or a cropped picture), Top |
+
+These apply to text subtitles. Picture subtitles (DVD, Blu-ray) are drawn as the disc
+made them.
+
+**Subtitles out of step?** **H** shows them 0.1 s later, **Shift+H** earlier (or type a
+value under *Subtitles → Delay*). The new timing holds from the next line on. It belongs
+to the video you are watching: the next one starts without it.
+
+**Sound out of step with the lips?** **Ctrl+=** plays the sound 50 ms later, **Ctrl+−**
+earlier (or *Sound → Sound delay*). This one is remembered, because the usual cause is
+the equipment: a wireless speaker or a TV that adds its own delay.
+
+**Night mode (D).** Quiet speech comes up and loud bangs come down, so a film can be
+followed at low volume without riding the volume control. It works with any look, on
+top of the look's own sound, and never clips.
+
+**Deinterlacing.** DVDs and TV recordings are often interlaced: each frame holds two
+half-pictures taken a moment apart, which shows as combing on anything that moves. Such
+video is deinterlaced automatically; other video is never touched. *Settings → Playback
+→ Deinterlace interlaced video* turns it off if you want the frames as stored (the
+*Interlaced* scanline style is a look, and works either way).
+
+**Shuffle and repeat.** The playlist panel has both (also **Ctrl+H** and **Ctrl+R**, and
+in desk mode right-click → *Playlist*).
+
+- **Shuffle** plays every video once in a random order; *previous* walks back through
+  what was played.
+- **Repeat** is off, the whole playlist, or this video.
+- With both, a new random round starts when one is finished.
+
+**Playlist files.** The playlist saves as an `.m3u8` file (the disk button in the
+playlist panel). Open one like a video, or drop it on the window, and its videos are
+added. `.m3u` and `.m3u8` files from other players work too. Videos in the list's own
+folder are written relative to it, so the folder can be moved or copied.
+
+**The next video in the folder.** With *Settings → Playback → Carry on with the next
+video in the folder* on, a video that ends with nothing after it in the playlist is
+followed by the next one in its folder, in name order with numbers read as numbers
+(Episode 2 before Episode 10). It is off by default.
+
+**Sleep timer (Shift+Z).** Stops playing after 15 to 120 minutes, or at the end of the
+current video. The sound fades out over the last seconds, playback pauses (in TV mode
+the TV turns off), and the screen is free to dim and sleep again. A message comes up a
+minute before. It is also under *Settings → Playback* and, in desk mode, right-click →
+*Sleep timer*.
 
 **Speed.** **−** and **+** change the speed in 0.25× steps (0.25× to 4×), and
 **Backspace** returns to normal. Voices keep their natural pitch.
@@ -1221,6 +1302,8 @@ is already partway through, the way it was when you flipped on the TV in 1994.
 - **It all goes through the set.** The channel number, banners and guide are part of the
   picture, so they curve with the tube and sit under the scanlines. It works in desk mode
   too: the 3D set changes channel.
+- **Subtitles and languages carry over.** Subtitles on or off, and the languages you
+  picked, hold from channel to channel.
 - **Any look works,** and so do the scaling modes, audio and subtitle tracks, screenshots
   and volume. Seeking and pausing work as well; the channel catches up with its schedule
   at the next programme.
@@ -1334,6 +1417,19 @@ Settings are saved whenever the player exits: window close, Ctrl+Q, or logout.
 ---
 
 ## Troubleshooting
+
+**No subtitles**
+
+- Subtitles are off until you turn them on: press **V**, or pick a track from the
+  subtitle button. From then on they stay on, in every video.
+- After a jump, a line that was already on screen comes back with the next line.
+- *This video has none* in the message means the file carries no subtitle track and no
+  subtitle file sits next to it.
+
+**The player froze after changing the sound track while paused** (before 2.11)
+
+- Fixed in 2.11. A sound track picked while paused, or while a video opens, is now
+  switched in when the video runs.
 
 **"Missing codec or GStreamer plugin: H.265 (Main Profile) decoder"** (or similar)
 
@@ -1477,6 +1573,8 @@ src/
   ui/                      control bar, CRT/Display/Playback/Playlist panels, theme, vector icons,
                            WheelGuard (wheel scrolls panels, not sliders)
   app/MainWindow.*         wiring, shortcuts, fullscreen and auto-hide, overlays
+  app/Everyday.cpp         subtitles and languages that carry over, delays, night mode, shuffle / repeat,
+                           playlist files, the next video in a folder, the sleep timer (part of MainWindow)
   app/Automation.*         scripted driver used for verification
   app/DeskWindow.*         desk mode: transparent screen-sized window, input mask, control strip
   jellyfin/JellyfinClient.* Jellyfin API: sign-in, browsing, images, stream URLs, playback reporting

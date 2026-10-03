@@ -77,6 +77,16 @@ buttons and shortcuts use.
 | `dialog cut\|gif` | Open the Cut or GIF dialog |
 | `gifopts WIDTH FPS LOOK` | GIF options: width in pixels (320–1024; 1280, 1920, 2560 and 3840 are the HD, Full HD, 1440p and 4K frames), frames a second, 1 = with the CRT look, 0 = original picture |
 | `gif [OUT_PATH]` | Save A–B (or the next 5 s) as a GIF; waits, and logs the result (size, frames, frames a second, how long it took) |
+| `waitpos MS [TIMEOUT_MS]` | Wait until the video has played to MS |
+| `subs on\|off` | Subtitles wanted or not (the V key): it holds from video to video |
+| `subtrack N` / `audiotrack N` | Pick a subtitle track (−1: off) or a sound track as the menus do: its language is remembered |
+| `subdelay MS` / `audiodelay MS` | Subtitle delay (this video) / sound delay (remembered) |
+| `substyle SIZE COLOUR BEHIND POSITION` | Subtitle text: size 0–3, colour 0 white / 1 yellow, 0 outline / 1 dark box, 0 bottom / 1 raised / 2 top |
+| `night on\|off`, `deinterlace on\|off` | Night mode; deinterlacing |
+| `shuffle on\|off`, `repeat off\|all\|one`, `autonext on\|off` | Playlist modes; carrying on with the next video in the folder |
+| `enqueue PATH`, `item next\|prev` | Add to the playlist without playing; next / previous item |
+| `playlist save PATH\|clear\|play N\|show\|click shuffle\|click repeat` | Save as .m3u8, empty it, play entry N, show the panel, press its buttons |
+| `sleep MINUTES\|end\|off\|seconds N` | Sleep timer |
 | `fmvgrab PATH` | Save the Sega CD FMV look's console screen (the 256×224 picture before the TV) as an image |
 | `tvadd NUMBER order\|shuffle FOLDER` | Cable TV: a channel from a folder. Channels made by a script get a fixed place in their rounds, so runs repeat |
 | `tvbumpers NUMBER FOLDER` | Short clips to play between that channel's programmes |

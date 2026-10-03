@@ -97,6 +97,25 @@ void paintIcon(QPainter& p, const QString& n, const QColor& c)
         p.drawLine(QPointF(5, 12), QPointF(19, 12));
     } else if (n == "clear") {
         p.drawLine(QPointF(7, 7), QPointF(17, 17)); p.drawLine(QPointF(17, 7), QPointF(7, 17));
+    } else if (n == "shuffle") {   // two crossing paths, arrows at the right
+        p.drawPolyline(QPolygonF({{3.5, 7.5}, {7.5, 7.5}, {14, 16.5}, {18, 16.5}}));
+        p.drawPolyline(QPolygonF({{3.5, 16.5}, {7.5, 16.5}, {9.3, 14}}));
+        p.drawPolyline(QPolygonF({{12.2, 10}, {14, 7.5}, {18, 7.5}}));
+        fillPoly({{17.5, 5}, {21, 7.5}, {17.5, 10}});
+        fillPoly({{17.5, 14}, {21, 16.5}, {17.5, 19}});
+    } else if (n == "repeat" || n == "repeat1") {   // a loop of two arrows; "1": this one only
+        p.drawPolyline(QPolygonF({{4.5, 11.5}, {4.5, 7.5}, {16.5, 7.5}}));
+        fillPoly({{16, 5}, {19.5, 7.5}, {16, 10}});
+        p.drawPolyline(QPolygonF({{19.5, 12.5}, {19.5, 16.5}, {7.5, 16.5}}));
+        fillPoly({{8, 14}, {4.5, 16.5}, {8, 19}});
+        if (n == "repeat1") {
+            p.setPen(QPen(c, 1.5, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+            p.drawPolyline(QPolygonF({{11, 10.8}, {12.3, 10}, {12.3, 14}}));
+        }
+    } else if (n == "save") {   // a floppy disk
+        p.drawPolygon(QPolygonF({{5, 5}, {16.5, 5}, {19, 7.5}, {19, 19}, {5, 19}}));
+        p.drawRect(QRectF(8.5, 5, 6, 4));
+        p.drawRect(QRectF(8, 13, 8, 6));
     }
 }
 

@@ -7,6 +7,8 @@
 #include <QListWidget>
 #include <QToolButton>
 #include <QVBoxLayout>
+#include <QSignalBlocker>
+#include <algorithm>
 
 PlaylistPanel::PlaylistPanel(QWidget* parent) : QWidget(parent)
 {
@@ -27,11 +29,24 @@ PlaylistPanel::PlaylistPanel(QWidget* parent) : QWidget(parent)
     auto* add = mk("add", tr("Add files…"));
     auto* rem = mk("remove", tr("Remove selected (Delete)"));
     auto* clr = mk("clear", tr("Clear playlist"));
+    m_clear = clr;
+    m_shuffle = mk("shuffle", tr("Shuffle: play in a random order (Ctrl+H)"));
+    m_shuffle->setCheckable(true);
+    m_repeat = mk("repeat", QString());
+    m_repeat->setCheckable(true);
+    auto* save = mk("save", tr("Save the playlist as a file (.m3u8)…"));
     h->addWidget(add);
     h->addWidget(rem);
     h->addWidget(clr);
     h->addStretch(1);
+    h->addWidget(m_shuffle);
+    h->addWidget(m_repeat);
+    h->addWidget(save);
     v->addLayout(h);
+    setRepeatMode(0);
+    connect(m_shuffle, &QToolButton::toggled, this, &PlaylistPanel::shuffleChanged);
+    connect(m_repeat, &QToolButton::clicked, this, [this] { setRepeatMode((m_repeatMode + 1) % 3); emit repeatModeChanged(m_repeatMode); });
+    connect(save, &QToolButton::clicked, this, &PlaylistPanel::saveRequested);
 
     connect(add, &QToolButton::clicked, this, &PlaylistPanel::addRequested);
     connect(rem, &QToolButton::clicked, this, [this] {
@@ -42,8 +57,9 @@ PlaylistPanel::PlaylistPanel(QWidget* parent) : QWidget(parent)
             else if (row < m_current) --m_current;
             delete it;
         }
+        emit changed();
     });
-    connect(clr, &QToolButton::clicked, this, [this] { m_list->clear(); m_current = -1; });
+    connect(clr, &QToolButton::clicked, this, [this] { m_list->clear(); m_current = -1; emit changed(); });
     connect(m_list, &QListWidget::itemActivated, this, [this](QListWidgetItem* it) { emit activated(m_list->row(it)); });
     connect(m_list->model(), &QAbstractItemModel::rowsMoved, this, [this] {
         for (int i = 0; i < m_list->count(); ++i)
@@ -81,6 +97,28 @@ int PlaylistPanel::addItems(const QStringList& paths)
         m_list->addItem(it);
     }
     return first;
+}
+
+void PlaylistPanel::setShuffle(bool on)
+{
+    QSignalBlocker b(m_shuffle);
+    m_shuffle->setChecked(on);
+}
+
+void PlaylistPanel::setRepeatMode(int mode)
+{
+    m_repeatMode = std::clamp(mode, 0, 2);
+    m_repeat->setChecked(m_repeatMode != 0);
+    m_repeat->setIcon(Icons::get(m_repeatMode == 2 ? "repeat1" : "repeat"));
+    m_repeat->setToolTip(m_repeatMode == 0 ? tr("Repeat: off (Ctrl+R)") : m_repeatMode == 1 ? tr("Repeat: the whole playlist (Ctrl+R)")
+                                                                                             : tr("Repeat: this video (Ctrl+R)"));
+}
+
+void PlaylistPanel::click(const QString& button)
+{
+    if (button == "shuffle") m_shuffle->click();
+    else if (button == "repeat") m_repeat->click();
+    else if (button == "clear") m_clear->click();
 }
 
 int PlaylistPanel::count() const { return m_list->count(); }

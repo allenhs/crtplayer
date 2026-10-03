@@ -54,6 +54,16 @@ struct AppSettings {
     bool lookSound = true;  // the look's sound: tape hiss, TV speaker, film crackle
     double noiseVolume = 1.0;     // how loud the hiss and crackle are (0 .. 2)
     double effectStrength = 1.0;  // how strongly the sound is changed (0 .. 1)
+    // 2.11: what carries over from video to video, and everyday playback
+    bool subtitlesOn = false;          // subtitles are off until asked for, and then stay as set
+    QString subtitleLang, audioLang;   // the languages last chosen ("en", "ja"); picked when a video offers them
+    int audioDelayMs = 0;              // sound later (+) or earlier (-) than the picture
+    int subSize = 1, subColor = 0, subBackground = 0, subPosition = 0;   // subtitle text
+    bool nightMode = false;            // quiet parts louder, loud parts quieter
+    bool deinterlace = true;           // interlaced video is deinterlaced
+    bool shuffle = false;
+    int repeatMode = 0;                // 0 off, 1 the whole playlist, 2 this video
+    bool autoNext = false;             // at the end of the playlist, carry on with the next video in the folder
     QString hiddenPluginNotice;   // the missing-plugin list the user chose not to see again
     QStringList recentFiles;   // local files, most recent first (max 15)   // 0 CRT television, 1 flat-face CRT, 2 flat panel
 

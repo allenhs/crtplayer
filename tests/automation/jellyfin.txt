@@ -52,4 +52,15 @@ waitstate playing 20000
 wait 1200
 expect displayAspect 2.3704
 report jf-episode
+# 2.11: with subtitles on, a video with none of its own gets the server's subtitle file by itself
+subs on
+jfhome
+jfwait listing 8000
+jfopen Movies
+jfwait listing 8000
+jfopen Test Pattern 4x3
+waitstate playing 20000
+wait 4000
+report jf-auto-subs
+subs off
 quit

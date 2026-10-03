@@ -45,7 +45,7 @@ G_END_DECLS
 struct _CrtTape {
     GstAudioFilter parent;
     // amounts (set from the GUI thread)
-    std::atomic<float> hiss, wow, saturation, tone, speaker, crackle, dropouts, crush, noiseGain;
+    std::atomic<float> hiss, wow, saturation, tone, speaker, crackle, dropouts, crush, night, noiseGain;
     // processing state (streaming thread)
     int rate, channels;
     std::vector<std::vector<float>>* delay;
@@ -58,6 +58,9 @@ struct _CrtTape {
     int writePos;
     double wowPh, flutPh, drift, driftTarget;
     double dipGain, dipLeft;
+    double nightEnv, nightGain;   // night mode: the level being followed, the gain in use
+    double meterSum; int meterN; std::atomic<float> levelDb;   // output level meter
+    int meterCross; float meterLast; std::atomic<float> pitchHz;   // ... and the pitch of a plain tone (zero crossings of the first channel)
     uint64_t rng;
     float lastTone, lastSpeaker;
     Biquad toneF, hp, pk, lp;
@@ -93,9 +96,33 @@ static GstFlowReturn crt_tape_transform_ip(GstBaseTransform* bt, GstBuffer* buf)
 {
     CrtTape* t = CRT_TAPE(bt);
     const float hiss = t->hiss, wow = t->wow, sat = t->saturation, tone = t->tone, spk = t->speaker, crackle = t->crackle, drop = t->dropouts, crush = t->crush;
+    const float night = t->night;
     const double noise = t->noiseGain;   // volume of the added hiss and crackle
-    if (hiss <= 0.f && wow <= 0.f && sat <= 0.f && tone <= 0.f && spk <= 0.f && crackle <= 0.f && drop <= 0.f && crush <= 0.f)
-        return GST_FLOW_OK;   // untouched
+    // The level of what goes out, half a second at a time (read by the player's report).
+    auto meter = [t](const float* s, size_t samples) {
+        const size_t ch = size_t(std::max(1, t->channels));
+        for (size_t i = 0; i < samples; ++i) {
+            t->meterSum += double(s[i]) * s[i];
+            if (i % ch == 0) {
+                if ((s[i] >= 0.f) != (t->meterLast >= 0.f)) ++t->meterCross;
+                t->meterLast = s[i];
+            }
+        }
+        t->meterN += int(samples);
+        if (t->meterN >= t->rate * int(ch) / 2) {
+            t->levelDb = float(10.0 * std::log10(t->meterSum / t->meterN + 1e-12));
+            t->pitchHz = float(t->meterCross / 2.0 / (double(t->meterN) / ch / t->rate));
+            t->meterSum = 0; t->meterN = 0; t->meterCross = 0;
+        }
+    };
+    if (hiss <= 0.f && wow <= 0.f && sat <= 0.f && tone <= 0.f && spk <= 0.f && crackle <= 0.f && drop <= 0.f && crush <= 0.f && night <= 0.f) {
+        GstMapInfo ro;
+        if (gst_buffer_map(buf, &ro, GST_MAP_READ)) {   // untouched: only measured
+            meter(reinterpret_cast<const float*>(ro.data), ro.size / sizeof(float));
+            gst_buffer_unmap(buf, &ro);
+        }
+        return GST_FLOW_OK;
+    }
     GstMapInfo map;
     if (!gst_buffer_map(buf, &map, GST_MAP_READWRITE)) return GST_FLOW_ERROR;
     float* s = reinterpret_cast<float*>(map.data);
@@ -110,6 +137,10 @@ static GstFlowReturn crt_tape_transform_ip(GstBaseTransform* bt, GstBuffer* buf)
     }
     auto& dl = *t->delay;
     const int len = int(dl[0].size());
+    // Night mode: a compressor. Above the threshold the level rises a third as fast as the
+    // source's (at full), and everything is then lifted, so speech comes up and bangs come down.
+    const double nThreshDb = -36.0, nRatio = 1.0 + 2.0 * night, nMakeupDb = 14.0 * night;
+    const double nAtk = std::exp(-1.0 / (sr * 0.004)), nRel = std::exp(-1.0 / (sr * 0.35)), nSmooth = std::exp(-1.0 / (sr * 0.010));
     for (int i = 0; i < frames; ++i) {
         // tape transport: slow wow, fast flutter, and a random drift
         t->wowPh += 2 * M_PI * 0.55 / sr;
@@ -182,8 +213,24 @@ static GstFlowReturn crt_tape_transform_ip(GstBaseTransform* bt, GstBuffer* buf)
             mono /= ch;
             for (int c = 0; c < ch; ++c) s[i * ch + c] = s[i * ch + c] * (1 - spk) + mono * spk;
         }
+        if (night > 0) {   // all channels share one gain, so the stereo image holds still
+            double peak = 0;
+            for (int c = 0; c < ch; ++c) peak = std::max(peak, double(std::fabs(s[i * ch + c])));
+            t->nightEnv = peak > t->nightEnv ? peak + (t->nightEnv - peak) * nAtk : peak + (t->nightEnv - peak) * nRel;
+            const double db = 20.0 * std::log10(std::max(t->nightEnv, 1e-6));
+            const double over = std::max(0.0, db - nThreshDb);
+            const double gainDb = nMakeupDb - over * (1.0 - 1.0 / nRatio);
+            const double g = std::pow(10.0, gainDb / 20.0);
+            t->nightGain = g + (t->nightGain - g) * nSmooth;
+            for (int c = 0; c < ch; ++c) {
+                double v = s[i * ch + c] * t->nightGain;
+                if (std::fabs(v) > 0.9) v = std::copysign(0.9 + 0.1 * std::tanh((std::fabs(v) - 0.9) / 0.1), v);   // never clips
+                s[i * ch + c] = float(v);
+            }
+        }
         t->writePos = (t->writePos + 1) % len;
     }
+    meter(s, size_t(frames) * ch);
     gst_buffer_unmap(buf, &map);
     return GST_FLOW_OK;
 }
@@ -212,7 +259,10 @@ static void crt_tape_class_init(CrtTapeClass* klass)
 
 static void crt_tape_init(CrtTape* t)
 {
-    t->hiss = t->wow = t->saturation = t->tone = t->speaker = t->crackle = t->dropouts = t->crush = 0.f;
+    t->hiss = t->wow = t->saturation = t->tone = t->speaker = t->crackle = t->dropouts = t->crush = t->night = 0.f;
+    t->nightEnv = 0; t->nightGain = 1;
+    t->meterSum = 0; t->meterN = 0; t->levelDb = -120.f;
+    t->meterCross = 0; t->meterLast = 0.f; t->pitchHz = 0.f;
     t->noiseGain = 1.f;
     t->rate = 48000; t->channels = 2;
     t->delay = new std::vector<std::vector<float>>(2, std::vector<float>(2400, 0.f));
@@ -238,11 +288,22 @@ void crtTapeRegister()
     gst_element_register(nullptr, "crttape", GST_RANK_NONE, CRT_TYPE_TAPE);
 }
 
+float crtTapePitchHz(GstElement* e)
+{
+    return (e && CRT_IS_TAPE(e)) ? float(CRT_TAPE(e)->pitchHz) : 0.f;
+}
+
+float crtTapeLevelDb(GstElement* e)
+{
+    return (e && CRT_IS_TAPE(e)) ? float(CRT_TAPE(e)->levelDb) : -120.f;
+}
+
 void crtTapeSetParams(GstElement* e, const TapeParams& p)
 {
     if (!e || !CRT_IS_TAPE(e)) return;
     CrtTape* t = CRT_TAPE(e);
     t->hiss = p.hiss; t->wow = p.wow; t->saturation = p.saturation; t->tone = p.tone;
     t->speaker = p.speaker; t->crackle = p.crackle; t->dropouts = p.dropouts; t->crush = p.crush;
+    t->night = std::clamp(p.night, 0.f, 1.f);
     t->noiseGain = std::clamp(p.noiseGain, 0.f, 2.f);
 }

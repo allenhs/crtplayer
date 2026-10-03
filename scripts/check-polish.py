@@ -38,7 +38,7 @@ check('seek preview shows the frame at the hovered time', d_match < 12 and d_oth
 on, off, en = (np.asarray(Image.open(out / f).convert('L')).astype(float) for f in ('sub_on.png', 'sub_off.png', 'sub_en.png'))
 h = on.shape[0]
 def band(a, b, y0, y1): return float(np.abs(a[int(h * y0):int(h * y1)] - b[int(h * y0):int(h * y1)]).mean())
-check('sidecar subtitle loads automatically and is drawn into the picture', band(on, off, 0.65, 1.0) > 3 * max(0.2, band(on, off, 0.0, 0.5)),
+check('with subtitles on, the sidecar subtitle file is loaded by itself and drawn into the picture', band(on, off, 0.65, 1.0) > 3 * max(0.2, band(on, off, 0.0, 0.5)),
       f'bottom-third change {band(on, off, 0.65, 1.0):.2f} vs top half {band(on, off, 0.0, 0.5):.2f}')
 check('another sidecar file shows different text', band(on, en, 0.65, 1.0) > 1.0 and rep['sub-en']['externalSubtitle'] == 'subs_clip.en.srt',
       f"{rep['sub-en']['externalSubtitle']}, bottom-third change {band(on, en, 0.65, 1.0):.2f}")

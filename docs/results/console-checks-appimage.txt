@@ -2,8 +2,8 @@ PASS  the script ran without a failed step: all ok
 PASS  a 4:3 video becomes the console's 256 × 224 screen: 256 × 224
 PASS  at most 64 colours on screen: 64 colours in the frame
 PASS  every colour is one of the console's 512 (3 bits per channel): levels used: [0, 52, 87, 116, 144, 172, 206, 255]
-PASS  the picture changes no more than 15 times a second: 22 codec frames in 3.1 s of video (22 video frames shown)
-PASS  set to 5 frames a second, it changes 5 times a second while the video runs on: 17 codec frames in 3.4 s (5.0/s); 25 video frames shown
+PASS  the picture changes no more than 15 times a second: 21 codec frames in 3.1 s of video (21 video frames shown)
+PASS  set to 5 frames a second, it changes 5 times a second while the video runs on: 15 codec frames in 3.1 s (4.9/s); 21 video frames shown
 PASS  the codec flattens blocks: at full strength far more 4×4 blocks hold one or two colours: 91% of blocks at full strength (no dither) vs 51% with the codec off
 PASS  blocks that hardly change are left as they were (and the rest redrawn): 51% of blocks identical in the next frame, 28% with the codec off
 PASS  the colour count follows the setting (16): 16 colours

@@ -1,20 +1,21 @@
 PASS  [10.10.3] wrong password is rejected and leaves the player signed out: 1 rejected attempt(s)
 PASS  [10.10.3] correct password signs in: home shows 4 entries
-PASS  [10.10.3] every authenticated request carries the Authorization header (except HLS segments): 1367 requests, 58 HLS playlist/segment requests by address
-PASS  [10.10.3] the token appears in no address except a conversion's (HLS) and its subtitle files: 64 such requests, all HLS or its subtitles
+PASS  [10.10.3] every authenticated request carries the Authorization header (except HLS segments): 1380 requests, 58 HLS playlist/segment requests by address
+PASS  [10.10.3] the token appears in no address except a conversion's (HLS) and its subtitle files: 65 such requests, all HLS or its subtitles
 PASS  [10.10.3] original-file streams never carry the token: header only
 PASS  [10.10.3] no request failed: all 2xx
 PASS  [10.10.3] closed streams had started successfully first: 0 closed
 PASS  [10.10.3] uses the route set matching the server version: ['/UserViews']
-PASS  [10.10.3] streams the original file and seeks with HTTP ranges: 11 stream requests, 4 mid-file range requests
+PASS  [10.10.3] streams the original file and seeks with HTTP ranges: 14 stream requests, 5 mid-file range requests
 PASS  [10.10.3] stream request marks the file as static (no server transcoding): static=true
-PASS  [10.10.3] seek moved playback to ~12 s: 14739 ms
-PASS  [10.10.3] continue-watching item resumed at its saved position: 12684 ms (saved: 12000)
-PASS  [10.10.3] playback start reported: 9 start reports
-PASS  [10.10.3] pause/unpause reported: 24 progress reports
-PASS  [10.10.3] stop reports the position (resume point) for the first movie: 16.4 s
+PASS  [10.10.3] seek moved playback to ~12 s: 14489 ms
+PASS  [10.10.3] continue-watching item resumed at its saved position: 12380 ms (saved: 12000)
+PASS  [10.10.3] playback start reported: 10 start reports
+PASS  [10.10.3] pause/unpause reported: 26 progress reports
+PASS  [10.10.3] stop reports the position (resume point) for the first movie: 15.8 s
 PASS  [10.10.3] TV show navigation reaches episodes: S01E01 · Pilot
-PASS  [10.10.3] external subtitle fetched from the server, authenticated: 2 subtitle request(s): /Videos/m1/m1/Subtitles/2/0/Stream.srt
+PASS  [10.10.3] external subtitle fetched from the server, authenticated: 4 subtitle request(s): /Videos/m1/m1/Subtitles/2/0/Stream.srt
+PASS  [10.10.3] with subtitles on, a video without its own gets the server's subtitle file by itself: English (SRT, external); playing
 PASS  [10.10.3] session restored on the next launch: signed in without the password
 PASS  [10.10.3] signing out revokes the token on the server: 2 logout request(s)
 PASS  [10.10.3] no password is ever written to the automation logs: checked
@@ -25,13 +26,13 @@ PASS  [10.10.3] the paging and conversion script ran without a failed step: all 
 PASS  [10.10.3] a big library (1,234 items) opens with its first page only: 100 shown of 1234
 PASS  [10.10.3] scrolling loads the rest a page at a time, each page once: 1234 items from 13 requests (StartIndex 0..1200)
 PASS  [10.10.3] the last item of the big library plays (beyond the old 500 limit): Clip 1234 (2009)
-PASS  [10.10.3] every play asks the server how (PlaybackInfo) with this computer's formats: 10 requests; video codecs: h264,hevc,vp8,vp9,av1,mpeg2video,mpeg1video,mpeg4,msmpeg4v3,vc1,wmv3,mjpeg,theora,h263
+PASS  [10.10.3] every play asks the server how (PlaybackInfo) with this computer's formats: 11 requests; video codecs: h264,hevc,vp8,vp9,av1,mpeg2video,mpeg1video,mpeg4,msmpeg4v3,vc1,wmv3,mjpeg,theora,h263
 PASS  [10.10.3] a codec this computer can't decode is converted by the server: Transcode, ['VideoCodecNotSupported']
-PASS  [10.10.3] the conversion streams as HLS segments, authenticated by their address: 53 segments, all 200
-PASS  [10.10.3] seeking works in a converted video: 15108 ms
+PASS  [10.10.3] the conversion streams as HLS segments, authenticated by their address: 52 segments, all 200
+PASS  [10.10.3] seeking works in a converted video: 15049 ms
 PASS  [10.10.3] an original that fails here is retried converted, once: converted by the server: the original didn't play here; 1 conversion request(s)
 PASS  [10.10.3] over the quality limit is converted; the limit reaches the server: ['ContainerBitrateExceedsLimit'], MaxStreamingBitrate 4000000
-PASS  [10.10.3] a converted video resumes at its saved position: 17609 ms (saved: 12000)
+PASS  [10.10.3] a converted video resumes at its saved position: 14435 ms (saved: 12000)
 PASS  [10.10.3] its embedded subtitle is offered as a file from the server: English (embedded)
 PASS  [10.10.3] "Play converted by the server" converts a playable file: converted by the server
 PASS  [10.10.3] back at the original quality, the same file plays directly again: original file

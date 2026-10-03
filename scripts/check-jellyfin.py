@@ -68,6 +68,9 @@ check('TV show navigation reaches episodes', rep['jf-episode']['source'] == 'jel
 subreq = [r for r in reqs if '/Subtitles/' in r['path']]
 check('external subtitle fetched from the server, authenticated', subreq and all(r['authHeader'] and r['status'] == 200 for r in subreq),
       f"{len(subreq)} subtitle request(s): {subreq[0]['path'] if subreq else '-'}")
+a = rep.get('jf-auto-subs')
+check('with subtitles on, a video without its own gets the server\'s subtitle file by itself', a is not None and a['externalSubtitle'] == 'English (SRT, external)'
+      and a['currentSubtitle'] >= 0 and a['state'] == 'playing', f"{a['externalSubtitle'] if a else 'missing'}; {a['state'] if a else ''}")
 check('session restored on the next launch', rep['jf-restored']['jellyfinSignedIn'], 'signed in without the password')
 logout = [r for r in reqs if r['path'] == '/Sessions/Logout']
 check('signing out revokes the token on the server', logout and logout[0]['status'] == 204 and not rep['jf-signed-out']['jellyfinSignedIn'],

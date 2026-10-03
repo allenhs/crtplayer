@@ -5,6 +5,8 @@
 #include <QFileDialog>
 #include <QFormLayout>
 #include <QGroupBox>
+#include <QSpinBox>
+#include <QSignalBlocker>
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QLineEdit>
@@ -55,6 +57,13 @@ PlaybackPanel::PlaybackPanel(QWidget* parent) : QWidget(parent)
     m_hw->setToolTip(tr("Prefers VA-API / NVDEC / V4L2 GStreamer decoders installed on this system. "
                         "If a hardware decoder fails, playback restarts in software automatically."));
     df->addWidget(m_hw);
+    m_deint = new QCheckBox(tr("Deinterlace interlaced video"));
+    m_deint->setToolTip(tr("DVDs and TV recordings are often interlaced: each frame holds two half-pictures taken a moment apart,\n"
+                           "which shows as combing on anything that moves. On: such video is deinterlaced; other video is never touched.\n"
+                           "Off: the frames are shown as stored."));
+    m_deint->setChecked(true);
+    connect(m_deint, &QCheckBox::toggled, this, &PlaybackPanel::deinterlaceChanged);
+    df->addWidget(m_deint);
     m_status = new QLabel;
     m_status->setWordWrap(true);
     m_status->setObjectName("paramValue");
@@ -84,8 +93,62 @@ PlaybackPanel::PlaybackPanel(QWidget* parent) : QWidget(parent)
     m_keepAwake->setChecked(true);
     connect(m_keepAwake, &QCheckBox::toggled, this, &PlaybackPanel::keepAwakeChanged);
     v->addWidget(m_keepAwake);
+    // ---- subtitles
+    auto* subBox = new QGroupBox(tr("Subtitles"), this);
+    auto* subF = new QFormLayout(subBox);
+    subF->setContentsMargins(0, 6, 0, 0);
+    m_subsOn = new QCheckBox(tr("Show subtitles (V)"));
+    m_subsOn->setToolTip(tr("Off until you turn them on, and then they stay as you set them: from one video to the next,\n"
+                            "from channel to channel, and the next time the player starts. The language you last picked\n"
+                            "is chosen again when a video has it."));
+    connect(m_subsOn, &QCheckBox::toggled, this, &PlaybackPanel::subtitlesWantedChanged);
+    subF->addRow(m_subsOn);
+    auto combo = [this](const QStringList& items) {
+        auto* c = new QComboBox;
+        c->addItems(items);
+        c->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
+        c->setMinimumContentsLength(10);
+        connect(c, &QComboBox::activated, this, [this] {
+            emit subtitleStyleChanged(m_subSize->currentIndex(), m_subColor->currentIndex(), m_subBack->currentIndex(), m_subPos->currentIndex());
+        });
+        return c;
+    };
+    m_subSize = combo({tr("Small"), tr("Normal"), tr("Large"), tr("Very large")});
+    m_subSize->setCurrentIndex(1);
+    m_subColor = combo({tr("White"), tr("Yellow")});
+    m_subBack = combo({tr("Outline"), tr("Dark box")});
+    m_subPos = combo({tr("Bottom"), tr("Raised"), tr("Top")});
+    subF->addRow(tr("Size"), m_subSize);
+    subF->addRow(tr("Colour"), m_subColor);
+    subF->addRow(tr("Behind the text"), m_subBack);
+    subF->addRow(tr("Position"), m_subPos);
+    m_subDelay = new QSpinBox;
+    m_subDelay->setRange(-60000, 60000);
+    m_subDelay->setSingleStep(100);
+    m_subDelay->setSuffix(tr(" ms"));
+    m_subDelay->setToolTip(tr("Subtitles later (+) or earlier (−) than they are stored. For this video only. Keys: H later, Shift+H earlier."));
+    connect(m_subDelay, &QSpinBox::valueChanged, this, &PlaybackPanel::subtitleDelayChanged);
+    subF->addRow(tr("Delay"), m_subDelay);
+    v->addWidget(subBox);
+
     auto* soundBox = new QGroupBox(tr("Sound"), this);
     auto* soundV = new QVBoxLayout(soundBox);
+    m_night = new QCheckBox(tr("Night mode: even out loud and quiet (D)"));
+    m_night->setToolTip(tr("Quiet speech comes up and loud bangs come down, so a film can be followed at low volume."));
+    connect(m_night, &QCheckBox::toggled, this, &PlaybackPanel::nightModeChanged);
+    soundV->addWidget(m_night);
+    {
+        auto* row = new QFormLayout;
+        m_audioDelay = new QSpinBox;
+        m_audioDelay->setRange(-10000, 10000);
+        m_audioDelay->setSingleStep(25);
+        m_audioDelay->setSuffix(tr(" ms"));
+        m_audioDelay->setToolTip(tr("Sound later (+) or earlier (−) than the picture, to fix lips that don't match. It is remembered\n"
+                                    "(wireless speakers and TVs add a fixed delay). Keys: Ctrl+= later, Ctrl+− earlier."));
+        connect(m_audioDelay, &QSpinBox::valueChanged, this, &PlaybackPanel::audioDelayChanged);
+        row->addRow(tr("Sound delay"), m_audioDelay);
+        soundV->addLayout(row);
+    }
     m_lookSound = new QCheckBox(tr("The look's sound (tape hiss, TV speaker, film crackle)"));
     m_lookSound->setToolTip(tr("Looks can change the sound as well as the picture: a VHS tape hisses and wobbles, a TV "
                                "speaker is small and boxy, a film print crackles. Adjust it under CRT → Sound."));
@@ -122,6 +185,26 @@ PlaybackPanel::PlaybackPanel(QWidget* parent) : QWidget(parent)
     connect(m_lookSound, &QCheckBox::toggled, m_soundLevels, &QWidget::setEnabled);
     soundV->addWidget(m_soundLevels);
     v->addWidget(soundBox);
+    // ---- at the end, and the sleep timer
+    auto* endBox = new QGroupBox(tr("When a video ends"), this);
+    auto* endF = new QFormLayout(endBox);
+    endF->setContentsMargins(0, 6, 0, 0);
+    m_autoNext = new QCheckBox(tr("Carry on with the next video in the folder"));
+    m_autoNext->setToolTip(tr("When the playlist has nothing more, the next video in the same folder plays (in name order,\n"
+                              "Episode 2 before Episode 10). Repeat and shuffle are in the playlist panel."));
+    connect(m_autoNext, &QCheckBox::toggled, this, &PlaybackPanel::autoNextChanged);
+    endF->addRow(m_autoNext);
+    m_sleepCombo = new QComboBox;
+    m_sleepCombo->addItem(tr("Off"), 0);
+    for (int m : {15, 30, 45, 60, 90, 120}) m_sleepCombo->addItem(tr("%1 minutes").arg(m), m);
+    m_sleepCombo->addItem(tr("At the end of this video"), -1);
+    m_sleepCombo->setToolTip(tr("Stops playing after this long (the sound fades out first), and lets the screen go to sleep. Key: Shift+Z."));
+    connect(m_sleepCombo, &QComboBox::activated, this, [this](int i) { emit sleepTimerChanged(m_sleepCombo->itemData(i).toInt()); });
+    m_sleepStatus = new QLabel;
+    m_sleepStatus->setObjectName("paramValue");
+    endF->addRow(tr("Sleep timer"), m_sleepCombo);
+    endF->addRow(QString(), m_sleepStatus);
+    v->addWidget(endBox);
     auto* diag = new QGroupBox(tr("Help with a problem"), this);
     auto* dl = new QVBoxLayout(diag);
     auto* dtext = new QLabel(tr("Copies a summary of this system (graphics, GStreamer, decoders, the current video's "
@@ -144,6 +227,27 @@ PlaybackPanel::PlaybackPanel(QWidget* parent) : QWidget(parent)
         const QString d = QFileDialog::getExistingDirectory(this, tr("Screenshot folder"), m_dir->text());
         if (!d.isEmpty()) { m_dir->setText(d); emit screenshotDirChanged(d); }
     });
+}
+
+void PlaybackPanel::setSubtitlesWanted(bool on) { QSignalBlocker b(m_subsOn); m_subsOn->setChecked(on); }
+void PlaybackPanel::setSubtitleStyle(int size, int color, int background, int position)
+{
+    const QSignalBlocker b1(m_subSize), b2(m_subColor), b3(m_subBack), b4(m_subPos);
+    m_subSize->setCurrentIndex(size); m_subColor->setCurrentIndex(color); m_subBack->setCurrentIndex(background); m_subPos->setCurrentIndex(position);
+}
+void PlaybackPanel::setSubtitleDelay(int ms) { QSignalBlocker b(m_subDelay); m_subDelay->setValue(ms); }
+void PlaybackPanel::setAudioDelay(int ms) { QSignalBlocker b(m_audioDelay); m_audioDelay->setValue(ms); }
+void PlaybackPanel::setNightMode(bool on) { QSignalBlocker b(m_night); m_night->setChecked(on); }
+void PlaybackPanel::setDeinterlace(bool on) { QSignalBlocker b(m_deint); m_deint->setChecked(on); }
+void PlaybackPanel::setAutoNext(bool on) { QSignalBlocker b(m_autoNext); m_autoNext->setChecked(on); }
+void PlaybackPanel::setSleepTimer(int minutes, const QString& status)
+{
+    QSignalBlocker b(m_sleepCombo);
+    int idx = m_sleepCombo->findData(minutes);
+    if (idx < 0) idx = minutes > 0 ? m_sleepCombo->findData(120) : 0;   // (a custom length shows as the longest)
+    m_sleepCombo->setCurrentIndex(idx);
+    m_sleepStatus->setText(status);
+    m_sleepStatus->setVisible(!status.isEmpty());
 }
 
 void PlaybackPanel::setHardwareDecoding(bool on) { QSignalBlocker b(m_hw); m_hw->setChecked(on); }

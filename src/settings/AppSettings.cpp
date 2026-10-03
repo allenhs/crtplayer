@@ -90,6 +90,19 @@ void AppSettings::load()
     noiseVolume = std::clamp(s.value("playback/noiseVolume", 1.0).toDouble(), 0.0, 2.0);
     effectStrength = std::clamp(s.value("playback/effectStrength", 1.0).toDouble(), 0.0, 1.0);
     hiddenPluginNotice = s.value("ui/hiddenPluginNotice").toString();
+    subtitlesOn = s.value("subtitles/on", false).toBool();
+    subtitleLang = s.value("subtitles/language").toString();
+    audioLang = s.value("audio/language").toString();
+    audioDelayMs = std::clamp(s.value("audio/delayMs", 0).toInt(), -10000, 10000);
+    subSize = std::clamp(s.value("subtitles/size", 1).toInt(), 0, 3);
+    subColor = std::clamp(s.value("subtitles/color", 0).toInt(), 0, 1);
+    subBackground = std::clamp(s.value("subtitles/background", 0).toInt(), 0, 1);
+    subPosition = std::clamp(s.value("subtitles/position", 0).toInt(), 0, 2);
+    nightMode = s.value("audio/nightMode", false).toBool();
+    deinterlace = s.value("playback/deinterlace", true).toBool();
+    shuffle = s.value("playlist/shuffle", false).toBool();
+    repeatMode = std::clamp(s.value("playlist/repeat", 0).toInt(), 0, 2);
+    autoNext = s.value("playlist/autoNext", false).toBool();
 }
 
 void AppSettings::save() const
@@ -160,5 +173,16 @@ void AppSettings::save() const
     s.setValue("playback/noiseVolume", noiseVolume);
     s.setValue("playback/effectStrength", effectStrength);
     s.setValue("ui/hiddenPluginNotice", hiddenPluginNotice);
+    s.setValue("subtitles/on", subtitlesOn);
+    s.setValue("subtitles/language", subtitleLang);
+    s.setValue("audio/language", audioLang);
+    s.setValue("audio/delayMs", audioDelayMs);
+    s.setValue("subtitles/size", subSize); s.setValue("subtitles/color", subColor);
+    s.setValue("subtitles/background", subBackground); s.setValue("subtitles/position", subPosition);
+    s.setValue("audio/nightMode", nightMode);
+    s.setValue("playback/deinterlace", deinterlace);
+    s.setValue("playlist/shuffle", shuffle);
+    s.setValue("playlist/repeat", repeatMode);
+    s.setValue("playlist/autoNext", autoNext);
     s.sync();
 }

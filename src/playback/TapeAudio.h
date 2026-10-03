@@ -3,7 +3,7 @@
 
 // Tape and speaker sound for the looks: an in-app GStreamer audio filter ("crttape",
 // 32-bit float, any rate and channel count). With every amount at 0 the audio passes
-// through untouched (bit-exact).
+// through untouched (bit-exact). Night mode, a setting rather than part of a look, lives here too.
 struct TapeParams {
     float hiss = 0.f;        // tape hiss (0..1)
     float wow = 0.f;         // wow and flutter: pitch wobble of the tape transport
@@ -13,9 +13,13 @@ struct TapeParams {
     float crackle = 0.f;     // film soundtrack crackle and pops
     float dropouts = 0.f;    // brief level dips (VHS dropouts)
     float crush = 0.f;       // console PCM: 8-bit samples at a low rate, played without smoothing (at 1: 8-bit, 11 kHz)
+    float night = 0.f;       // night mode: quiet parts louder, loud parts quieter (a compressor; 1 = full)
     float noiseGain = 1.f;   // volume of the added noise (hiss and crackle): 0 silent .. 2 twice as loud
-    bool any() const { return hiss > 0.f || wow > 0.f || saturation > 0.f || tone > 0.f || speaker > 0.f || crackle > 0.f || dropouts > 0.f || crush > 0.f; }
+    bool any() const { return hiss > 0.f || wow > 0.f || saturation > 0.f || tone > 0.f || speaker > 0.f || crackle > 0.f || dropouts > 0.f || crush > 0.f || night > 0.f; }
 };
 
 void crtTapeRegister();                                  // once, after gst_init
 void crtTapeSetParams(GstElement* tape, const TapeParams& p);
+// The level of what left the element over the last half second (RMS over all channels, dB; -120 for silence).
+float crtTapeLevelDb(GstElement* tape);
+float crtTapePitchHz(GstElement* tape);   // of a plain tone, over the same half second (the checks tell sound tracks apart by it)

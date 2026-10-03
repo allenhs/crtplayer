@@ -80,6 +80,22 @@ tv_suite() {
   echo "== Cable TV checks"
   checker "$O/tv-checks.txt" python3 "$HERE/scripts/check-tv.py" "$O" "$XDG_CONFIG_HOME" "$XDG_DATA_HOME"
 }
+# 2.11: everyday playback (sticky subtitles and languages, delays, night mode, deinterlacing,
+# shuffle / repeat, playlist files, the next video in a folder, the sleep timer).
+everyday_suite() {
+  rm -rf "$XDG_CONFIG_HOME" "$XDG_DATA_HOME" "$O/everyday-media"
+  mkdir -p "$O/everyday-media/Episodes" "$O/everyday-media/tv-a" "$O/everyday-media/tv-b"
+  cp "$M/short_a.mp4" "$O/everyday-media/Episodes/Episode 1.mp4"
+  cp "$M/short_b.mp4" "$O/everyday-media/Episodes/Episode 2.mp4"
+  cp "$M/short_c.mp4" "$O/everyday-media/Episodes/Episode 10.mp4"
+  echo "not a video" > "$O/everyday-media/Episodes/Episode 3 notes.txt"
+  cp "$M/hd_16x9_multitrack.mkv" "$O/everyday-media/tv-a/"
+  cp "$M/multitrack_b.mkv" "$O/everyday-media/tv-b/"
+  run everyday everyday.txt
+  run everyday-restore everyday-restore.txt
+  echo "== everyday playback checks"
+  checker "$O/everyday-checks.txt" python3 "$HERE/scripts/check-everyday.py" "$O"
+}
 desk_suite() {
   rm -rf "$XDG_CONFIG_HOME"
   run desk desk.txt
@@ -141,6 +157,7 @@ else
   edit_suite
   console_suite
   if python3 -c "import PIL" 2>/dev/null; then tv_suite; fi
+  if python3 -c "import PIL" 2>/dev/null; then everyday_suite; fi
   rm -rf "$XDG_CONFIG_HOME"
   run sound sound.txt
   echo "== sound checks"

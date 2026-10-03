@@ -68,6 +68,7 @@
 #include <QPushButton>
 #include <QSignalBlocker>
 #include <QSlider>
+#include <QScrollArea>
 #include <QTabWidget>
 #include <QScreen>
 #include <QToolButton>
@@ -77,7 +78,7 @@
 namespace {
 const char* kVideoFilter =
     "Video files (*.mp4 *.m4v *.mkv *.webm *.mov *.avi *.wmv *.flv *.mpg *.mpeg *.ts *.m2ts *.mts *.vob *.ogv *.3gp *.divx *.asf *.y4m);;"
-    "Audio files (*.mp3 *.flac *.ogg *.opus *.m4a *.wav *.aac);;All files (*)";
+    "Audio files (*.mp3 *.flac *.ogg *.opus *.m4a *.wav *.aac);;Playlists (*.m3u8 *.m3u);;All files (*)";
 
 QJsonObject rectJson(const QRectF& r) { return {{"x", r.x()}, {"y", r.y()}, {"w", r.width()}, {"h", r.height()}}; }
 }
@@ -110,6 +111,13 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent)
     });
     connect(m_player, &Player::durationChanged, this, [this](qint64 ns) { m_controls->setDuration(ns > 0 ? ns / 1000000 : 0); });
     connect(m_player, &Player::tracksChanged, this, [this] { rebuildAudioMenu(); rebuildSubtitleMenu(); });
+    // Subtitles wanted, none in the video, but the server offers some: load them (once the tracks are known).
+    connect(m_player, &Player::mediaLoaded, this, [this] { QTimer::singleShot(400, this, [this] { maybeLoadOfferedSubtitle(); }); });
+    m_subRefresh.setSingleShot(true);
+    m_subRefresh.setInterval(250);
+    connect(&m_subRefresh, &QTimer::timeout, this, [this] { refreshSubtitlesNow(); });
+    m_sleepTimer.setInterval(500);
+    connect(&m_sleepTimer, &QTimer::timeout, this, [this] { sleepTick(); });
     connect(m_player, &Player::orientationChanged, m_video, &VideoWidget::setOrientationTag);
     connect(m_player, &Player::decoderChanged, this, &MainWindow::updateDecoderStatus);
     connect(m_player, &Player::mediaLoaded, this, [this] { updateDecoderStatus(); updateTitle(); });
@@ -117,13 +125,14 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent)
         if (tvOn()) {   // Cable TV: whatever the channel has on next
             // (Only the end of the programme that was asked for counts, and only once: an end
             // reported twice, or by a file that was already replaced, would skip a programme.)
-            if (m_tvLoaded) { m_tvLoaded = false; m_tv->programEnded(); }
+            if (!m_tvLoaded) return;
+            m_tvLoaded = false;
+            if (m_sleepAtEnd) goToSleep();   // the sleep timer was waiting for this programme to end
+            else m_tv->programEnded();
             return;
         }
-        const int next = m_playlist->currentIndex() + 1;
-        if (next > 0 && next < m_playlist->count()) {
-            playIndex(next);
-        } else {
+        if (m_sleepAtEnd) { goToSleep(); return; }   // the sleep timer was waiting for this
+        if (!playAfterEnd()) {
             m_player->pause();
             showOsd(tr("End of playlist"));
             vcr(QStringLiteral("STOP ■"), 3.0);
@@ -241,6 +250,10 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent)
     connect(m_playbackPanel, &PlaybackPanel::screenshotDirChanged, this, [this](const QString& d) { m_settings.screenshotDir = d; });
     connect(m_playlist, &PlaylistPanel::activated, this, &MainWindow::playIndex);
     connect(m_playlist, &PlaylistPanel::addRequested, this, &MainWindow::addDialog);
+    connect(m_playlist, &PlaylistPanel::shuffleChanged, this, &MainWindow::setShuffle);
+    connect(m_playlist, &PlaylistPanel::repeatModeChanged, this, &MainWindow::setRepeatMode);
+    connect(m_playlist, &PlaylistPanel::saveRequested, this, &MainWindow::savePlaylistDialog);
+    connect(m_playlist, &PlaylistPanel::changed, this, [this] { m_shufflePlayed.clear(); m_shuffleHistory.clear(); });
     connect(m_settingsDock, &QDockWidget::visibilityChanged, this, [this](bool) {
         QSignalBlocker b(m_controls->settingsButton);
         m_controls->settingsButton->setChecked(m_settingsDock->isVisible());
@@ -341,6 +354,17 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent)
     connect(m_playbackPanel, &PlaybackPanel::noiseVolumeChanged, this, [this](double v) { setSoundLevels(v, m_settings.effectStrength); });
     connect(m_playbackPanel, &PlaybackPanel::effectStrengthChanged, this, [this](double v) { setSoundLevels(m_settings.noiseVolume, v); });
     connect(m_playbackPanel, &PlaybackPanel::lookSoundChanged, this, [this](bool on) { m_settings.lookSound = on; applyLookSound(); });
+    connect(m_playbackPanel, &PlaybackPanel::subtitlesWantedChanged, this, [this](bool on) { setSubtitlesWanted(on); });
+    connect(m_playbackPanel, &PlaybackPanel::subtitleStyleChanged, this, [this](int size, int color, int back, int pos) {
+        SubtitleStyle st; st.size = size; st.color = color; st.background = back; st.position = pos;
+        setSubtitleStyle(st);
+    });
+    connect(m_playbackPanel, &PlaybackPanel::subtitleDelayChanged, this, [this](int ms) { setSubtitleDelay(ms, false); });
+    connect(m_playbackPanel, &PlaybackPanel::audioDelayChanged, this, [this](int ms) { setAudioDelay(ms, false); });
+    connect(m_playbackPanel, &PlaybackPanel::nightModeChanged, this, [this](bool on) { setNightMode(on, false); });
+    connect(m_playbackPanel, &PlaybackPanel::deinterlaceChanged, this, &MainWindow::setDeinterlace);
+    connect(m_playbackPanel, &PlaybackPanel::autoNextChanged, this, &MainWindow::setAutoNext);
+    connect(m_playbackPanel, &PlaybackPanel::sleepTimerChanged, this, &MainWindow::setSleepTimer);
     connect(m_playbackPanel, &PlaybackPanel::keepAwakeChanged, this, [this, updateSleep](bool on) { m_settings.keepAwake = on; updateSleep(); });
 
     // ---- resume, recent files, subtitles, speed, loop, chapters, previews (1.8)
@@ -489,7 +513,14 @@ void MainWindow::buildUi()
     m_playbackPanel = new PlaybackPanel;
     m_tabs->addTab(m_crtPanel, tr("CRT"));
     m_tabs->addTab(m_displayPanel, tr("Display"));
-    m_tabs->addTab(m_playbackPanel, tr("Playback"));
+    {   // (the Playback tab has grown: it scrolls)
+        auto* sc = new QScrollArea;
+        sc->setWidget(m_playbackPanel);
+        sc->setWidgetResizable(true);
+        sc->setFrameShape(QFrame::NoFrame);
+        sc->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+        m_tabs->addTab(sc, tr("Playback"));
+    }
     m_tvPanel = new TvPanel;
     m_tabs->addTab(m_tvPanel, tr("TV"));
     m_settingsDock->setWidget(m_tabs);
@@ -577,12 +608,16 @@ void MainWindow::buildActions()
     });
     add({Qt::Key_A}, [this] { cycleAudio(); });
     add({Qt::Key_J}, [this] { cycleSubtitle(); });
-    add({Qt::Key_V}, [this] {
-        if (m_player->currentSubtitleTrack() >= 0) { m_player->setSubtitleTrack(-1); showOsd(tr("Subtitles off")); }
-        else if (!m_player->subtitleTracks().isEmpty()) { m_player->setSubtitleTrack(0); showOsd(m_player->subtitleTracks().first().label); }
-        else showOsd(tr("No subtitle tracks"));
-        rebuildSubtitleMenu();
-    });
+    add({Qt::Key_V}, [this] { setSubtitlesWanted(!m_settings.subtitlesOn); });   // stays as set, from video to video
+    // 2.11: delays, night mode, sleep timer, shuffle and repeat
+    add({QKeySequence(Qt::CTRL | Qt::Key_Equal), QKeySequence(Qt::CTRL | Qt::Key_Plus)}, [this] { setAudioDelay(m_player->audioDelay() + 50); });
+    add({QKeySequence(Qt::CTRL | Qt::Key_Minus)}, [this] { setAudioDelay(m_player->audioDelay() - 50); });
+    add({Qt::Key_H}, [this] { setSubtitleDelay(m_player->subtitleDelay() + 100); });
+    add({QKeySequence(Qt::SHIFT | Qt::Key_H)}, [this] { setSubtitleDelay(m_player->subtitleDelay() - 100); });
+    add({Qt::Key_D}, [this] { setNightMode(!m_settings.nightMode); });
+    add({QKeySequence(Qt::SHIFT | Qt::Key_Z)}, [this] { cycleSleepTimer(); });
+    add({QKeySequence(Qt::CTRL | Qt::Key_H)}, [this] { setShuffle(!m_settings.shuffle); });
+    add({QKeySequence(Qt::CTRL | Qt::Key_R)}, [this] { setRepeatMode((m_settings.repeatMode + 1) % 3); });
     add({Qt::Key_S}, [this] { takeScreenshot(m_settings.screenshotFiltered); });
     add({QKeySequence(Qt::SHIFT | Qt::Key_S)}, [this] { takeScreenshot(false); });
     add({QKeySequence(Qt::CTRL | Qt::Key_S)}, [this] { takeScreenshot(true); });
@@ -631,6 +666,7 @@ void MainWindow::restoreSettings()
 
     m_playlist->setItems(m_settings.playlist);
     m_playlist->setCurrentIndex(m_settings.playlistIndex < m_playlist->count() ? m_settings.playlistIndex : -1);
+    applyEverydaySettings();
     if (!m_settings.geometry.isEmpty()) restoreGeometry(m_settings.geometry);
     if (!m_settings.windowState.isEmpty()) restoreState(m_settings.windowState);
     m_settingsDock->setVisible(m_settings.settingsVisible);
@@ -646,7 +682,7 @@ void MainWindow::saveSettings()
     rememberPosition();
     jellyfinStopCurrent(true);
     m_settings.jellyfinVisible = m_fullscreen ? m_settings.jellyfinVisible : m_jfDock->isVisible();
-    m_settings.volume = m_player->volume();
+    m_settings.volume = m_sleepFading ? volume01() : m_player->volume();   // (never the faded-out volume)
     m_settings.muted = m_player->isMuted();
     m_settings.scaleMode = m_video->scaleMode();
     m_settings.crop = m_video->crop();
@@ -679,9 +715,15 @@ void MainWindow::closeEvent(QCloseEvent* e)
 
 // ---- files & playlist ------------------------------------------------------
 
-void MainWindow::openFiles(const QStringList& paths, bool playNow)
+void MainWindow::openFiles(const QStringList& pathsIn, bool playNow)
 {
-    if (paths.isEmpty()) return;
+    if (pathsIn.isEmpty()) return;
+    QStringList paths;   // playlist files (.m3u, .m3u8) stand for what they list
+    for (const QString& p : pathsIn) {
+        if (isPlaylistFile(p)) paths += readPlaylistFile(p);
+        else paths << p;
+    }
+    if (paths.isEmpty()) { showOsd(tr("Nothing to play in that playlist")); return; }
     const int first = m_playlist->addItems(paths);
     if (!QFileInfo(paths.first()).absolutePath().isEmpty()) m_settings.lastDir = QFileInfo(paths.first()).absolutePath();
     if (playNow) playIndex(first);
@@ -701,6 +743,8 @@ void MainWindow::playIndex(int i)
 void MainWindow::playSource(const QString& path, int i)
 {
     const bool tv = tvOn();
+    m_playLog.append(QFileInfo(path).fileName().isEmpty() ? path : QFileInfo(path).fileName());
+    if (m_playLog.size() > 300) m_playLog.removeFirst();
     m_lastSource = path;
     m_lastSourceIndex = i;
     rememberPosition();
@@ -711,6 +755,10 @@ void MainWindow::playSource(const QString& path, int i)
     m_extSubLabel.clear();
     m_player->setExternalSubtitle(QString());
     setLoop(-1, -1);
+    if (m_player->subtitleDelay() != 0) setSubtitleDelay(0, false);   // (a subtitle delay belongs to one video)
+    // What carries over: subtitles on or off and the languages last picked.
+    m_player->setPreferredLanguages(m_settings.audioLang, m_settings.subtitleLang);
+    m_player->setSubtitlesWanted(m_settings.subtitlesOn);
     QString uri = path;
     qint64 start = 0;
     if (path.startsWith(QLatin1String("jellyfin:"))) {
@@ -969,9 +1017,18 @@ void MainWindow::enqueueJellyfin(const JfItem& item)
 void MainWindow::nextItem(int dir)
 {
     if (tvOn()) { m_tv->channelStep(dir); return; }   // Cable TV: channel up / down
-    const int i = m_playlist->currentIndex() + dir;
-    if (i >= 0 && i < m_playlist->count()) playIndex(i);
-    else showOsd(dir > 0 ? tr("End of playlist") : tr("Start of playlist"));
+    const int i = pickNext(dir);
+    if (i >= 0) { playIndex(i); return; }
+    if (dir > 0 && m_settings.autoNext && !m_settings.shuffle && !m_currentLocal.isEmpty()) {   // on into the folder
+        const QString f = nextInFolder(m_currentLocal);
+        if (!f.isEmpty()) {
+            int idx = m_playlist->items().indexOf(f);
+            if (idx < 0) idx = m_playlist->addItems({f});
+            playIndex(idx);
+            return;
+        }
+    }
+    showOsd(dir > 0 ? tr("End of playlist") : tr("Start of playlist"));
 }
 
 void MainWindow::openDialog(QWidget* parent)
@@ -1068,6 +1125,7 @@ void MainWindow::applyLookSound()
         t.dropouts = m_params.tapeHiss > 0.f ? m_params.vhsDropouts * k : 0.f;   // tape dropouts dip the sound too
         t.crush = m_params.pcmCrush * k;
     }
+    if (m_settings.nightMode) t.night = 1.f;   // (a setting of its own, not part of a look)
     m_lastTape = t;
     m_player->setTapeParams(t);
 }
@@ -1248,7 +1306,7 @@ void MainWindow::rebuildAudioMenu()
         a->setCheckable(true);
         a->setChecked(t.index == cur);
         g->addAction(a);
-        connect(a, &QAction::triggered, this, [this, t] { m_player->setAudioTrack(t.index); showOsd(t.label); });
+        connect(a, &QAction::triggered, this, [this, t] { chooseAudioTrack(t.index); });
     }
 }
 
@@ -1262,14 +1320,14 @@ void MainWindow::rebuildSubtitleMenu()
     off->setCheckable(true);
     off->setChecked(cur < 0);
     g->addAction(off);
-    connect(off, &QAction::triggered, this, [this] { m_player->setSubtitleTrack(-1); showOsd(tr("Subtitles off")); });
+    connect(off, &QAction::triggered, this, [this] { chooseSubtitleTrack(-1); });
     if (tracks.isEmpty()) m_subMenu->addAction(tr("No subtitle tracks in this file"))->setEnabled(false);
     for (const TrackInfo& t : tracks) {
         QAction* a = m_subMenu->addAction(t.label);
         a->setCheckable(true);
         a->setChecked(t.index == cur);
         g->addAction(a);
-        connect(a, &QAction::triggered, this, [this, t] { m_player->setSubtitleTrack(t.index); showOsd(t.label); });
+        connect(a, &QAction::triggered, this, [this, t] { chooseSubtitleTrack(t.index); });
     }
     // External subtitle files: next to a local video, or offered by the Jellyfin server.
     m_subMenu->addSection(tr("Subtitle files"));
@@ -1351,8 +1409,13 @@ void MainWindow::applyExternalSubtitle(const QString& uri, const QString& label)
     const bool playing = m_player->isPlaying();
     const QString cur = m_player->currentUri();
     if (cur.isEmpty()) return;
-    m_player->setExternalSubtitle(uri);
+    m_player->setExternalSubtitle(uri, true);
     m_extSubLabel = label;
+    if (!label.isEmpty()) {   // picking a subtitle file is asking for subtitles
+        m_settings.subtitlesOn = true;
+        m_player->setSubtitlesWanted(true);
+        m_playbackPanel->setSubtitlesWanted(true);
+    }
     m_player->open(cur, playing, pos);
     showOsd(label.isEmpty() ? tr("Subtitle file off") : tr("Subtitles: %1").arg(label));
 }
@@ -2034,10 +2097,7 @@ void MainWindow::cycleAudio()
 {
     const auto tracks = m_player->audioTracks();
     if (tracks.size() < 2) { showOsd(tracks.isEmpty() ? tr("No audio tracks") : tr("Only one audio track")); return; }
-    const int next = (m_player->currentAudioTrack() + 1) % tracks.size();
-    m_player->setAudioTrack(next);
-    showOsd(tracks.at(next).label);
-    rebuildAudioMenu();
+    chooseAudioTrack((m_player->currentAudioTrack() + 1) % tracks.size());
 }
 
 void MainWindow::cycleSubtitle()
@@ -2046,9 +2106,7 @@ void MainWindow::cycleSubtitle()
     if (tracks.isEmpty()) { showOsd(tr("No subtitle tracks")); return; }
     int next = m_player->currentSubtitleTrack() + 1;   // -1 (off) -> 0 -> ... -> off
     if (next >= tracks.size()) next = -1;
-    m_player->setSubtitleTrack(next);
-    showOsd(next < 0 ? tr("Subtitles off") : tracks.at(next).label);
-    rebuildSubtitleMenu();
+    chooseSubtitleTrack(next);
 }
 
 // ---- screenshots -------------------------------------------------------------
@@ -2247,6 +2305,8 @@ void MainWindow::updateInfoOverlay()
     lines << tr("Video       %1 via %2 [%3]").arg(m_player->videoCodec(), m_player->videoDecoder(),
                                                   m_player->videoDecoderIsHardware() ? "HW" : "SW");
     lines << tr("Audio       %1 via %2").arg(m_player->audioCodec(), m_player->audioDecoder());
+    if (m_player->deinterlacing()) lines << tr("Interlaced  deinterlaced for display");
+    if (m_player->audioDelay() != 0) lines << tr("Sound delay %1 ms").arg(m_player->audioDelay());
     if (f.isValid()) {
         const QSizeF ds = displaySize(f, m_video->aspectOverride());
         lines << tr("Coded       %1×%2 %3, %4 fps").arg(f.width).arg(f.height).arg(m_video->pixelFormat()).arg(m_player->frameRate(), 0, 'f', 3);
@@ -2380,6 +2440,7 @@ QJsonObject MainWindow::stateReport() const
     o["subtitleTracks"] = st;
     o["currentAudio"] = m_player->currentAudioTrack();
     o["currentSubtitle"] = m_player->currentSubtitleTrack();
+    o["everyday"] = everydayReport();
     o["missingPlugins"] = QJsonArray::fromStringList(m_player->missingPlugins());
     o["lastError"] = m_lastError;
     o["lastWarning"] = m_lastWarning;
@@ -2588,7 +2649,38 @@ void MainWindow::showDeskMenu(const QPoint& globalPos)
         a->setCheckable(true);
         a->setChecked(i == m_playlist->currentIndex());
     }
+    {   // shuffle and repeat live with the playlist
+        pl->addSeparator();
+        QAction* sh = pl->addAction(tr("Shuffle\tCtrl+H"), this, [this] { setShuffle(!m_settings.shuffle); });
+        sh->setCheckable(true);
+        sh->setChecked(m_settings.shuffle);
+        QMenu* rp = pl->addMenu(tr("Repeat"));
+        const QStringList names = {tr("Off"), tr("The whole playlist"), tr("This video")};
+        for (int i = 0; i < 3; ++i) {
+            QAction* a = rp->addAction(names[i], this, [this, i] { setRepeatMode(i); });
+            a->setCheckable(true);
+            a->setChecked(m_settings.repeatMode == i);
+        }
+    }
     fillRecentMenu(menu.addMenu(tr("Recent files")));
+    {   // 2.11: the things the settings panel holds, within reach in desk mode
+        QAction* subs = menu.addAction(tr("Subtitles\tV"), this, [this] { setSubtitlesWanted(!m_settings.subtitlesOn); });
+        subs->setCheckable(true);
+        subs->setChecked(m_settings.subtitlesOn);
+        QAction* night = menu.addAction(tr("Night mode (even out loud and quiet)\tD"), this, [this] { setNightMode(!m_settings.nightMode); });
+        night->setCheckable(true);
+        night->setChecked(m_settings.nightMode);
+        QMenu* sm = menu.addMenu(tr("Sleep timer"));
+        const bool running = m_sleepAt > 0 || m_sleepAtEnd;
+        auto addSleep = [&](const QString& text, int minutes) {
+            QAction* a = sm->addAction(text, this, [this, minutes] { setSleepTimer(minutes); });
+            a->setCheckable(true);
+            a->setChecked(running ? m_sleepMinutes == minutes : minutes == 0);
+        };
+        addSleep(tr("Off"), 0);
+        for (int m : {15, 30, 45, 60, 90, 120}) addSleep(tr("%1 minutes").arg(m), m);
+        addSleep(tr("At the end of this video"), -1);
+    }
     if (m_tv && !m_tv->channels().isEmpty()) {   // Cable TV: on/off, the guide, and the channels
         QMenu* tm = menu.addMenu(tr("Cable TV"));
         QAction* on = tm->addAction(tr("TV on\tCtrl+T"), this, [this] { setTvMode(!tvOn()); });

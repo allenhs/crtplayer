@@ -209,6 +209,37 @@ int main(int argc, char** argv)
         for (size_t i = 0; same && i < in.size(); ++i) same = clean[i] == in[i];
         check("console PCM at 0: untouched", same, same ? "bit-exact" : "differs");
     }
+    {   // night mode: quiet comes up, loud comes down, nothing clips
+        TapeParams p;
+        p.night = 1.f;
+        const double quietIn = rmsDb(sine(300, 3.0, 0.01), settle), loudIn = rmsDb(sine(300, 3.0, 0.9), settle);
+        const std::vector<float> q = run(sine(300, 3.0, 0.01), p), l = run(sine(300, 3.0, 0.9), p);
+        const double quietOut = rmsDb(q, settle), loudOut = rmsDb(l, settle);
+        float peak = 0;
+        for (float x : l) peak = std::max(peak, std::fabs(x));
+        std::snprintf(d, sizeof d, "quiet %.1f -> %.1f dB, loud %.1f -> %.1f dB: %.1f dB apart instead of %.1f; peak %.2f",
+                      quietIn, quietOut, loudIn, loudOut, loudOut - quietOut, loudIn - quietIn, peak);
+        check("night mode: quiet sound is lifted, loud sound is held down, nothing clips",
+              quietOut - quietIn > 10 && loudOut - loudIn < -6 && (loudOut - quietOut) < 0.5 * (loudIn - quietIn) && peak <= 1.0f, d);
+        // a bang after quiet: the gain comes down within a few milliseconds, and no sample goes over full scale
+        std::vector<float> in = sine(300, 2.0, 0.01), bang = sine(300, 1.0, 0.95);
+        in.insert(in.end(), bang.begin(), bang.end());
+        const std::vector<float> o = run(in, p);
+        float bangPeak = 0;
+        for (size_t i = size_t(kRate) * 2 * 2; i < o.size(); ++i) bangPeak = std::max(bangPeak, std::fabs(o[i]));
+        const double tail = rmsDb(o, size_t(kRate * 2.5));
+        std::snprintf(d, sizeof d, "peak %.2f of full scale at the bang; settled at %.1f dB", bangPeak, tail);
+        check("night mode: a sudden bang after quiet stays within full scale", bangPeak <= 1.0f && tail < -8, d);
+        // both channels get the same gain
+        std::vector<float> st = sine(300, 2.0, 0.5);
+        for (size_t i = 0; i < st.size() / 2; ++i) st[i * 2 + 1] *= 0.25f;
+        const std::vector<float> so = run(st, p);
+        double ratio = 0; size_t n = 0;
+        for (size_t i = settle; i < so.size() / 2; ++i) if (std::fabs(so[i * 2]) > 0.05) { ratio += so[i * 2 + 1] / so[i * 2]; ++n; }
+        ratio /= std::max<size_t>(1, n);
+        std::snprintf(d, sizeof d, "right/left %.3f (0.250 going in)", ratio);
+        check("night mode: left and right keep their balance", std::fabs(ratio - 0.25) < 0.01, d);
+    }
     std::printf(g_fail ? "\n%d tape sound check(s) failed\n" : "\nAll tape sound checks passed\n", g_fail);
     return g_fail ? 1 : 0;
 }
