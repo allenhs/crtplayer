@@ -347,6 +347,13 @@ void JellyfinPanel::scrollToEnd()
     maybeLoadMore();
 }
 
+bool JellyfinPanel::tvChannelByName(const QString& name)
+{
+    for (const JfItem& it : itemsOf(m_list))
+        if (it.isFolder && (it.name == name || it.displayName() == name)) { emit tvChannelRequested(it); return true; }
+    return false;
+}
+
 bool JellyfinPanel::playConvertedByName(const QString& name)
 {
     const auto& store = itemsOf(m_list);
@@ -404,6 +411,8 @@ void JellyfinPanel::contextMenu(const QPoint& pos)
         menu.addAction(tr("Play converted by the server"), this, [this, it] { emit convertedPlayRequested(it); });
     } else {
         menu.addAction(tr("Open"), this, [this, it] { navigateInto(it); });
+        menu.addSeparator();
+        menu.addAction(tr("Add as TV channel"), this, [this, it] { emit tvChannelRequested(it); });
     }
     menu.exec(m_list->viewport()->mapToGlobal(pos));
 }

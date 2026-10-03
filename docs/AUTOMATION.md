@@ -75,8 +75,15 @@ buttons and shortcuts use.
 | `keyframe next\|prev` | Jump to the next / previous keyframe (Shift+→ / Shift+←) |
 | `cut [OUT_PATH]` | Save A–B without re-encoding (the X dialog's *Save cut*); waits, and logs the result |
 | `dialog cut\|gif` | Open the Cut or GIF dialog |
-| `gifopts WIDTH FPS LOOK` | GIF options: width in pixels, frames a second, 1 = with the CRT look, 0 = original picture |
-| `gif [OUT_PATH]` | Record A–B (or the next 5 s) as a GIF; waits, and logs the result |
+| `gifopts WIDTH FPS LOOK` | GIF options: width in pixels (320–1024; 1280, 1920, 2560 and 3840 are the HD, Full HD, 1440p and 4K frames), frames a second, 1 = with the CRT look, 0 = original picture |
+| `gif [OUT_PATH]` | Save A–B (or the next 5 s) as a GIF; waits, and logs the result (size, frames, frames a second, how long it took) |
+| `fmvgrab PATH` | Save the Sega CD FMV look's console screen (the 256×224 picture before the TV) as an image |
+| `tvadd NUMBER order\|shuffle FOLDER` | Cable TV: a channel from a folder. Channels made by a script get a fixed place in their rounds, so runs repeat |
+| `tvbumpers NUMBER FOLDER` | Short clips to play between that channel's programmes |
+| `tvjf NAME` | The folder NAME in the current Jellyfin listing becomes a channel |
+| `tvwait TIMEOUT_MS` | Wait until every channel's videos have been read |
+| `tvclock MS` | The TV's wall clock reads MS (since the Unix epoch) now, and runs on from there |
+| `tv on\|off\|up\|down\|ch N\|digit N\|guide on\|guide off` | TV mode on/off, channel up/down, tune channel N, press a number key, the guide |
 | `jfwait count N TIMEOUT_MS` | Wait until the listing holds N items, scrolling to its end meanwhile (pages load as you scroll) |
 | `jfopen NAME` | In the current Jellyfin listing, open a folder, or play a video, by name |
 | `jfconverted NAME` | Play a video in the listing converted by the server (its context menu's *Play converted by the server*) |

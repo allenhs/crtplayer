@@ -45,7 +45,7 @@ G_END_DECLS
 struct _CrtTape {
     GstAudioFilter parent;
     // amounts (set from the GUI thread)
-    std::atomic<float> hiss, wow, saturation, tone, speaker, crackle, dropouts, noiseGain;
+    std::atomic<float> hiss, wow, saturation, tone, speaker, crackle, dropouts, crush, noiseGain;
     // processing state (streaming thread)
     int rate, channels;
     std::vector<std::vector<float>>* delay;
@@ -53,6 +53,8 @@ struct _CrtTape {
     std::vector<BiquadState>* spk;       // 3 per channel: highpass, peak, lowpass
     std::vector<float>* hissHp;          // one-pole state per channel
     std::vector<float>* click;           // current click amplitude per channel
+    std::vector<float>* held;            // console PCM: the sample being held, per channel
+    double holdPh;
     int writePos;
     double wowPh, flutPh, drift, driftTarget;
     double dipGain, dipLeft;
@@ -80,6 +82,8 @@ static gboolean crt_tape_setup(GstAudioFilter* f, const GstAudioInfo* info)
     t->spk->assign(size_t(t->channels) * 3, BiquadState());
     t->hissHp->assign(t->channels, 0.f);
     t->click->assign(t->channels, 0.f);
+    t->held->assign(t->channels, 0.f);
+    t->holdPh = 1.0;
     t->writePos = 0;
     t->lastTone = t->lastSpeaker = -1.f;
     return TRUE;
@@ -88,9 +92,9 @@ static gboolean crt_tape_setup(GstAudioFilter* f, const GstAudioInfo* info)
 static GstFlowReturn crt_tape_transform_ip(GstBaseTransform* bt, GstBuffer* buf)
 {
     CrtTape* t = CRT_TAPE(bt);
-    const float hiss = t->hiss, wow = t->wow, sat = t->saturation, tone = t->tone, spk = t->speaker, crackle = t->crackle, drop = t->dropouts;
+    const float hiss = t->hiss, wow = t->wow, sat = t->saturation, tone = t->tone, spk = t->speaker, crackle = t->crackle, drop = t->dropouts, crush = t->crush;
     const double noise = t->noiseGain;   // volume of the added hiss and crackle
-    if (hiss <= 0.f && wow <= 0.f && sat <= 0.f && tone <= 0.f && spk <= 0.f && crackle <= 0.f && drop <= 0.f)
+    if (hiss <= 0.f && wow <= 0.f && sat <= 0.f && tone <= 0.f && spk <= 0.f && crackle <= 0.f && drop <= 0.f && crush <= 0.f)
         return GST_FLOW_OK;   // untouched
     GstMapInfo map;
     if (!gst_buffer_map(buf, &map, GST_MAP_READWRITE)) return GST_FLOW_ERROR;
@@ -122,6 +126,12 @@ static GstFlowReturn crt_tape_transform_ip(GstBaseTransform* bt, GstBuffer* buf)
         const bool pop = crackle > 0 && rnd(t->rng) < crackle * 9.0 / sr;
         const double popAmp = pop ? (rnd(t->rng) * 0.3 + 0.1) * (rnd(t->rng) < 0.5 ? -1 : 1) : 0.0;
         const bool tick = crackle > 0 && rnd(t->rng) < crackle * 120.0 / sr;
+        // console PCM: a new sample only every so often (down to 11 kHz), held in between
+        bool newSample = false;
+        if (crush > 0) {
+            t->holdPh += (sr * (1.0 - crush) + std::min(sr, 11025.0) * crush) / sr;
+            if (t->holdPh >= 1.0) { t->holdPh -= 1.0; newSample = true; }
+        }
         float mono = 0.f;
         for (int c = 0; c < ch; ++c) {
             float& x = s[i * ch + c];
@@ -151,6 +161,14 @@ static GstFlowReturn crt_tape_transform_ip(GstBaseTransform* bt, GstBuffer* buf)
                 v += cl * noise;
                 cl *= float(std::exp(-1.0 / (sr * 0.0007)));
             }
+            if (crush > 0) {   // ... and stored with few bits (16 down to 8)
+                float& h = (*t->held)[c];
+                if (newSample) {
+                    const double levels = std::pow(2.0, 15.0 - 8.0 * crush);
+                    h = float(std::round(std::clamp(v, -1.0, 1.0) * levels) / levels);
+                }
+                v = h;
+            }
             if (spk > 0) {
                 auto* st = &(*t->spk)[size_t(c) * 3];
                 v = st[0].run(t->hp, v);
@@ -173,7 +191,7 @@ static GstFlowReturn crt_tape_transform_ip(GstBaseTransform* bt, GstBuffer* buf)
 static void crt_tape_finalize(GObject* o)
 {
     CrtTape* t = CRT_TAPE(o);
-    delete t->delay; delete t->tape; delete t->spk; delete t->hissHp; delete t->click;
+    delete t->delay; delete t->tape; delete t->spk; delete t->hissHp; delete t->click; delete t->held;
     G_OBJECT_CLASS(crt_tape_parent_class)->finalize(o);
 }
 
@@ -194,7 +212,7 @@ static void crt_tape_class_init(CrtTapeClass* klass)
 
 static void crt_tape_init(CrtTape* t)
 {
-    t->hiss = t->wow = t->saturation = t->tone = t->speaker = t->crackle = t->dropouts = 0.f;
+    t->hiss = t->wow = t->saturation = t->tone = t->speaker = t->crackle = t->dropouts = t->crush = 0.f;
     t->noiseGain = 1.f;
     t->rate = 48000; t->channels = 2;
     t->delay = new std::vector<std::vector<float>>(2, std::vector<float>(2400, 0.f));
@@ -202,6 +220,8 @@ static void crt_tape_init(CrtTape* t)
     t->spk = new std::vector<BiquadState>(6);
     t->hissHp = new std::vector<float>(2, 0.f);
     t->click = new std::vector<float>(2, 0.f);
+    t->held = new std::vector<float>(2, 0.f);
+    t->holdPh = 1.0;
     t->writePos = 0;
     t->wowPh = t->flutPh = t->drift = t->driftTarget = 0;
     t->dipGain = 1; t->dipLeft = 0;
@@ -223,6 +243,6 @@ void crtTapeSetParams(GstElement* e, const TapeParams& p)
     if (!e || !CRT_IS_TAPE(e)) return;
     CrtTape* t = CRT_TAPE(e);
     t->hiss = p.hiss; t->wow = p.wow; t->saturation = p.saturation; t->tone = p.tone;
-    t->speaker = p.speaker; t->crackle = p.crackle; t->dropouts = p.dropouts;
+    t->speaker = p.speaker; t->crackle = p.crackle; t->dropouts = p.dropouts; t->crush = p.crush;
     t->noiseGain = std::clamp(p.noiseGain, 0.f, 2.f);
 }

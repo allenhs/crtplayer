@@ -1,0 +1,82 @@
+# 2.10: Cable TV. Channels from folders (@O@/tv-media, made by run-verification.sh) and
+# from the mock Jellyfin server (@JF@). The wall clock is pinned so the run is repeatable.
+tvadd 2 order @O@/tv-media/movies
+tvadd 5 order @O@/tv-media/toons
+tvbumpers 5 @O@/tv-media/idents
+tvadd 9 order @O@/tv-media/empty
+tvwait 60000
+jfsignin @JF@ demo crt
+jfwait signedin 8000
+jfwait listing 8000
+tvjf Shows
+tvwait 30000
+report channels
+tvclock 1790000000000
+tv on
+report tuning
+waitstate playing 20000
+wait 300
+report badge
+wait 1200
+report ch2
+tv up
+waitstate playing 30000
+wait 1500
+report ch3
+# channel 5 has bumpers between its short programmes: watch it change over
+tv ch 5
+waitstate playing 20000
+wait 1000
+report toons-1
+wait 7000
+report toons-2
+wait 7000
+report toons-3
+wait 7000
+report toons-4
+wait 7000
+report toons-5
+tv guide on
+wait 1500
+screenshot filtered @O@/tv-guide.png
+report guide
+tv guide off
+wait 4500
+report plain
+screenshot filtered @O@/tv-plain.png
+# number keys: 0, 2 -> channel 2, which has moved on meanwhile
+tv digit 0
+tv digit 2
+wait 2400
+waitstate playing 20000
+wait 1200
+report ch2-again
+tv ch 9
+wait 1500
+report empty
+screenshot filtered @O@/tv-empty.png
+tv ch 7
+wait 600
+report nosuch
+# leaving for the empty channel while a programme is still opening: it must not start playing
+tv ch 2
+wait 150
+tv ch 9
+wait 3500
+report raced
+tv ch 2
+waitstate playing 20000
+wait 800
+desk on
+wait 2500
+tv up
+wait 2500
+deskgrab @O@/tv-desk.png
+report desk
+desk off
+wait 800
+tv off
+wait 600
+report off
+screenshot filtered @O@/tv-off.png
+quit

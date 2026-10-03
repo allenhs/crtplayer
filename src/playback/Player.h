@@ -105,6 +105,7 @@ public:
     QString clockName() const;
     double frameRate() const;
     qint64 lastFrameStreamTime() const { return m_lastFrameStreamTime; }
+    quint64 frameSerial();   // counts decoded frames handed to the display
     bool hasVideoStream() const { return m_nVideo > 0; }
 
     // Latest decoded frame as a new reference (nullptr if none yet). Several views can
@@ -148,7 +149,7 @@ private:
     QString m_subUri;
     QString m_audioOutput = QStringLiteral("automatic");
     GstElement* m_tape = nullptr;   // the "crttape" element in the audio chain (owned by the pipeline)
-    float m_tapeValues[7] = {0, 0, 0, 0, 0, 0, 0};
+    float m_tapeValues[8] = {0, 0, 0, 0, 0, 0, 0, 0};
     double m_rate = 1.0;
     QVector<ChapterInfo> m_chapters;
     void readToc(GstToc* toc);

@@ -52,6 +52,7 @@ uniform float uStatic;          // 0..1 static between channels/items
 uniform sampler2D uOsd;         // VCR on-screen display text (premultiplied RGBA)
 uniform float uOsdAlpha;
 uniform vec4  uOsdRect;         // in picture uv: x, y, w, h
+uniform bool  uOsdSmear;        // the VCR text's trailing smear
 uniform int   uMaskType;
 uniform float uMaskStrength;
 uniform float uMaskScale;
@@ -95,6 +96,30 @@ const float kSignalSamples = 640.0; // luma samples across the picture for compo
 float gLod = -1.0;
 // Set on the CRT side only: the bypass / "original" side always shows full resolution.
 bool gPixelate = false;
+
+// On-screen display: added to the output signal after tape playback, so it is steady (no
+// tape jitter) but still goes through the TV: noise, scanlines, mask. A small text (VCR
+// lettering, with its slight trailing smear) or a picture-sized overlay (Cable TV).
+float osdCover(vec2 p)
+{
+    if (uOsdAlpha <= 0.0) return 0.0;
+    vec2 picSize = uImg.zw / uSrc.zw;
+    vec2 picOrigin = uImg.xy - uSrc.xy * picSize;
+    vec2 l = ((p - picOrigin) / picSize - uOsdRect.xy) / uOsdRect.zw;
+    if (any(lessThan(l, vec2(0.0))) || any(greaterThan(l, vec2(1.0)))) return 0.0;
+    return texture(uOsd, l).a * uOsdAlpha;
+}
+vec3 osdOver(vec3 c, vec2 p)
+{
+    if (uOsdAlpha <= 0.0) return c;
+    vec2 picSize = uImg.zw / uSrc.zw;
+    vec2 picOrigin = uImg.xy - uSrc.xy * picSize;
+    vec2 l = ((p - picOrigin) / picSize - uOsdRect.xy) / uOsdRect.zw;
+    if (any(lessThan(l, vec2(0.0))) || any(greaterThan(l, vec2(1.0)))) return c;
+    vec4 o = texture(uOsd, l);
+    if (uOsdSmear) o = max(o, texture(uOsd, l - vec2(0.006, 0.0)) * 0.6);
+    return c * (1.0 - o.a * uOsdAlpha) + o.rgb * uOsdAlpha;
+}
 
 // Ordered (Bayer) dither threshold in [0,1): bits of x^y and y interleaved, reversed.
 float bayer(vec2 cell, int n)
@@ -299,18 +324,7 @@ vec3 sourceColor(vec2 p, vec2 qc, vec2 px, float unit)
     }
     base = yiq2rgb(yiq);
 
-    if (uOsdAlpha > 0.0) {
-        // VCR on-screen display: added to the output signal after tape playback, so it is
-        // steady (no tape jitter) but still goes through the TV: noise, scanlines, mask.
-        vec2 puv = (p - picOrigin) / picSize;
-        vec2 l = (puv - uOsdRect.xy) / uOsdRect.zw;
-        if (all(greaterThanEqual(l, vec2(0.0))) && all(lessThanEqual(l, vec2(1.0)))) {
-            vec4 o = texture(uOsd, l);
-            vec4 o2 = texture(uOsd, l - vec2(0.006, 0.0));   // slight trailing smear, as on a VCR
-            o = max(o, o2 * 0.6);
-            base = base * (1.0 - o.a * uOsdAlpha) + o.rgb * uOsdAlpha;
-        }
-    }
+    base = osdOver(base, p);
 
     bool insidePic = sv >= 0.0 && sv <= 1.0 && pw.x >= uImg.x && pw.x <= uImg.x + uImg.z;
     if (insidePic) {
@@ -353,7 +367,7 @@ vec3 sourceColor(vec2 p, vec2 qc, vec2 px, float unit)
 // Picture controls only, on an unprocessed sample (used for horizontal neighbours).
 vec3 plainColor(vec2 p)
 {
-    vec3 col = fetch(uImage, p);
+    vec3 col = osdOver(fetch(uImage, p), p);
     col = (col - 0.5) * uContrast + 0.5;
     col *= uBrightness;
     col = mix(vec3(dot(col, kLuma)), col, uSaturation);
@@ -438,7 +452,8 @@ void main()
             // Static between channels / playlist items (before the tube, so it gets scanlines).
             float snow = hash12(floor(px / 1.5) + vec2(uFrameRand * 917.0, uFrameRand * 433.0));
             snow = snow * (0.85 + 0.15 * sin(px.y * 0.05 + uTime * 40.0));
-            if (uStatic > 0.0) col0 = mix(col0, vec3(snow), uStatic);
+            // (A picture-sized overlay is the set's own display: it stays readable over the snow.)
+            if (uStatic > 0.0) { col0 = mix(col0, vec3(snow), uStatic); if (!uOsdSmear) col0 = osdOver(col0, p); }
             col = col0;
             // ---- 5. tube ------------------------------------------------------------
             if (beamStyle) {
@@ -517,7 +532,7 @@ void main()
                 float pxPerLine = uTube.w / (lines * (1.0 - uOverscan));
                 float s = uScanStrength * smoothstep(1.4, 2.8, pxPerLine);
                 col = mix(flatCol, beamCol, s);
-                if (uStatic > 0.0) col = mix(col, vec3(snow), uStatic);
+                if (uStatic > 0.0) { col = mix(col, vec3(snow), uStatic); if (!uOsdSmear) col = osdOver(col, p); }
             } else if (uScanStrength > 0.0 && lines > 0.0) {
                 float lyy = ly + ((uScanType == 3) ? 0.5 * mod(field, 2.0) : 0.0);   // alternate fields
                 float f = fract(lyy) - 0.5;
@@ -567,6 +582,8 @@ void main()
             if (uHasBlur && (uGlow > 0.0 || uBloom > 0.0)) {
                 vec2 bt = (p - uImg.xy) / uImg.zw;
                 vec3 b = texture(uBlur, uSrc.xy + bt * uSrc.zw).rgb;
+                b *= 1.0 - 0.9 * osdCover(p);   // the picture's glow doesn't shine through what covers it
+                b *= 1.0 - uStatic;             // nor through static: with no signal there is no picture to glow
                 col += b * uGlow * 0.55;
                 col += max(b - 0.35, 0.0) * uBloom * 1.6;
             }

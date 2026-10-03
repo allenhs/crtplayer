@@ -119,6 +119,10 @@ public:
 
     // A small picture of the current view with another scene (for the settings window).
     QImage scenePreview(int scene, const QSize& size);
+    // The whole view rendered for another size of the same shape (GIF clips up to 4K).
+    QSizeF pictureDisplaySize() const;   // of the video being shown (empty before the first frame)
+    QSize sceneSizeIn(const QSize& box) const;
+    QImage grabScene(const QSize& size);
     int framesShown() const { return m_desk.frameCount(); }
     int picturesLoaded() const;
     double cameraClearance();   // the camera's height above the scene's floor (for tests)
@@ -180,6 +184,8 @@ private:
     SourceFormat m_source;
     bool m_hasFrame = false;
     quint64 m_shownSerial = 0;
+    unsigned m_grabFbo = 0;      // a scene grab in progress renders here
+    double m_grabScale = 1.0;
     int m_osdUploaded = -1;
     Orientation m_orient;
     QElapsedTimer m_clock;

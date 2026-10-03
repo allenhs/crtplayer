@@ -1,6 +1,6 @@
 # Verification report
 
-This report covers the build delivered alongside it (CRT Player 2.9.0).
+This report covers the build delivered alongside it (CRT Player 2.10.0).
 
 The final X11 and Wayland suites were run against the exact stripped `crtplayer` binary
 that is delivered, and **again against the AppImage with the system's Qt libraries
@@ -13,7 +13,7 @@ This environment differs from Bazzite in important ways.
 
 | | |
 |---|---|
-| OS | Ubuntu 24.04.4 LTS, x86-64, in a container with **1 CPU core and no GPU** |
+| OS | Ubuntu 24.04.4 LTS, x86-64, in a container with **1 to 2 CPU cores and no GPU** |
 | Qt / GStreamer | Qt 6.4.2 / GStreamer 1.24.2 (distribution packages) |
 | OpenGL | Mesa llvmpipe, a *software* renderer, providing OpenGL 4.5 core |
 | X11 | Xvfb 1920×1080 with the Openbox window manager (Qt platform `xcb`). For desk mode also the **picom** compositor, plus a desktop-type wallpaper window standing in for the desktop background |
@@ -286,6 +286,201 @@ was **not measured**, because there is no GPU in this environment.
 - GPU performance;
 - the interlaced style's look at real refresh rates (only its field alternation was
   measured).
+
+## 2.10: GIFs up to 4K, the Sega CD FMV look, Cable TV
+
+### GIF clips at any size up to 4K
+
+2.9 played the section and grabbed the window, so a GIF could be no sharper than the
+window and no smoother than the computer could grab. 2.10 replaces that
+(`src/edit/GifRecorder`):
+
+- **Stepping, not playing.** The player pauses, seeks exactly to A, and steps forward one
+  video frame at a time. One frame is taken for every 1/fps of video time, so the frame
+  count is exact on any machine; a slow one only takes longer.
+- **Each frame is drawn at the GIF's size,** off screen: the CRT pass runs again for a
+  picture of that size (`VideoWidget::renderPictureAt`), or the desk scene is rendered
+  into a framebuffer of that size (`DeskView::grabScene`). Nothing is enlarged.
+- **Sizes:** 320 to 1024 wide, and the HD frames (1280×720, 1920×1080, 2560×1440,
+  3840×2160), which the picture is fitted inside.
+- **Timing:** each frame's delay is in GIF hundredths, handed out so the rounding never
+  drifts: the GIF plays exactly as long as the section.
+- **Memory:** frames wait for the encoder (worker threads); when more than 8 are
+  waiting, stepping pauses until it catches up.
+- **Afterwards** the player goes back to where it was (position, paused or playing, A–B).
+
+| Check (`tests/automation/edit.txt`, `scripts/check-edit.py`) | Result |
+|---|---|
+| A–B (2–5 s) at 480 wide, 15 frames a second | PASS: 480×360, 45 frames exactly, plays 3.00 s |
+| Original picture, 320 wide, 10 frames a second | PASS: 320×240, 30 frames, 3.00 s |
+| With the look the GIF shows the CRT; without, the plain picture | PASS: 4 dark (curved) corners vs 0; texture 6.4 vs 0.0 |
+| Without A–B: the next 5 seconds | PASS: from 10000 ms, 75 frames, 5.00 s |
+| Full HD: a 4:3 picture is 1440×1080 | PASS: 10 frames, 1.00 s, 3.4 MB |
+| 4K: a 4:3 picture is 2880×2160 | PASS: 10 frames, 1.00 s, 12.7 MB |
+| The 4K GIF is drawn at 4K, not enlarged | PASS: 476 scanlines counted (4.5 pixels each): the tube shows all of the video's 480 lines. At Full HD, where they would not fit, it shows 239 |
+| Afterwards the player is as it was | PASS: paused, same look, A–B 2000–3000 ms |
+| 4K: a 16:9 video fills 3840×2160 | PASS: 10 frames, 12.6 MB |
+| Desk mode: the whole scene | PASS: 480×270, 30 frames, 2.00 s |
+| Desk mode in HD: drawn at the GIF's size | PASS: 1280×720, 20 frames; fine detail 1.24 against 0.66 for the small GIF enlarged |
+
+The scanline count is the evidence that 4K is real: it is read from the GIF itself (the
+strongest fine ripple in brightness down a strip of the picture).
+
+**By hand:** a 5-second 4K GIF at 15 frames a second: 75 frames, 250 MB, made in 113 s
+with software OpenGL on 2 cores; the player's memory peaked at 501 MB.
+
+### The Sega CD FMV look
+
+What was built (`src/render/FmvPalette`, `shaders/fmv_codec.frag`, `fmv_palette.frag`,
+`CrtRenderer::updateFmv`):
+
+1. **The console's screen:** the video is averaged down to 256×224 (340×224 for 16:9;
+   the pixel shape stays 8:7). With *Video window* below 1 the video takes the middle
+   and the rest is black.
+2. **A codec pass in 4×4 blocks,** in the manner of Cinepak. A block with little detail
+   keeps one colour and four brightness values (one per 2×2 quarter); a detailed block
+   keeps every pixel's brightness and one colour per quarter. A block that differs
+   little from the frame before is left as it was. A full frame is sent at the start,
+   after a jump, and every 2 seconds.
+3. **A palette for each frame:** the frame is read back and reduced to at most *Colours*
+   (64) by median cut, on the console's own grid of 512 colours (3 bits a channel, at the
+   Mega Drive's output levels 0, 52, 87, 116, 144, 172, 206, 255).
+4. **Ordered 4×4 dither** to the nearest palette colour.
+5. **Frame hold:** the picture changes *Frame rate* times a second (15), counted in
+   video time, while the video and its sound run on.
+6. The result goes through the usual composite and tube stages.
+
+**The sound** (`TapeAudio`, parameter *Console PCM*): samples are held (down to
+11.025 kHz at full) and rounded to fewer bits (down to 8), with no smoothing. At 0 the
+sound is untouched.
+
+This is a look, not an emulation of the real codec: it works from the same ideas (4×4
+blocks, colour kept coarser than brightness, skipped blocks, a small per-frame palette).
+Its output was checked for the properties below; it was not compared with captures of
+real games.
+
+| Check (`tests/automation/console.txt`, `scripts/check-console.py`) | Result |
+|---|---|
+| A 4:3 video becomes the console's screen | PASS: 256 × 224 |
+| At most 64 colours on screen | PASS: 64 in the frame |
+| Every colour is one of the console's 512 | PASS: only the 8 output levels appear |
+| The picture changes no more than 15 times a second | PASS: 21 codec frames in 3.0 s of video |
+| Set to 5 frames a second | PASS: 17 codec frames in 3.4 s (5.0/s) while 24 video frames were shown |
+| The codec flattens blocks | PASS: 91% of 4×4 blocks hold one or two colours at full strength, 51% with the codec off |
+| Blocks that hardly change are left as they were | PASS: 51% of blocks identical in the next frame, 28% with the codec off |
+| The colour count follows the setting (16) | PASS: 16 colours |
+| The small-window look | PASS: window 160 × 136 at (48, 44) on the 256 × 224 screen |
+| The look brings the console's sound, a clean look takes it away | PASS: crush 0.85 / 0.00 |
+| A 16:9 video keeps the console's pixel shape | PASS: 340 × 224, 64 colours |
+| It goes on through the TV | PASS: the filtered screenshot shows the tube |
+
+Unit tests: `tests/test_fmv.cpp` (the screen grid for 4:3 and 16:9, the window; the
+palette: about as many colours as asked, all on the 512-colour grid, five colours stay
+five, a small red detail on a big blue background keeps a red of its own) and
+`tests/test_tape.cpp` (the PCM stage: at 0 the sound is bit-exact; at full, samples are
+held at about 11 kHz on 256 levels).
+
+### Cable TV
+
+- **The schedule** (`src/tv/TvSchedule`, pure and unit-tested): a channel is a list of
+  programmes with their lengths, optionally shuffled, optionally with a bumper after
+  every programme. One round of the list repeats for ever, counted from 1 January 2000
+  with a per-channel offset. *What is on now* is arithmetic on the wall clock: nothing
+  runs in the background, and a channel "carries on" while the player is closed.
+  Shuffled channels use a new order each round, fixed by the channel's seed and the
+  round's number.
+- **The controller** (`src/tv/TvController`): channels, scanning (video lengths are read
+  on a worker thread and cached by file size and date in `channels.json`), tuning, and
+  the on-screen graphics, painted into an image that the CRT shader lays over the
+  picture.
+- **Following the schedule:** tuning starts the programme where the broadcast is, plus
+  the time files take to open here (measured each time, from the request to the third
+  frame on screen). When a programme ends, the next in the schedule follows: a bumper
+  plays whole; a programme starts from its top when it is under 3 seconds late and
+  otherwise that much in. A bumper whose time is already up is skipped. More than 8
+  seconds out (after a long pause), the channel is joined afresh.
+- **What it leaves alone:** the playlist, resume positions, and Jellyfin playback
+  reports.
+
+| Check (`tests/automation/tv.txt`, `tv-restore.txt`, `scripts/check-tv.py`) | Result |
+|---|---|
+| Both scripts ran without a failed step | PASS: all ok |
+| A folder becomes a channel: its videos and its subfolders', nothing else | PASS: channel 2: 3 programmes, one round is 65.0 s (20 + 30 + 15) |
+| Bumpers are read from their folder | PASS: channel 5: 3 programmes, 2 bumpers |
+| A Jellyfin folder becomes a channel with its episodes | PASS: channel 3 "Shows": 2 programmes, 20 s |
+| An empty folder is a channel with nothing on | PASS: channel 9: 0 programmes |
+| Turning the TV on tunes the first channel, with static until the picture arrives | PASS: channel 2, static |
+| It comes on partway through, where the broadcast is | PASS: "Another Film": the broadcast is 19.9 s in, the player 19.2 s |
+| The channel number and what is on show for a few seconds after tuning, then go | PASS: just after tuning: "CH 02 MOVIES", "Another Film", "NEXT  7:13 AM  Tall Story"; later the number has gone |
+| Channel up | PASS: the Jellyfin channel plays, in step with its schedule: "Test Show · S01E01 · Pilot": the broadcast is 7.4 s in, the player 7.0 s |
+| Programmes follow one another on their own, as scheduled | PASS: Toon Episode 1 → Toon Episode 1 → Toon Episode 1 → ident-b → Toon Episode 10 (5 of 5 looks in step, 0 during a change-over) |
+| Bumpers play between programmes | PASS: 1 bumper(s), 4 programmes played so far |
+| W shows the guide over the lower part of the picture, through the tube | PASS: 98% blue in the lower part with the guide, 0% without; the video stays on above (21% blue) |
+| Number keys tune a channel, and it has moved on meanwhile | PASS: "Big Movie 1994": the broadcast is 17.4 s in, the player 17.5 s; 42 s after the first visit |
+| An empty channel shows static and says so, with the channel number readable over the snow | PASS: "NO PROGRAMMES", static; green lettering in 5.1% of the top-right corner, 0.00% green elsewhere |
+| A number with no channel leaves the TV where it was | PASS: "CH 07 NOT IN USE", still channel 9 |
+| Leaving for the empty channel while a programme is still opening | PASS: nothing starts playing behind the static: idle, static, "NO PROGRAMMES" |
+| Desk mode | PASS: channels change on the set, with the overlay drawn: channel 3, overlay on, 7% of the desk view lit by the set |
+| TV off | PASS: the programme stops; no overlay, no static: idle; overlay: False, static: none |
+| TV mode adds nothing to the playlist | PASS: playlist empty throughout |
+| TV mode saves no resume positions | PASS: no TV programme in the resume file |
+| Jellyfin | PASS: the channel's episodes are listed in one recursive query: 1 request(s), ParentId lib-shows |
+| Jellyfin | PASS: TV mode reports no playback (resume points and "watched" marks stay as they are): 5 stream requests, 0 playback reports |
+| Jellyfin | PASS: streams still carry the token in the header only: 5 requests |
+| The channels are stored without any token | PASS: …/CRTPlayer/CRTPlayer/channels.json |
+| The channels are back on the next launch, without reading the videos again | PASS: channels [2, 3, 5, 9], ready after 48 ms |
+| TV on again goes to the channel last watched | PASS: channel 3; "Test Show · S01E01 · Pilot": the broadcast is 0.8 s in, the player 0.0 s |
+| Opening a file of your own turns the TV off | PASS: TV on: False; playing sd_4x3_h264.mp4 |
+
+Unit tests (`tests/test_tv.cpp`, 17 checks): the round's length; one programme at any
+moment, with the right offset, and the same answer when asked again; programmes back to
+back, in order, wrapping from the last to the first; shuffled rounds hold every
+programme once, differ from round to round, repeat exactly when asked again, and never
+show the same programme twice in a row; bumpers alternate with programmes; the guide's
+window; an empty channel.
+
+**Faults found by the checks, and fixed:**
+
+- **The last picture's glow tinted the static.** With nothing on, the snow showed the
+  previous channel's colours faintly. Static now has no picture glow, and the set's own
+  lettering is drawn over the snow.
+- **The open time was measured too early** (when the file was opened, not when its
+  picture arrived), so the player ran 1 to 3 seconds behind the schedule and short
+  bumpers were skipped. It is now measured to the third frame on screen.
+- **Leaving for an empty channel while a programme was still opening:** the programme
+  started playing behind the static a moment later. The player is now closed, and a
+  Jellyfin stream still being asked for is dropped. The same when the TV is turned off.
+- **An end-of-file reported twice** restarted the next programme. Only the first end of
+  the programme that was asked for counts.
+- **The channel number could be gone before the picture arrived** on a slow start; it
+  now stays for 3 seconds from the first picture.
+
+**Full suites for 2.10.0:** native X11 (327 checks) and Wayland (18), and the same on
+the AppImage with the system's Qt removed (327 and 18). No failures. Results:
+`docs/results/edit-checks.txt`, `console-checks.txt`, `tv-checks.txt`, and the
+`-appimage` versions.
+
+**Known limits and what was not tested:**
+
+- **Speed.** Everything here ran with software OpenGL on 2 cores, where a file takes
+  about 2 seconds to open. On a real GPU the TV should follow its schedule within a
+  fraction of a second, and big GIFs should take a fraction of the time; neither is
+  measured here.
+- **Jellyfin channels** were tested against the mock server only, with original files.
+  A programme the server has to convert starts at the right place only if the server
+  honours the start time; that is not tested.
+- **Big libraries.** Reading lengths takes a moment per file the first time (a handful
+  of files here). Thousands of files, and network shares, are not tested.
+- **The guide** was checked with four channels. Its scrolling, when there are more
+  channels than fit, is not tested.
+- **Sega CD look:** not compared with real captures, as said above. Each codec frame
+  costs one read-back of the 256×224 picture for its palette; on a real GPU that is
+  expected to be small, and is not measured.
+- **Seeking and pausing in TV mode** work, and the channel rejoins its schedule at the
+  next programme. Tried by hand only: after a 6-second pause the player was 8.0 s behind
+  its channel, and 0.9 s behind once the next programme had started.
+- **A 30-second 4K GIF** (the longest allowed) was not made; from the 5-second one it
+  would be over a gigabyte.
 
 ## 2.9: cutting without re-encoding, and GIF clips
 

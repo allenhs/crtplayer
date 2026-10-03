@@ -1,6 +1,7 @@
 #pragma once
 #include <QHash>
 #include <functional>
+#include <memory>
 #include <QJsonObject>
 #include <QObject>
 #include <QPixmap>
@@ -77,6 +78,9 @@ public:
     void loadChildren(const QString& parentId, int startIndex = 0);
     static constexpr int kPageSize = 100;
     void search(const QString& term);              // -> searchResults
+    // Every video under a library, folder, series or season, however deep (paged), in
+    // series/season/episode order. The callback gets them all, or an error. (Cable TV.)
+    void loadAllVideos(const QString& parentId, std::function<void(const QVector<JfItem>& items, const QString& error)> done);
     void fetchItem(const QString& itemId);         // -> itemLoaded
     void fetchSubtitles(const QString& itemId);    // -> subtitlesLoaded (external subtitle files)
     // Authenticated download (e.g. a subtitle file); the callback runs on the GUI thread.
@@ -127,6 +131,8 @@ private:
     QList<QPair<QString, QString>> userQuery() const;
     QVector<JfItem> parseItems(const QByteArray& json, int* total = nullptr);
     void remember(const QVector<JfItem>& items);
+    void loadAllVideosPage(const QString& parentId, int startIndex, std::shared_ptr<QVector<JfItem>> acc,
+                           std::function<void(const QVector<JfItem>&, const QString&)> done);
     void saveSession() const;
     void clearSession(bool keepServer);
     QString describeError(QNetworkReply* r) const;

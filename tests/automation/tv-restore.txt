@@ -1,0 +1,13 @@
+# Second launch: the channels are remembered; opening a file turns the TV off.
+tvwait 20000
+report restored
+tvclock 1790000300000
+tv on
+waitstate playing 30000
+wait 1200
+report on-again
+open @M@/sd_4x3_h264.mp4
+waitstate playing 15000
+wait 800
+report opened-file
+quit

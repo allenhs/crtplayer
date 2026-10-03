@@ -14,6 +14,17 @@ struct CrtParams {
                                  // 7 Game Boy (4 greens), 8 CGA (4 colours), 9 EGA (16 colours)
     int   dither       = 0;      // 0 none, 1 ordered 4x4, 2 ordered 8x8
     int   videoStandard = 0;     // 0 NTSC (480 lines, 59.94 fields/s), 1 PAL (576 lines, 50 fields/s)
+    // FMV console: the picture as an early-90s CD console played full-motion video.
+    // Sega CD: a Cinepak-style codec (4x4 blocks, flat ones and unchanged ones kept), a few
+    // dozen colours picked per frame from the Mega Drive's 512, ordered dither, a low frame
+    // rate, often in a window smaller than the screen. Works on the lowered resolution
+    // (rows/columns above; 224 rows with 8:7 pixels when those are left at native/auto).
+    int   fmvMode      = 0;      // 0 off, 1 Sega CD
+    int   fmvColors    = 64;     // colours on screen at once (8..256); the Mega Drive shows 61-64
+    int   fmvFps       = 15;     // frames per second (0 = the video's own)
+    float fmvBlocks    = 0.6f;   // codec strength: how readily blocks go flat or stay unchanged
+    float fmvDither    = 0.7f;   // ordered-dither amount
+    float fmvWindow    = 1.0f;   // the video's share of the screen (0.5..1); the rest is black
     // Set behaviour
     bool  powerEffects = false;  // power-on / power-off animation
     bool  channelStatic = false; // static between playlist items
@@ -60,6 +71,7 @@ struct CrtParams {
     float tapeTone       = 0.0f;  // treble loss of a VHS linear track
     float tvSpeaker      = 0.0f;  // a small TV speaker (mono at 1)
     float filmCrackle    = 0.0f;  // optical soundtrack crackle and pops
+    float pcmCrush       = 0.0f;  // console PCM: 8-bit samples at a low rate (at 1: 8-bit, 11 kHz)
     float vhsSoftness    = 0.0f;  // reduced luma/chroma bandwidth (~240 TVL at 1.0)
     // Composite video & LaserDisc
     float dotCrawl       = 0.0f;  // moving dots along colour edges
@@ -95,6 +107,7 @@ QStringList scanTypeNames();
 QStringList pixelFilterNames();
 QStringList colorDepthNames();
 QStringList ditherNames();
+QStringList fmvModeNames();
 
 struct CrtPreset {
     QString name;

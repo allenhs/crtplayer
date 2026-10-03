@@ -10,6 +10,7 @@
 #include <QOpenGLVertexArrayObject>
 #include <QRectF>
 #include <QString>
+#include <QVector>
 #include <gst/gst.h>
 #include <gst/video/video.h>
 
@@ -72,17 +73,21 @@ public:
     // VCR on-screen display text (straight RGBA image, uploaded premultiplied).
     void setOsdImage(const QImage& img);
     void resetPersistence() { m_histValid = false; }
+    // FMV console: colours in the palette of the frame shown, and how many codec frames were drawn.
+    QImage fmvImage();   // the console's screen as last drawn (its own grid, e.g. 256 x 224)
+    int fmvColorsUsed() const { return m_fmvColorsUsed; }
+    quint64 fmvFramesDrawn() const { return m_fmvDrawn; }
 
 private:
     void convert();
     void ensureTarget(GLuint& tex, GLuint& fbo, QSize& curSize, const QSize& size, bool mipmaps, bool blackBorder);
-    void computeBlur();
+    void computeBlur(GLuint src = 0);
     void drawCrt(GLuint targetFbo, const DrawParams& p);
     void drawQuad();
     bool loadProgram(QOpenGLShaderProgram& prog, const char* frag, QString* error);
 
     bool m_initialized = false;
-    QOpenGLShaderProgram m_convert, m_down, m_blur, m_crt, m_persist, m_copy;
+    QOpenGLShaderProgram m_convert, m_down, m_blur, m_crt, m_persist, m_copy, m_fmvCodec, m_fmvPal;
     QOpenGLVertexArrayObject m_vao;
     QOpenGLBuffer m_vbo{QOpenGLBuffer::VertexBuffer};
 
@@ -110,6 +115,23 @@ private:
     float m_histTime = 0;
     GLuint m_osdTex = 0;
     void updateLowRes(const QSize& size);
+    // FMV console (Sega CD): the codec pass (ping-pong, so unchanged blocks can stay), the
+    // frame's palette, and the picture shown with it. Updated at the look's frame rate.
+    bool updateFmv(const QSize& grid, const CrtParams& p);
+    GLuint m_fmvDecTex[2] = {0, 0}, m_fmvDecFbo[2] = {0, 0};
+    QSize m_fmvDecSize[2];
+    int m_fmvIdx = 0;
+    GLuint m_fmvTex = 0, m_fmvFbo = 0, m_fmvPalTex = 0;
+    QSize m_fmvSize;
+    bool m_fmvValid = false;
+    qint64 m_fmvFrame = -1;          // the codec frame shown
+    int m_fmvSinceKey = 0;
+    QVector<float> m_fmvKey;         // the settings it was made with
+    int m_fmvColorsUsed = 0;
+    quint64 m_fmvDrawn = 0;
+    qint64 m_framePts = -1;          // ns, stream time of the uploaded frame
+    quint64 m_uploads = 0;
+    GLuint m_blurSrc = 0;            // what the blur was last made from
 
     GstVideoInfo m_info;
     bool m_infoValid = false;

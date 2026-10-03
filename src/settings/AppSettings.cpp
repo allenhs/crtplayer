@@ -85,7 +85,7 @@ void AppSettings::load()
     lookSound = s.value("playback/lookSound", true).toBool();
     jfMaxBitrateMbps = std::clamp(s.value("jellyfin/maxBitrateMbps", 0).toInt(), 0, 1000);
     gifWidth = std::clamp(s.value("gif/width", 480).toInt(), 120, 3840);
-    gifFps = std::clamp(s.value("gif/fps", 15).toInt(), 5, 30);
+    gifFps = std::clamp(s.value("gif/fps", 15).toInt(), 5, 60);
     gifLook = s.value("gif/look", true).toBool();
     noiseVolume = std::clamp(s.value("playback/noiseVolume", 1.0).toDouble(), 0.0, 2.0);
     effectStrength = std::clamp(s.value("playback/effectStrength", 1.0).toDouble(), 0.0, 1.0);

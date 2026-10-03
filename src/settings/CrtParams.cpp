@@ -5,6 +5,9 @@
 const QVector<ParamDesc>& floatParamDescs()
 {
     static const QVector<ParamDesc> d = {
+        {"fmvBlocks",    "Codec blocks", "FMV console", &CrtParams::fmvBlocks, 0.f, 1.f, 2, "How hard the video codec works: more 4×4 blocks go flat, and more of them stay frozen where little moves"},
+        {"fmvDither",    "Dither",     "FMV console", &CrtParams::fmvDither, 0.f, 1.f, 2, "The checkered pattern that fakes in-between colours"},
+        {"fmvWindow",    "Video window", "FMV console", &CrtParams::fmvWindow, 0.5f, 1.f, 2, "The video's share of the screen: many games played their video in a window with a black border"},
         {"scanStrength", "Strength",   "Scanlines", &CrtParams::scanStrength, 0.f, 1.f, 2, "How dark the gaps between scanlines are"},
         {"scanWidth",    "Beam width", "Scanlines", &CrtParams::scanWidth,    0.f, 1.f, 2, "Thickness of each scanline; bright areas bloom wider automatically"},
         {"maskStrength", "Strength",   "Phosphor mask", &CrtParams::maskStrength, 0.f, 1.f, 2, "Visibility of the phosphor mask pattern"},
@@ -34,6 +37,7 @@ const QVector<ParamDesc>& floatParamDescs()
         {"tapeTone",     "Treble loss",  "Sound", &CrtParams::tapeTone, 0.f, 1.f, 2, "The dull top end of a VHS linear soundtrack"},
         {"tvSpeaker",    "TV speaker",   "Sound", &CrtParams::tvSpeaker, 0.f, 1.f, 2, "A small, boxy TV speaker: thin bass, no highs, mono when full"},
         {"filmCrackle",  "Film crackle", "Sound", &CrtParams::filmCrackle, 0.f, 1.f, 2, "Crackle and pops of an optical film soundtrack"},
+        {"pcmCrush",     "Console PCM", "Sound", &CrtParams::pcmCrush, 0.f, 1.f, 2, "Sound as a console's sample chip played it: few bits, a low rate, no smoothing (8-bit at 11 kHz when full)"},
         {"vhsSoftness",  "Tape softness", "VHS tape", &CrtParams::vhsSoftness, 0.f, 1.f, 2, "Lower horizontal resolution; at 1.0 about 240 TV lines, colour much softer than luma"},
         {"dotCrawl",     "Dot crawl",  "Composite & LaserDisc", &CrtParams::dotCrawl, 0.f, 1.f, 2, "Crawling dots along colour edges from the composite subcarrier"},
         {"rainbow",      "Rainbow crosstalk", "Composite & LaserDisc", &CrtParams::rainbow, 0.f, 1.f, 2, "Shimmering false colour on fine stripes and text"},
@@ -52,6 +56,11 @@ QStringList colorDepthNames()
     return {"Full colour", "15-bit (32 768 colours)", "12-bit (4 096 colours)", "9-bit (512 colours)",
             "8-bit (256 colours, 3-3-2)", "6-bit (64 colours)", "3-bit (8 colours)",
             "Game Boy (4 greens)", "CGA (4 colours)", "EGA (16 colours)"};
+}
+
+QStringList fmvModeNames()
+{
+    return {"Off", "Sega CD"};
 }
 
 QStringList ditherNames()
@@ -90,6 +99,9 @@ QJsonObject CrtParams::toJson() const
     o.insert("colorDepth", colorDepth);
     o.insert("dither", dither);
     o.insert("videoStandard", videoStandard);
+    o.insert("fmvMode", fmvMode);
+    o.insert("fmvColors", fmvColors);
+    o.insert("fmvFps", fmvFps);
     o.insert("powerEffects", powerEffects);
     o.insert("channelStatic", channelStatic);
     o.insert("vcrOsd", vcrOsd);
@@ -112,6 +124,9 @@ CrtParams CrtParams::fromJson(const QJsonObject& o)
     if (o.contains("colorDepth"))  p.colorDepth = o.value("colorDepth").toInt();
     if (o.contains("dither"))      p.dither = o.value("dither").toInt();
     if (o.contains("videoStandard")) p.videoStandard = o.value("videoStandard").toInt();
+    if (o.contains("fmvMode"))   p.fmvMode = o.value("fmvMode").toInt();
+    if (o.contains("fmvColors")) p.fmvColors = o.value("fmvColors").toInt();
+    if (o.contains("fmvFps"))    p.fmvFps = o.value("fmvFps").toInt();
     if (o.contains("powerEffects")) p.powerEffects = o.value("powerEffects").toBool();
     if (o.contains("channelStatic")) p.channelStatic = o.value("channelStatic").toBool();
     if (o.contains("vcrOsd"))      p.vcrOsd = o.value("vcrOsd").toBool();
@@ -139,6 +154,9 @@ void CrtParams::clamp()
     colorDepth = std::clamp(colorDepth, 0, 9);
     dither = std::clamp(dither, 0, 2);
     videoStandard = std::clamp(videoStandard, 0, 1);
+    fmvMode = std::clamp(fmvMode, 0, 1);
+    fmvColors = std::clamp(fmvColors, 8, 256);
+    fmvFps = std::clamp(fmvFps, 0, 60);
 }
 
 bool CrtParams::operator==(const CrtParams& o) const
@@ -148,7 +166,8 @@ bool CrtParams::operator==(const CrtParams& o) const
     return scanLines == o.scanLines && scanType == o.scanType && maskType == o.maskType && includeBars == o.includeBars &&
            pixelHeight == o.pixelHeight && pixelWidth == o.pixelWidth && pixelFilter == o.pixelFilter &&
            colorDepth == o.colorDepth && dither == o.dither && videoStandard == o.videoStandard &&
-           powerEffects == o.powerEffects && channelStatic == o.channelStatic && vcrOsd == o.vcrOsd;
+           powerEffects == o.powerEffects && channelStatic == o.channelStatic && vcrOsd == o.vcrOsd &&
+           fmvMode == o.fmvMode && fmvColors == o.fmvColors && fmvFps == o.fmvFps;
 }
 
 QVector<CrtPreset> builtinPresets()
@@ -270,6 +289,23 @@ QVector<CrtPreset> builtinPresets()
         p.maskType = 2; p.maskStrength = 0.25f; p.maskScale = 1.0f;
         p.curvature = 0.08f; p.cornerRadius = 0.03f;
         p.bloom = 0.15f; p.glow = 0.12f; p.bleed = 0.15f; p.vignette = 0.15f; p.brightness = 1.08f; p.saturation = 1.08f;
+    });
+    // Full-motion video on the Sega CD, through the console's composite output on a TV.
+    auto segaCd = [](CrtParams& p) {
+        p.fmvMode = 1; p.fmvColors = 64; p.fmvFps = 15; p.fmvBlocks = 0.60f; p.fmvDither = 0.70f;
+        p.pixelHeight = 224; p.pixelWidth = 0; p.pixelFilter = 2;   // 224 rows, 8:7 pixels; soft, as composite shows them
+        p.scanStrength = 0.55f; p.scanWidth = 0.50f; p.scanType = 0;
+        p.maskType = 3; p.maskStrength = 0.25f; p.maskScale = 1.0f;
+        p.curvature = 0.10f; p.cornerRadius = 0.04f;
+        p.bloom = 0.15f; p.glow = 0.15f; p.vignette = 0.15f;
+        p.bleed = 0.45f; p.rainbow = 0.30f; p.dotCrawl = 0.20f; p.vhsSoftness = 0.12f; p.noise = 0.03f;   // the console's blurry composite
+        p.brightness = 1.08f; p.contrast = 1.05f; p.saturation = 1.10f;
+        p.pcmCrush = 0.85f; p.tvSpeaker = 0.45f;   // 8-bit PCM through the TV's speaker
+    };
+    add("Sega CD FMV", [&](CrtParams& p) { segaCd(p); });
+    add("Sega CD FMV (small window)", [&](CrtParams& p) {
+        segaCd(p);
+        p.fmvWindow = 0.62f; p.fmvFps = 12; p.fmvBlocks = 0.75f;   // the smaller, choppier video of the early games
     });
     add("Home Computer (320×200)", [](CrtParams& p) {
         p.pixelHeight = 200; p.pixelWidth = 320; p.pixelFilter = 0; p.colorDepth = 9; p.dither = 1;   // EGA, dithered

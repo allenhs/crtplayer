@@ -210,6 +210,17 @@ class Handler(BaseHTTPRequestHandler):
             if "SearchTerm" in q:
                 t = q["SearchTerm"].lower()
                 return self.listing([i for i in st.items.values() if t in i["Name"].lower() and i["Type"] != "CollectionFolder"], q)
+            if q.get("Recursive") == "true":
+                # every descendant of ParentId, of the asked types
+                types = set((q.get("IncludeItemTypes") or "").split(","))
+                def under(i):
+                    p = i.get("Parent")
+                    while p:
+                        if p == q.get("ParentId"):
+                            return True
+                        p = st.items.get(p, {}).get("Parent")
+                    return False
+                return self.listing([i for i in st.items.values() if under(i) and (not types or i["Type"] in types)], q)
             return self.listing([i for i in st.items.values() if i.get("Parent") == q.get("ParentId")], q)
         m = re.fullmatch(r"/Users/%s/Items/(\w+)" % uid, path) if not st.modern else re.fullmatch(r"/Items/(\w[\w-]*)", path)
         if method == "GET" and m and m.group(1) in st.items:

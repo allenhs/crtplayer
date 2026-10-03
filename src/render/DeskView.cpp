@@ -5,6 +5,7 @@
 #include <QOpenGLFunctions>
 #include <QOpenGLContext>
 #include "DeskView.h"
+#include <QOpenGLFramebufferObject>
 #include "playback/Player.h"
 #include "render/VideoWidget.h"
 
@@ -495,7 +496,9 @@ void DeskView::paintGL()
     if (s) gst_sample_unref(s);
     ++m_frameCounter;
 
-    const qreal dpr = devicePixelRatioF();
+    // (A scene grab renders the same view larger, into its own framebuffer.)
+    const qreal dpr = devicePixelRatioF() * m_grabScale;
+    const GLuint target = m_grabFbo ? m_grabFbo : defaultFramebufferObject();
     const QSize vp(int(width() * dpr), int(height() * dpr));
     const float time = float(m_flat->effectTime());   // the same clock as the regular view
     const Geo g = geometry();
@@ -517,7 +520,7 @@ void DeskView::paintGL()
     if (!m_hasFrame) flat.image = QRectF();
 
     if (m_phase == Phase::Full) {
-        m_crt.draw(defaultFramebufferObject(), flat);
+        m_crt.draw(target, flat);
         return;
     }
 
@@ -604,13 +607,13 @@ void DeskView::paintGL()
     f.glassBulge = flatGlass ? 0.f : 0.015f + vs.params.curvature * 0.30f;
     f.ledOn = m_player->hasMedia() ? 1.f : 0.25f;
     f.time = time;
-    m_desk.draw(defaultFramebufferObject(), f);
+    m_desk.draw(target, f);
 
     // Last stretch of the flight: dissolve into the exact flat image.
     const float xfade = float(smoothstepD(0.80, 1.0, e));
     if (xfade > 0.f && m_hasFrame) {
         flat.opacity = xfade;
-        m_crt.draw(defaultFramebufferObject(), flat);
+        m_crt.draw(target, flat);
     }
 
     // Screen-space outline of the set: drives click-through and control placement.
@@ -623,6 +626,42 @@ void DeskView::paintGL()
         emit silhouetteChanged(m_silhouette);
     }
     if (needsTicks() && !m_ticker.isActive()) m_ticker.start();
+}
+
+QSizeF DeskView::pictureDisplaySize() const
+{
+    return m_hasFrame ? displaySize(m_source, m_flat->viewSettings().aspectOverride) : QSizeF();
+}
+
+QSize DeskView::sceneSizeIn(const QSize& box) const
+{
+    if (width() <= 0 || height() <= 0) return {};
+    const double aspect = double(width()) / height();
+    double w = box.width(), h = w / aspect;
+    if (box.height() > 0 && h > box.height()) { h = box.height(); w = h * aspect; }
+    return QSize(std::max(2, int(std::lround(w)) & ~1), std::max(2, int(std::lround(h)) & ~1));
+}
+
+QImage DeskView::grabScene(const QSize& size)
+{
+    if (!m_glOk || size.isEmpty() || width() <= 0) return {};
+    makeCurrent();
+    QOpenGLFramebufferObjectFormat fmt;
+    fmt.setAttachment(QOpenGLFramebufferObject::CombinedDepthStencil);
+    QImage img;
+    {
+        QOpenGLFramebufferObject fbo(size, fmt);
+        m_grabFbo = fbo.handle();
+        m_grabScale = double(size.width()) / (width() * devicePixelRatioF());
+        paintGL();
+        m_grabFbo = 0;
+        m_grabScale = 1.0;
+        img = fbo.toImage();
+    }
+    doneCurrent();
+    update();   // the window's own picture again
+    img.setDevicePixelRatio(1.0);
+    return img;
 }
 
 bool DeskView::needsTicks() const

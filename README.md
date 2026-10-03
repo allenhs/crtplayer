@@ -53,6 +53,15 @@ configurable, GPU-rendered CRT presentation that respects every aspect ratio:
 - **Lower resolution / bigger pixels.** Render the video at 240, 224, 160… rows (or
   exact sizes like 256×224 and 320×200), with hard, sharp or soft pixels. Scanlines lock
   to one line per pixel row.
+- **Sega CD FMV look.** Video the way an early-90s CD console played it: a 256×224
+  screen, a blocky 4×4 codec, about 64 colours picked afresh for every frame and
+  dithered, 15 frames a second, 8-bit sound. See [Sega CD FMV look](#sega-cd-fmv-look).
+- **Cable TV.** Folders of videos (and Jellyfin libraries) become channels that
+  broadcast around the clock. Tune in and a programme is already partway through; flip
+  channels through static, and bring up a scrolling programme guide.
+  See [Cable TV](#cable-tv).
+- **Cut and clip.** Cut a section into a new file without re-encoding, or save it as an
+  animated GIF with the look, at any size up to 4K.
 - **Eleven scanline styles.** Six original ones: Soft, Sharp, Dynamic, Interlaced,
   VGA double-scan and Pixel beam. Five emulator looks modelled on well-known RetroArch
   and MAME shaders: Geom-, Lottes-, Easymode-, Hyllian- and MAME HLSL-style. These are
@@ -82,11 +91,12 @@ configurable, GPU-rendered CRT presentation that respects every aspect ratio:
 7. [Screenshots, frame stepping, playlist](#screenshots-frame-stepping-playlist)
    - [Cutting without re-encoding, and GIF clips](#cutting-without-re-encoding-and-gif-clips)
 8. [Desk mode: a 3D TV on your desktop](#desk-mode-a-3d-tv-on-your-desktop)
-9. [Jellyfin](#jellyfin)
-10. [Where settings are stored](#where-settings-are-stored)
-11. [Troubleshooting](#troubleshooting)
-12. [Code layout](#code-layout)
-13. [Verification](#verification)
+9. [Cable TV](#cable-tv)
+10. [Jellyfin](#jellyfin)
+11. [Where settings are stored](#where-settings-are-stored)
+12. [Troubleshooting](#troubleshooting)
+13. [Code layout](#code-layout)
+14. [Verification](#verification)
 
 The rendering pipeline is explained in [docs/PIPELINE.md](docs/PIPELINE.md).
 The scripted test driver is documented in [docs/AUTOMATION.md](docs/AUTOMATION.md).
@@ -383,6 +393,10 @@ Hover any button to see its shortcut.
 | Shift+← / Shift+→ | Previous / next keyframe (for cut points) |
 | X | Cut A–B into a new file, without re-encoding |
 | G | Save A–B (or the next 5 s) as a GIF clip, as shown |
+| Ctrl+T | Cable TV on/off |
+| Page Up / Page Down (in TV mode) | Channel up / down |
+| 0–9 (in TV mode) | Type a channel number |
+| W (in TV mode) | Programme guide on/off |
 | Shift+PgUp / Shift+PgDn | Previous / next chapter |
 | Ctrl+J | Jellyfin panel |
 | Ctrl+Q | Quit |
@@ -456,6 +470,8 @@ setting that deliberately stretches the picture, and it defaults to *From file*.
 | **Hyllian Look** | Hyllian-style flat beams and crisp horizontals, flat screen |
 | **MAME HLSL Look** | Sine-shaped scanlines, shadow mask, bloom, slight convergence error |
 | **16-bit Console (256×224)** | Wide 256×224 pixels, sharp filter, geom-style beams, shadow mask |
+| **Sega CD FMV** | Full-motion video as the console played it: 256×224, blocky codec, 64 dithered colours, 15 frames a second, composite into a TV, 8-bit sound. See [Sega CD FMV look](#sega-cd-fmv-look) |
+| **Sega CD FMV (small window)** | The same with the video in a window with a black border, 12 frames a second, as the early games had it |
 | **Home Computer (320×200)** | 320×200 hard pixels, sharp scanlines, fine shadow mask |
 | **PAL Television** | Consumer set on a PAL signal: 50 Hz fields, diagonal colour crawl, Hanover bars |
 | **Handheld (4 greens)** | 160×144 pixels in four greens, no scanlines, slow-LCD ghosting |
@@ -565,6 +581,43 @@ In desk mode the blocks are drawn on the tilted 3D glass, so their edges soften
 slightly with perspective. After flying into fullscreen they're exact.
 
 ![Native, and 60 rows with Hard, Sharp and Soft pixels](docs/images/bigger-pixels.jpg)
+
+### Sega CD FMV look
+
+Full-motion video as the Sega CD showed it: small, blocky, grainy with dither, a little
+choppy, and unmistakable. Pick the preset **Sega CD FMV**, or **Sega CD FMV (small
+window)** for the look of the early games, which played their video in a window with a
+black border.
+
+![The Sega CD FMV look](docs/images/sega-cd-fmv.jpg)
+
+What the console did, and what the look does:
+
+| The console | The look |
+|---|---|
+| A 256×224 screen with slightly wide pixels | The video is drawn on that grid (340×224 for 16:9 video, so nothing is stretched) |
+| A video codec working in 4×4 blocks, redrawing only the blocks that changed | Blocks go flat or two-coloured; blocks where little moves stay frozen for a few frames |
+| 64 colours on screen, out of 512 | Each frame gets its own palette of up to 64 colours, all from the console's 512, with a checkered dither faking the rest |
+| About 12 to 15 frames a second | The picture changes 15 times a second (12 in the small-window preset); the sound carries on normally |
+| Composite video into a TV | Colour bleed, rainbowing and dot crawl, then scanlines and a slot mask |
+| 8-bit PCM sound | **Console PCM**: fewer bits and a lower sample rate, unsmoothed, through the TV's speaker |
+
+The controls are in *CRT → FMV console*:
+
+- **Console:** Off, or Sega CD.
+- **Colours:** 8 to 256 on screen at once (64 is the console's).
+- **Frame rate:** the video's own, or 10 to 30 frames a second.
+- **Codec blocks:** how hard the codec works. Higher flattens more blocks and freezes
+  more of them where little moves.
+- **Dither:** the strength of the checkered pattern.
+- **Video window:** the video's share of the screen, down to half, with black around it.
+
+*CRT → Sound → Console PCM* is the sound; it works with any look.
+
+The console setting takes over the resolution (it is always the 224-row screen) and the
+*Colour depth* setting. Everything after it still applies: any scanline style, mask,
+curvature, VHS effects and desk mode. Bypass, the *original* side of the before/after
+view and *original frame* screenshots stay untouched.
 
 ### Emulator scanline looks
 
@@ -716,22 +769,28 @@ it takes seconds.
   stored at the moment they appear, so one that started before the cut isn't carried
   over. Lines that start inside the section are kept, and end at B.
 
-**GIF clips (G).** This plays A–B once (or the next 5 seconds when A and B aren't set)
-and saves it as a looping animated GIF, just as it looks. It is saved in the screenshot
-folder.
+**GIF clips (G).** This saves A–B (or the next 5 seconds when A and B aren't set) as a
+looping animated GIF, just as it looks. It is saved in the screenshot folder.
 
 | Option | Choices |
 |---|---|
-| Size | 320 to 1024 pixels wide (480 is a good start) |
+| Size | 320 to 1024 pixels wide (480 is a good start), HD 720p, Full HD 1080p, 1440p, or 4K |
 | Smoothness | 10 to 30 frames a second |
 | Picture | With the CRT look, or the original picture |
 
+- **Every frame is drawn at the GIF's own size,** so a 4K GIF is real 4K: the tube has
+  room for every scanline and the mask is fine-grained, not an enlargement of the
+  window. The HD sizes fit the picture inside the named frame: a 16:9 video at 4K is
+  3840×2160, a 4:3 video 2880×2160.
+- **The frame rate is exact on any computer.** The player steps through the section
+  frame by frame while paused and draws each one, so a slow computer only takes longer.
+  The picture on screen holds still meanwhile, and the dialog shows the progress. When
+  it finishes, the player is back where it was.
 - **Desk mode** records the whole scene: the TV and the room around it.
-- **The GIF runs at the true speed** even if the computer can't grab every frame in time.
-  The dialog says how many frames a second it managed.
-- **Colours:** each frame gets its own 256-colour palette, with dithering. The picture
-  is softened slightly before shrinking, so the scanlines and shadow mask don't turn
-  into moiré rings.
+- **Colours:** each frame gets its own 256-colour palette, with dithering.
+- **Big GIFs are big files.** With the look, a 4K GIF runs to 1 to 3 MB per frame: a
+  5-second clip at 15 frames a second came to 250 MB here. The dialog shows the size as
+  it grows. For anything long, a smaller size is kinder.
 - **Length:** at most 30 seconds (GIFs get big).
 
 ---
@@ -1115,6 +1174,72 @@ out, since it lies on the desk's upper side. Its click area disappears with it.
 
 ---
 
+## Cable TV
+
+Turn a pile of videos into television. Each channel plays a folder's videos around the
+clock, on a schedule that runs whether you're watching or not. Tune in and a programme
+is already partway through, the way it was when you flipped on the TV in 1994.
+
+![The programme guide](docs/images/cable-tv-guide.jpg)
+
+**Making channels** (*Settings → TV*):
+
+- **Add folder…** makes one channel from a folder and everything in its subfolders.
+- **Add each subfolder…** makes a channel for every folder inside the one you pick. A
+  *Shows* folder with a folder per show becomes a channel per show.
+- **Jellyfin:** in the Jellyfin panel, right-click a library, a series or a folder and
+  choose **Add as TV channel**. The channel plays every episode and film inside it.
+- For each channel you can set its **name** and **number**, and:
+  - **Shuffled** (the default): a new order every time round. Off: name order, like a
+    series from its first episode to its last, then again.
+  - **Bumpers:** a folder of short clips (idents, old adverts, station breaks). One
+    plays between every two programmes.
+  - **Look for new videos** reads the folder again.
+
+**Watching:**
+
+| Key | Action |
+|---|---|
+| Ctrl+T | TV on/off. It comes back on the channel you last watched; turning it off stops the programme |
+| Page Up / Page Down | Channel up / down |
+| N / P, the ⏭ ⏮ buttons, the media keys | Channel up / down |
+| 0–9 | Type a channel number; it tunes after a moment |
+| W | The programme guide |
+
+- **Changing channel** gives a burst of static, the channel number in green in the
+  corner, and a banner with what is on now and what is next. A reminder of what is next
+  comes up again as a programme ends.
+- **The guide** covers the lower part of the picture and scrolls through the channels
+  by itself, with the next hour and a half laid out against the clock. The programme
+  carries on above it.
+- **The schedule is fixed by the clock.** Leave a channel and come back ten minutes
+  later, and it is ten minutes further on. Close the player and open it tomorrow, and
+  the channels have carried on. Nothing is recorded or kept running to do this: what is
+  on at any moment is worked out from the time of day and the lengths of the videos.
+- **An empty channel** (or one whose videos can't be read) shows static and says so. A
+  number with no channel says *not in use* and leaves you where you were.
+- **It all goes through the set.** The channel number, banners and guide are part of the
+  picture, so they curve with the tube and sit under the scanlines. It works in desk mode
+  too: the 3D set changes channel.
+- **Any look works,** and so do the scaling modes, audio and subtitle tracks, screenshots
+  and volume. Seeking and pausing work as well; the channel catches up with its schedule
+  at the next programme.
+- **In desk mode,** right-click → *Cable TV* has on/off, the guide and the channel list.
+- **Opening a file of your own** (or anything from the playlist or Jellyfin) turns the
+  TV off.
+
+**What TV mode leaves alone:** your playlist, your resume positions, and Jellyfin's
+resume points and *watched* marks. Flipping past an episode doesn't count as watching it.
+
+**The first time** a folder is added, the player reads the length of each video (a
+moment per file; the list shows the progress). The lengths are remembered, so later
+launches are instant. Jellyfin channels need you to be signed in; until then they show
+*no signal*.
+
+![An empty channel](docs/images/cable-tv-static.jpg)
+
+---
+
 ## Jellyfin
 
 Open the **Jellyfin** panel with **Ctrl+J**, or with the server button in the control
@@ -1202,6 +1327,7 @@ supported.
 | Jellyfin sign-in (server, user, access token, device ID; never the password) | `~/.config/CRTPlayer/CRTPlayer/jellyfin.json` (owner-only) |
 | Resume positions (local files) | `~/.local/share/CRTPlayer/resume.json` |
 | Recent files | in `CRTPlayer.conf` |
+| TV channels (folders, names, numbers, video lengths; no sign-in details) | `~/.config/CRTPlayer/CRTPlayer/channels.json` |
 
 Settings are saved whenever the player exits: window close, Ctrl+Q, or logout.
 
@@ -1359,9 +1485,14 @@ src/
   render/DeskView.*        desk mode view: poses, flight, crossfade to flat, mouse interaction
   edit/LosslessCutter.*    cutting without re-encoding (parsebin → muxer, keyframe start, decode-order end)
   edit/GifEncoder.*        animated GIF writer (median-cut palettes, dithering, LZW, parallel)
-  edit/GifRecorder.*       records a section as shown, at the true speed
+  edit/GifRecorder.*       steps through a section and has each frame drawn at the GIF's size
+  render/FmvPalette.*      Sega CD FMV look: screen grid, per-frame palette from the console's 512 colours
+  tv/TvSchedule.*          Cable TV: what is on a channel at any moment (pure, unit-tested)
+  tv/TvController.*        Cable TV: channels, scanning, tuning, the channel display, banners and guide
+  ui/TvPanel.*             the TV tab
   ui/CutDialog.*, ui/GifDialog.*  the two dialogs
 shaders/                   quad.vert, convert.frag, downsample.frag, blur.frag, crt.frag,
+                           fmv_codec.frag, fmv_palette.frag (Sega CD FMV look),
                            desk.vert, desk.frag (3D cabinet, glass, shadow)
 tests/                     unit tests + automation scripts
 scripts/                   build-bazzite.sh, install-local.sh, make-test-media.sh, run-verification.sh,

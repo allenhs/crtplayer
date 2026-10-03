@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(CRTPlayer VERSION 2.9.0 LANGUAGES CXX)
+project(CRTPlayer VERSION 2.10.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -29,6 +29,8 @@ pkg_check_modules(GST REQUIRED IMPORTED_TARGET
 # Pure logic shared by the app and the tests (no GL, no GStreamer).
 add_library(crtcore STATIC
   src/render/Geometry.cpp  src/render/Geometry.h
+  src/render/FmvPalette.cpp src/render/FmvPalette.h
+  src/tv/TvSchedule.cpp    src/tv/TvSchedule.h
   src/settings/CrtParams.cpp src/settings/CrtParams.h
   src/settings/PresetManager.cpp src/settings/PresetManager.h)
 target_include_directories(crtcore PUBLIC src)
@@ -64,6 +66,8 @@ add_executable(crtplayer
   src/ui/PlaylistPanel.cpp    src/ui/PlaylistPanel.h
   src/settings/AppSettings.cpp  src/settings/AppSettings.h
   src/edit/LosslessCutter.cpp src/edit/LosslessCutter.h
+  src/tv/TvController.cpp     src/tv/TvController.h
+  src/ui/TvPanel.cpp          src/ui/TvPanel.h
   src/ui/CutDialog.cpp        src/ui/CutDialog.h
   src/edit/GifEncoder.cpp     src/edit/GifEncoder.h
   src/edit/GifRecorder.cpp    src/edit/GifRecorder.h
@@ -98,6 +102,12 @@ if(CRTPLAYER_BUILD_TESTS)
   target_include_directories(test_tape PRIVATE src)
   target_link_libraries(test_tape PRIVATE PkgConfig::GST)
   add_test(NAME tape COMMAND test_tape)
+  add_executable(test_tv tests/test_tv.cpp)
+  target_link_libraries(test_tv PRIVATE crtcore)
+  add_test(NAME tv COMMAND test_tv)
+  add_executable(test_fmv tests/test_fmv.cpp)
+  target_link_libraries(test_fmv PRIVATE crtcore)
+  add_test(NAME fmv COMMAND test_fmv)
   add_executable(test_gif tests/test_gif.cpp src/edit/GifEncoder.cpp src/edit/GifEncoder.h)
   target_include_directories(test_gif PRIVATE src)
   target_link_libraries(test_gif PRIVATE Qt6::Core Qt6::Gui)

@@ -25,6 +25,8 @@
 #include "ui/JellyfinPanel.h"
 #include "ui/ControlBar.h"
 #include "ui/CutDialog.h"
+#include "ui/TvPanel.h"
+#include "tv/TvController.h"
 #include "edit/LosslessCutter.h"
 #include "ui/GifDialog.h"
 #include "ui/CrtPanel.h"
@@ -112,6 +114,12 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent)
     connect(m_player, &Player::decoderChanged, this, &MainWindow::updateDecoderStatus);
     connect(m_player, &Player::mediaLoaded, this, [this] { updateDecoderStatus(); updateTitle(); });
     connect(m_player, &Player::endOfStream, this, [this] {
+        if (tvOn()) {   // Cable TV: whatever the channel has on next
+            // (Only the end of the programme that was asked for counts, and only once: an end
+            // reported twice, or by a file that was already replaced, would skip a programme.)
+            if (m_tvLoaded) { m_tvLoaded = false; m_tv->programEnded(); }
+            return;
+        }
         const int next = m_playlist->currentIndex() + 1;
         if (next > 0 && next < m_playlist->count()) {
             playIndex(next);
@@ -132,11 +140,15 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent)
             const qint64 pos = m_player->position();
             m_pendingStartNs = pos > 0 ? pos : m_jfStartNs;
             showOsd(tr("The original file won't play here — asking the server to convert it"), 5000);
-            const int idx = m_playlist->currentIndex();
-            QTimer::singleShot(0, this, [this, idx] { playIndex(idx); });
+            QTimer::singleShot(0, this, [this] { playSource(m_lastSource, m_lastSourceIndex); });
             return;
         }
         m_lastError = title + ": " + details;
+        if (tvOn()) {   // Cable TV: no dialog; the channel shows "no signal" and carries on with the next programme
+            qWarning() << "Cable TV programme failed:" << m_lastError;
+            m_tv->programFailed(title);
+            return;
+        }
         m_emptyHint->setText(title + tr("\nDetails are in the error dialog. Drop another file to continue."));
         m_emptyHint->show();
         layoutOverlays();
@@ -261,6 +273,7 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent)
     });
     connect(m_player, &Player::mediaLoaded, this, [this] {
         if (m_jfItemId.isEmpty() || m_jfStarted) return;
+        if (tvOn()) return;   // Cable TV leaves the server's resume points and "watched" marks alone
         m_jf->reportStart(m_jfItemId, m_player->position(), false);
         m_jfStarted = true;
         m_jfTimer.start();
@@ -279,6 +292,37 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent)
         }
     });
     m_jf->restoreSession();
+
+    // ---- Cable TV (2.10)
+    {
+        TvController::Host h;
+        h.play = [this](const QString& source, qint64 offsetNs, const QString& title, bool burst) { tvPlay(source, offsetNs, title, burst); };
+        h.snow = [this] { tvSnow(); };
+        h.setOverlay = [this](const QImage& img) {
+            m_video->setOverlayImage(img);
+            if (m_desk) m_desk->view()->update();
+        };
+        h.pictureAspect = [this] {
+            QSizeF ds = m_video->displaySizeNow();
+            if (m_deskActive && m_desk && !m_desk->view()->pictureDisplaySize().isEmpty()) ds = m_desk->view()->pictureDisplaySize();
+            return ds.height() > 0 ? ds.width() / ds.height() : 4.0 / 3.0;
+        };
+        h.positionMs = [this] { return m_player->position() / 1000000; };
+        h.framesShown = [this] { return m_tvLoaded ? int(std::min<quint64>(m_player->frameSerial() - m_tvLoadedSerial, 1000000)) : 0; };
+        h.jellyfin = m_jf;
+        m_tv = new TvController(h, QDir(QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation)).filePath("channels.json"), this);
+        m_tvPanel->setController(m_tv);
+        connect(m_tvPanel, &TvPanel::tvModeRequested, this, &MainWindow::setTvMode);
+        connect(m_tv, &TvController::stateChanged, this, [this] { m_tvPanel->refresh(); updateTitle(); });
+        connect(m_player, &Player::mediaLoaded, this, [this] { m_tvLoadedSerial = m_player->frameSerial(); m_tvLoaded = true; });
+        connect(m_jfPanel, &JellyfinPanel::tvChannelRequested, this, [this](const JfItem& item) {
+            const int n = m_tv->addJellyfinChannel(item.id, item.displayName());
+            showOsd(tr("Channel %1: %2").arg(n).arg(item.displayName()), 3000);
+        });
+        connect(m_jf, &JellyfinClient::signedIn, this, [this] {   // channels waiting for the server
+            for (const TvChannel& c : m_tv->channels()) if (!c.jellyfin.isEmpty() && c.lineup.programs.isEmpty()) m_tv->rescan(c.number);
+        });
+    }
 
     // ---- Bazzite fit (1.9): media keys / KDE media widget (MPRIS), game controllers
 #ifndef _WIN32
@@ -310,7 +354,7 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent)
         m_settings.recentFiles.prepend(m_currentLocal);
         while (m_settings.recentFiles.size() > 15) m_settings.recentFiles.removeLast();
     });
-    connect(m_player, &Player::endOfStream, this, [this] { if (!m_currentLocal.isEmpty()) m_resume->forget(m_currentLocal); });
+    connect(m_player, &Player::endOfStream, this, [this] { if (!m_currentLocal.isEmpty() && !tvOn()) m_resume->forget(m_currentLocal); });
     // Movie theater curtains follow playback.
     connect(m_player, &Player::stateChanged, this, &MainWindow::updateTheater);
     connect(m_player, &Player::seekFinished, this, [this] { if (m_desk) m_desk->view()->noteSeek(); });
@@ -446,6 +490,8 @@ void MainWindow::buildUi()
     m_tabs->addTab(m_crtPanel, tr("CRT"));
     m_tabs->addTab(m_displayPanel, tr("Display"));
     m_tabs->addTab(m_playbackPanel, tr("Playback"));
+    m_tvPanel = new TvPanel;
+    m_tabs->addTab(m_tvPanel, tr("TV"));
     m_settingsDock->setWidget(m_tabs);
     addDockWidget(Qt::RightDockWidgetArea, m_settingsDock);
     resizeDocks({m_settingsDock}, {380}, Qt::Horizontal);
@@ -497,6 +543,13 @@ void MainWindow::buildActions()
     add({QKeySequence(Qt::SHIFT | Qt::Key_Right)}, [this] { seekKeyframe(true); });
     add({QKeySequence(Qt::SHIFT | Qt::Key_Left)}, [this] { seekKeyframe(false); });
     add({Qt::Key_X}, [this] { showCutDialog(); });
+    // Cable TV: Ctrl+T on/off, W the guide ("what's on"), digits the channel number.
+    add({QKeySequence(Qt::CTRL | Qt::Key_T)}, [this] { setTvMode(!tvOn()); });
+    add({Qt::Key_W}, [this] {
+        if (tvOn()) m_tv->setGuide(!m_tv->guideVisible());
+        else showOsd(tr("The guide is part of TV mode (Ctrl+T)"));
+    });
+    for (int d = 0; d <= 9; ++d) add({Qt::Key(Qt::Key_0 + d)}, [this, d] { if (tvOn()) m_tv->digit(d); });
     add({Qt::Key_G}, [this] { showGifDialog()->record(); });   // record straight away, with the last options
     add({Qt::Key_Comma}, [this] { m_player->stepFrame(false); });
     add({Qt::Key_Up}, [this] { m_controls->volumeSlider()->setValue(m_controls->volumeSlider()->value() + 5); showOsd(tr("Volume %1%").arg(m_controls->volumeSlider()->value())); });
@@ -533,8 +586,11 @@ void MainWindow::buildActions()
     add({Qt::Key_S}, [this] { takeScreenshot(m_settings.screenshotFiltered); });
     add({QKeySequence(Qt::SHIFT | Qt::Key_S)}, [this] { takeScreenshot(false); });
     add({QKeySequence(Qt::CTRL | Qt::Key_S)}, [this] { takeScreenshot(true); });
-    add({Qt::Key_PageDown, Qt::Key_MediaNext, Qt::Key_N}, [this] { nextItem(1); });
-    add({Qt::Key_PageUp, Qt::Key_MediaPrevious, Qt::Key_P}, [this] { nextItem(-1); });
+    // (Cable TV: Page Up is channel up, as on a remote; next / previous are channel up / down.)
+    add({Qt::Key_PageDown}, [this] { if (tvOn()) m_tv->channelStep(-1); else nextItem(1); });
+    add({Qt::Key_PageUp}, [this] { if (tvOn()) m_tv->channelStep(+1); else nextItem(-1); });
+    add({Qt::Key_MediaNext, Qt::Key_N}, [this] { nextItem(1); });
+    add({Qt::Key_MediaPrevious, Qt::Key_P}, [this] { nextItem(-1); });
     add({QKeySequence::Open}, [this] { openDialog(); });
     add({Qt::Key_E}, [this] { m_settingsDock->setVisible(!m_settingsDock->isVisible()); });
     add({Qt::Key_L}, [this] { m_playlistDock->setVisible(!m_playlistDock->isVisible()); });
@@ -636,8 +692,21 @@ void MainWindow::playIndex(int i)
 {
     const QString path = m_playlist->at(i);
     if (path.isEmpty()) return;
+    if (m_tv && m_tv->isOn()) m_tv->setOn(false);   // playing something of one's own turns the TV off
+    playSource(path, i);
+}
+
+// Plays a file, an address or a "jellyfin:" reference. i: its place in the playlist, or -1
+// when it isn't from the playlist (Cable TV).
+void MainWindow::playSource(const QString& path, int i)
+{
+    const bool tv = tvOn();
+    m_lastSource = path;
+    m_lastSourceIndex = i;
     rememberPosition();
     jellyfinStopCurrent(false);
+    // A server conversion that was never reported (Cable TV doesn't report) ends here.
+    if (m_jfTranscoding && !m_jfPlaySession.isEmpty()) { m_jf->stopTranscode(m_jfPlaySession); m_jfPlaySession.clear(); }
     m_extSubs.clear();
     m_extSubLabel.clear();
     m_player->setExternalSubtitle(QString());
@@ -648,6 +717,7 @@ void MainWindow::playIndex(int i)
         // "jellyfin:///<itemId>#<title>": resolved to an authenticated stream only now, so
         // the playlist never holds a token or even the server address.
         const QString id = QUrl(path).path().section('/', -1);
+        if (!m_jf->isSignedIn() && tv) { m_pendingStartNs = -1; m_tv->programFailed(tr("Not signed in to Jellyfin")); return; }
         if (!m_jf->isSignedIn()) {
             showOsd(tr("Sign in to Jellyfin to play this item"), 3000);
             showJellyfin(true);
@@ -656,8 +726,6 @@ void MainWindow::playIndex(int i)
         }
         m_mediaTitle = QUrl::fromPercentEncoding(path.section('#', 1).toUtf8());
         m_currentLocal.clear();
-        // A conversion that never got as far as playing is ended here.
-        if (m_jfTranscoding && !m_jfPlaySession.isEmpty()) m_jf->stopTranscode(m_jfPlaySession);
         m_jfTranscoding = false;
         m_jfPlaySession.clear();
         m_jfReasons.clear();
@@ -677,7 +745,7 @@ void MainWindow::playIndex(int i)
         caps.h264 = caps.videoCodecs.contains(QStringLiteral("h264"));
         const int req = ++m_jfRequest;
         m_pendingStartNs = -1;
-        m_playlist->setCurrentIndex(i);
+        if (i >= 0) m_playlist->setCurrentIndex(i);
         const QString shown = m_mediaTitle;
         m_jf->requestPlayback(id, qint64(m_settings.jfMaxBitrateMbps) * 1000000, force, caps,
                               [this, req, id, i, start, shown, force](const JfPlayback& pb) {
@@ -716,11 +784,13 @@ void MainWindow::playIndex(int i)
     } else {
         m_player->setHttpHeaders({});
         m_jfItemId.clear();
+        m_jfTranscoding = false;
         m_mediaTitle.clear();
         const QFileInfo fi(path);
         m_currentLocal = fi.exists() ? fi.absoluteFilePath() : QString();
         if (!m_currentLocal.isEmpty()) {
-            if (m_pendingStartNs < 0) start = m_resume->position(m_currentLocal) * 1000000;   // where it was left
+            if (m_pendingStartNs >= 0) start = m_pendingStartNs;   // (Cable TV: where the broadcast is)
+            else start = m_resume->position(m_currentLocal) * 1000000;   // where it was left
             // Subtitle files next to the video ("Movie.srt", "Movie.en.srt", ...): the first loads.
             for (const QString& sub : findSidecarSubtitles(m_currentLocal))
                 m_extSubs.append({QFileInfo(sub).fileName(), QUrl::fromLocalFile(sub).toString(QUrl::FullyEncoded)});
@@ -734,15 +804,21 @@ void MainWindow::playIndex(int i)
         }
     }
     m_pendingStartNs = -1;
+    if (tv && !m_tvTitle.isEmpty()) m_mediaTitle = m_tvTitle;
     openResolved(i, uri, start, m_mediaTitle.isEmpty() ? QFileInfo(path).fileName() : m_mediaTitle, QString());
 }
 
 void MainWindow::openResolved(int i, const QString& uri, qint64 start, const QString& shown, const QString& note)
 {
-    m_playlist->setCurrentIndex(i);
+    if (i >= 0) m_playlist->setCurrentIndex(i);
     m_lastError.clear();
     m_emptyHint->hide();
-    if (m_params.channelStatic && m_video->hasFrame()) {
+    const bool tv = tvOn();
+    if (tv) {
+        // Changing channel: static until the picture arrives. One programme following
+        // another: the last frame stays until the next one's first.
+        if (m_tvBurst) m_video->channelChange();
+    } else if (m_params.channelStatic && m_video->hasFrame()) {
         m_video->channelChange();   // static over the old picture until the new file's first frame
     } else {
         m_video->clearFrame();
@@ -750,10 +826,78 @@ void MainWindow::openResolved(int i, const QString& uri, qint64 start, const QSt
     }
     m_player->open(uri, true, start);
     updateTitle();
+    if (tv) return;   // (the channel's own banner says what is on)
     QString msg = start > 0 ? tr("%1 — resuming at %2 (Home: start over)").arg(shown, formatTime(start / 1000000)) : shown;
     if (!note.isEmpty()) msg += QStringLiteral(" · ") + note;
     showOsd(msg);
 }
+
+// ---- Cable TV ---------------------------------------------------------------------------
+
+bool MainWindow::tvOn() const { return m_tv && m_tv->isOn(); }
+
+void MainWindow::setTvMode(bool on)
+{
+    if (on == tvOn()) return;
+    if (on) {
+        if (m_tv->channels().isEmpty()) {
+            showOsd(tr("No TV channels yet: add a folder in the TV panel"), 4000);
+            if (m_deskActive) leaveDeskMode();
+            m_settingsDock->show();
+            m_tabs->setCurrentWidget(m_tvPanel);
+            return;
+        }
+        rememberPosition();          // what was playing keeps its place
+        jellyfinStopCurrent(false);
+        setLoop(-1, -1);
+    }
+    m_tv->setOn(on);
+    if (!on) {
+        // The set is off: the programme stops (and one still opening is dropped). The playlist
+        // and what was open before are as they were left.
+        ++m_jfRequest;
+        m_pendingStartNs = -1;
+        m_tvLoaded = false;
+        if (m_jfTranscoding && !m_jfPlaySession.isEmpty()) { m_jf->stopTranscode(m_jfPlaySession); m_jfPlaySession.clear(); }
+        m_jfItemId.clear();
+        m_player->close();
+        m_mediaTitle.clear();
+        m_tvTitle.clear();
+        m_video->setSnow(false);
+        m_video->releaseStatic();
+        updateTitle();
+        if (m_desk) m_desk->view()->update();
+        showOsd(tr("TV off"));
+    }
+}
+
+void MainWindow::tvPlay(const QString& source, qint64 offsetNs, const QString& title, bool burst)
+{
+    m_tvBurst = burst || !m_video->hasFrame() || m_video->snow();
+    m_video->setSnow(false);
+    m_tvTitle = title;
+    m_tvLoaded = false;
+    m_pendingStartNs = std::max<qint64>(0, offsetNs);
+    playSource(source, -1);
+}
+
+void MainWindow::tvSnow()
+{
+    // Nothing is on: whatever was playing stops, and so does anything still opening (a file
+    // that loads a moment after the channel was left, a Jellyfin stream being asked for).
+    ++m_jfRequest;
+    m_pendingStartNs = -1;
+    m_tvLoaded = false;
+    if (m_jfTranscoding && !m_jfPlaySession.isEmpty()) { m_jf->stopTranscode(m_jfPlaySession); m_jfPlaySession.clear(); }
+    m_jfItemId.clear();
+    m_tvTitle.clear();
+    m_mediaTitle.clear();
+    m_video->setSnow(true);   // static until something is tuned in
+    m_player->close();
+    updateTitle();
+    if (m_desk) m_desk->view()->update();
+}
+
 
 QString MainWindow::jellyfinPlayDescription() const
 {
@@ -824,6 +968,7 @@ void MainWindow::enqueueJellyfin(const JfItem& item)
 
 void MainWindow::nextItem(int dir)
 {
+    if (tvOn()) { m_tv->channelStep(dir); return; }   // Cable TV: channel up / down
     const int i = m_playlist->currentIndex() + dir;
     if (i >= 0 && i < m_playlist->count()) playIndex(i);
     else showOsd(dir > 0 ? tr("End of playlist") : tr("Start of playlist"));
@@ -921,6 +1066,7 @@ void MainWindow::applyLookSound()
         t.wow = m_params.wowFlutter * k; t.saturation = m_params.tapeSaturation * k;
         t.tone = m_params.tapeTone * k; t.speaker = m_params.tvSpeaker * k;
         t.dropouts = m_params.tapeHiss > 0.f ? m_params.vhsDropouts * k : 0.f;   // tape dropouts dip the sound too
+        t.crush = m_params.pcmCrush * k;
     }
     m_lastTape = t;
     m_player->setTapeParams(t);
@@ -1605,6 +1751,7 @@ bool MainWindow::loadSubtitleOffer(int index)
 void MainWindow::rememberPosition()
 {
     if (m_currentLocal.isEmpty() || !m_player->hasMedia()) return;
+    if (tvOn()) return;   // a channel's programme isn't something to resume
     m_resume->remember(m_currentLocal, m_player->position() / 1000000, m_player->duration() / 1000000);
     m_resume->save();
 }
@@ -1697,25 +1844,38 @@ GifDialog* MainWindow::showGifDialog()
         h.title = [this] { return mediaTitle(); };
         h.folder = [this] { return m_settings.screenshotDir; };
         h.deskMode = [this] { return m_deskActive && m_desk; };
-        h.recorder.grab = [this]() -> QImage {
-            if (m_deskActive && m_desk) return m_desk->view()->grabFramebuffer();   // the whole scene
-            if (!m_gifLook) return m_video->grabOriginalFrame();
-            // The picture as shown, without the empty bars around it.
-            QImage img = m_video->grabFilteredFrame();
-            const LayoutResult L = m_video->currentLayout();
-            const QRect r = L.visibleRect.toAlignedRect().intersected(img.rect());
-            return L.valid && r.width() > 16 && r.height() > 16 ? img.copy(r) : img;
+        h.recorder.pictureSize = [this](const QSize& box) {
+            if (m_deskActive && m_desk) return m_desk->view()->sceneSizeIn(box);   // the whole scene
+            return m_video->pictureSizeIn(box);
         };
-        h.recorder.position = [this] { return m_player->position(); };
+        h.recorder.render = [this](const QSize& size, double clock) -> QImage {
+            if (m_deskActive && m_desk) {
+                m_video->setClockOverride(clock);
+                QImage img = m_desk->view()->grabScene(size);
+                m_video->setClockOverride(m_gifClockSaved);
+                return img.convertToFormat(QImage::Format_RGB32);
+            }
+            if (!m_gifLook) return m_video->renderPictureAt(size, false);
+            // Drawn for this very size, as a window of this size would show it: the look thins
+            // out its scanlines by itself when there are too few rows for them (no moiré).
+            return m_video->renderPictureAt(size, true, clock);
+        };
+        h.recorder.framePts = [this] { return m_player->lastFrameStreamTime(); };
+        h.recorder.frameSerial = [this] { return m_player->frameSerial(); };
+        h.recorder.isSeeking = [this] { return m_player->isSeeking(); };
         h.recorder.isPlaying = [this] { return m_player->isPlaying(); };
-        h.recorder.seekAndPlay = [this](qint64 ns) {
+        h.recorder.effectClock = [this] { return m_video->effectTime(); };
+        h.recorder.seekPaused = [this](qint64 ns) {
+            if (m_player->isPlaying()) m_player->pause();
             m_player->seek(ns, Player::SeekMode::Accurate);
-            if (!m_player->isPlaying()) m_player->play();
         };
+        h.recorder.step = [this] { m_player->stepFrame(true); };
+        h.recorder.restore = [this](bool wasPlaying) { if (wasPlaying) m_player->play(); };
         h.setLook = [this](bool on) { m_gifLook = on; };
         h.recording = [this](bool on) {
             m_gifRecording = on;
-            if (on) showOsd(tr("● Recording GIF…"), 2000);
+            if (on) m_gifClockSaved = m_video->clockOverride();
+            if (on) showOsd(tr("Making the GIF…"), 2000);
         };
         h.saveSettings = [this](const GifDialog::Settings& s) {
             m_settings.gifWidth = s.width;
@@ -2118,6 +2278,11 @@ QJsonObject MainWindow::stateReport() const
     o["file"] = m_mediaTitle.isEmpty() ? QFileInfo(m_player->currentPath()).fileName() : m_mediaTitle;
     o["source"] = m_jfItemId.isEmpty() ? QStringLiteral("file") : QStringLiteral("jellyfin");
     o["jellyfinSignedIn"] = m_jf->isSignedIn();
+    o["tv"] = m_tv->report();
+    o["staticMoment"] = m_video->momentName();
+    o["playlistCount"] = m_playlist->count();
+    o["fmvColorsUsed"] = m_video->fmvColorsUsed();
+    o["fmvFramesDrawn"] = double(m_video->fmvFramesDrawn());
     o["jellyfinPlayMethod"] = m_jfItemId.isEmpty() ? QString() : m_jfTranscoding ? QStringLiteral("Transcode") : QStringLiteral("DirectPlay");
     o["jellyfinTranscodeReasons"] = QJsonArray::fromStringList(m_jfReasons);
     o["jellyfinConvertedAfterFailure"] = m_jfRetried;
@@ -2153,6 +2318,8 @@ QJsonObject MainWindow::stateReport() const
     o["srcRect"] = rectJson(L.srcRect);
     o["scaleMode"] = scaleModeName(m_video->scaleMode());
     o["preset"] = m_presetName;
+    o["loopAMs"] = m_loopA >= 0 ? double(m_loopA) / 1e6 : -1.0;
+    o["loopBMs"] = m_loopB >= 0 ? double(m_loopB) / 1e6 : -1.0;
     o["bypass"] = m_video->bypass();
     o["compare"] = m_video->compare();
     o["scanlines"] = m_video->currentScanlines();
@@ -2164,7 +2331,7 @@ QJsonObject MainWindow::stateReport() const
     o["effectStrength"] = m_settings.effectStrength;
     o["tapeSound"] = QJsonObject{{"hiss", m_lastTape.hiss}, {"crackle", m_lastTape.crackle}, {"noiseGain", m_lastTape.noiseGain},
                                  {"wow", m_lastTape.wow}, {"saturation", m_lastTape.saturation}, {"tone", m_lastTape.tone},
-                                 {"speaker", m_lastTape.speaker}, {"dropouts", m_lastTape.dropouts}};
+                                 {"speaker", m_lastTape.speaker}, {"dropouts", m_lastTape.dropouts}, {"crush", m_lastTape.crush}};
     o["tapeSoundActive"] = m_player->hasTapeSound() && m_settings.lookSound &&
                            (m_params.tapeHiss > 0 || m_params.wowFlutter > 0 || m_params.tapeSaturation > 0 || m_params.tapeTone > 0 ||
                             m_params.tvSpeaker > 0 || m_params.filmCrackle > 0);
@@ -2422,6 +2589,24 @@ void MainWindow::showDeskMenu(const QPoint& globalPos)
         a->setChecked(i == m_playlist->currentIndex());
     }
     fillRecentMenu(menu.addMenu(tr("Recent files")));
+    if (m_tv && !m_tv->channels().isEmpty()) {   // Cable TV: on/off, the guide, and the channels
+        QMenu* tm = menu.addMenu(tr("Cable TV"));
+        QAction* on = tm->addAction(tr("TV on\tCtrl+T"), this, [this] { setTvMode(!tvOn()); });
+        on->setCheckable(true);
+        on->setChecked(tvOn());
+        if (tvOn()) {
+            QAction* g = tm->addAction(tr("Guide\tW"), this, [this] { m_tv->setGuide(!m_tv->guideVisible()); });
+            g->setCheckable(true);
+            g->setChecked(m_tv->guideVisible());
+        }
+        tm->addSeparator();
+        for (const TvChannel& c : m_tv->channels()) {
+            const int n = c.number;
+            QAction* a = tm->addAction(QStringLiteral("%1  %2").arg(n).arg(c.name), this, [this, n] { setTvMode(true); if (tvOn()) m_tv->tune(n); });
+            a->setCheckable(true);
+            a->setChecked(tvOn() && m_tv->currentChannel() == n);
+        }
+    }
     if (m_jf->isSignedIn()) {
         QMenu* jm = menu.addMenu(tr("Jellyfin: continue watching"));
         if (m_jfResume.isEmpty()) jm->addAction(tr("Nothing to continue"))->setEnabled(false);

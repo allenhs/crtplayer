@@ -1,0 +1,56 @@
+# 2.10: the Sega CD FMV look. fmvgrab saves the console's own screen (before the CRT).
+open @M@/fmv_natural.mp4
+waitstate playing 15000
+preset Sega CD FMV
+wait 1200
+report sega-a
+wait 3000
+report sega-b
+param fmvFps 5
+wait 600
+report hold-a
+wait 3000
+report hold-b
+pause
+param fmvFps 15
+seek 2.0
+wait 900
+fmvgrab @O@/fmv-a.png
+screenshot filtered @O@/fmv-screen.png
+seek 2.07
+wait 900
+fmvgrab @O@/fmv-b.png
+param fmvBlocks 0
+seek 2.0
+wait 900
+fmvgrab @O@/fmv-noblocks-a.png
+seek 2.07
+wait 900
+fmvgrab @O@/fmv-noblocks-b.png
+param fmvBlocks 1
+param fmvDither 0
+seek 2.0
+wait 900
+fmvgrab @O@/fmv-hard.png
+param fmvBlocks 0.6
+param fmvDither 0.7
+param fmvColors 16
+wait 600
+fmvgrab @O@/fmv-16.png
+preset Sega CD FMV (small window)
+wait 800
+fmvgrab @O@/fmv-window.png
+report window
+play
+wait 1500
+pause
+preset Clean Broadcast Monitor
+wait 400
+report clean
+open @M@/hd_16x9_multitrack.mkv
+waitstate playing 15000
+pause
+preset Sega CD FMV
+wait 900
+fmvgrab @O@/fmv-169.png
+quit

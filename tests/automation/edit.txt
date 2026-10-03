@@ -43,7 +43,7 @@ waitstate playing 15000
 pause
 loop 8000 12000
 cut
-# GIFs: A–B with the look, then the original picture, then 5 s from here, then desk mode
+# GIFs: A–B with the look, then the original picture, then 5 s from here, big sizes, desk mode
 open @O@/edit-media/sd_4x3_h264.mp4
 waitstate playing 15000
 pause
@@ -57,11 +57,28 @@ seek 10
 wait 800
 gifopts 480 15 1
 gif @O@/gif-5s.gif
+# 2.10: big sizes. Every frame is drawn at the GIF's own size, so Full HD and 4K are real.
+loop 2000 3000
+gifopts 1920 10 1
+gif @O@/gif-fhd.gif
+gifopts 3840 10 1
+gif @O@/gif-4k.gif
+report after-big
 desk on
 wait 2500
 loop 2000 4000
+gifopts 480 15 1
 gif @O@/gif-desk.gif
+gifopts 1280 10 1
+gif @O@/gif-desk-hd.gif
 desk off
 wait 800
+# a 16:9 video fills the whole 4K frame
+open @O@/edit-media/hd_16x9_multitrack.mkv
+waitstate playing 15000
+pause
+loop 2000 3000
+gifopts 3840 10 0
+gif @O@/gif-4k-wide.gif
 report end
 quit

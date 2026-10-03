@@ -4,6 +4,7 @@
 #include <memory>
 #include "Automation.h"
 #include "ui/CutDialog.h"
+#include "tv/TvController.h"
 #include "ui/GifDialog.h"
 #include "MainWindow.h"
 #include "playback/Player.h"
@@ -164,6 +165,64 @@ void Automation::next()
         const QString path = m_w->takeScreenshot(a.value(1) != "original", a.value(2));
         if (path.isEmpty()) ++m_failures;
         log(line, {{"saved", path}});
+    } else if (cmd == "tvadd") {
+        // tvadd NUMBER order|shuffle FOLDER : a channel from a folder
+        TvController* tv = m_w->tv();
+        const QString folder = line.section(' ', 3);
+        tv->setTestSeeds(true);   // repeatable runs
+        const int n = tv->addFolderChannel(folder, a.value(1).toInt());
+        if (n > 0) tv->setShuffle(n, a.value(2) == "shuffle");
+        if (n <= 0) ++m_failures;
+        log(line, {{"ok", n > 0}, {"number", n}});
+    } else if (cmd == "tvbumpers") {
+        // tvbumpers NUMBER FOLDER : short clips between that channel's programmes
+        m_w->tv()->setBumperFolder(a.value(1).toInt(), line.section(' ', 2));
+        log(line);
+    } else if (cmd == "tvjf") {
+        // tvjf NAME : the folder NAME of the current Jellyfin listing becomes a channel
+        m_w->tv()->setTestSeeds(true);
+        const bool ok = m_w->jellyfinPanel()->tvChannelByName(rest);
+        if (!ok) ++m_failures;
+        log(line, {{"ok", ok}});
+    } else if (cmd == "tvclock") {
+        // tvclock MS : the wall clock reads MS (since the Unix epoch) now, and runs on from there
+        m_w->tv()->setClock(a.value(1).toLongLong());
+        log(line);
+    } else if (cmd == "tv") {
+        // tv on|off|up|down|ch N|digit N|guide on|guide off
+        TvController* tv = m_w->tv();
+        const QString what = a.value(1);
+        if (what == "on") m_w->setTvMode(true);
+        else if (what == "off") m_w->setTvMode(false);
+        else if (what == "up") tv->channelStep(1);
+        else if (what == "down") tv->channelStep(-1);
+        else if (what == "ch") tv->tune(a.value(2).toInt());
+        else if (what == "digit") tv->digit(a.value(2).toInt());
+        else if (what == "guide") tv->setGuide(a.value(2) != "off");
+        else ++m_failures;
+        log(line, {{"on", tv->isOn()}, {"channel", tv->currentChannel()}});
+    } else if (cmd == "tvwait") {
+        // tvwait TIMEOUT_MS : until every channel has read its videos' lengths
+        const int timeout = a.value(1, "30000").toInt();
+        const qint64 t0 = m_clock.elapsed();
+        auto* poll = new QTimer(this);
+        poll->setInterval(50);
+        connect(poll, &QTimer::timeout, this, [=] {
+            const bool ok = m_w->tv()->allReady();
+            if (!ok && m_clock.elapsed() - t0 < timeout) return;
+            poll->deleteLater();
+            if (!ok) ++m_failures;
+            log(line, {{"ok", ok}, {"waitedMs", double(m_clock.elapsed() - t0)}});
+            QTimer::singleShot(10, this, &Automation::next);
+        });
+        poll->start();
+        return;
+    } else if (cmd == "fmvgrab") {
+        // fmvgrab PATH : the FMV console's own screen (its pixel grid, before the CRT)
+        const QImage img = m_w->video()->grabFmvFrame();
+        const bool ok = !img.isNull() && img.save(a.value(1));
+        if (!ok) ++m_failures;
+        log(line, {{"ok", ok}, {"width", img.width()}, {"height", img.height()}});
     } else if (cmd == "grabwindow") {
         const bool ok = m_w->grab().save(a.value(1));
         log(line, {{"ok", ok}});
@@ -499,7 +558,8 @@ void Automation::next()
                 const GifRecorder::Result r = dlg->lastResult();
                 if (!r.ok) ++m_failures;
                 log(line, {{"ok", r.ok}, {"error", r.error}, {"path", r.path}, {"frames", r.frames}, {"width", r.width},
-                           {"height", r.height}, {"seconds", r.seconds}, {"bytes", double(r.bytes)}, {"startMs", r.startNs / 1e6},
+                           {"height", r.height}, {"seconds", r.seconds}, {"fps", r.fps}, {"tookSeconds", r.tookSeconds},
+                           {"bytes", double(r.bytes)}, {"startMs", r.startNs / 1e6},
                            {"endMs", r.endNs / 1e6}, {"truncated", r.truncated}, {"waitedMs", double(m_clock.elapsed() - t0)}});
                 QTimer::singleShot(10, this, &Automation::next);
             });

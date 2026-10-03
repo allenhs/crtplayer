@@ -1,4 +1,5 @@
 #include "CrtRenderer.h"
+#include "render/FmvPalette.h"
 
 #include <QDebug>
 #include <QFile>
@@ -55,6 +56,8 @@ bool CrtRenderer::initialize(QString* error)
     if (!loadProgram(m_crt, ":/shaders/crt.frag", error)) return false;
     if (!loadProgram(m_persist, ":/shaders/persist.frag", error)) return false;
     if (!loadProgram(m_copy, ":/shaders/copy.frag", error)) return false;
+    if (!loadProgram(m_fmvCodec, ":/shaders/fmv_codec.frag", error)) return false;
+    if (!loadProgram(m_fmvPal, ":/shaders/fmv_palette.frag", error)) return false;
 
     static const GLfloat quad[] = {-1.f, -1.f, 1.f, -1.f, -1.f, 1.f, 1.f, 1.f};
     m_vao.create();
@@ -87,6 +90,13 @@ void CrtRenderer::destroy()
     if (m_lowTex) glDeleteTextures(1, &m_lowTex);
     if (m_lowFbo) glDeleteFramebuffers(1, &m_lowFbo);
     m_lowTex = m_lowFbo = 0;
+    glDeleteTextures(2, m_fmvDecTex);
+    glDeleteFramebuffers(2, m_fmvDecFbo);
+    if (m_fmvTex) glDeleteTextures(1, &m_fmvTex);
+    if (m_fmvFbo) glDeleteFramebuffers(1, &m_fmvFbo);
+    if (m_fmvPalTex) glDeleteTextures(1, &m_fmvPalTex);
+    m_fmvDecTex[0] = m_fmvDecTex[1] = m_fmvDecFbo[0] = m_fmvDecFbo[1] = m_fmvTex = m_fmvFbo = m_fmvPalTex = 0;
+    m_fmvValid = false;
     if (m_outFbo) glDeleteFramebuffers(1, &m_outFbo);
     m_outTex = m_outFbo = 0;
     if (m_imgFbo) glDeleteFramebuffers(1, &m_imgFbo);
@@ -158,6 +168,14 @@ bool CrtRenderer::uploadSample(GstSample* sample)
         return false;
     }
 
+    m_framePts = -1;
+    if (GST_BUFFER_PTS_IS_VALID(buf)) {
+        const GstSegment* seg = gst_sample_get_segment(sample);
+        const guint64 st = seg && seg->format == GST_FORMAT_TIME ? gst_segment_to_stream_time(seg, GST_FORMAT_TIME, GST_BUFFER_PTS(buf))
+                                                                 : GST_BUFFER_PTS(buf);
+        if (st != GST_CLOCK_TIME_NONE) m_framePts = qint64(st);
+    }
+    ++m_uploads;
     GstVideoFrame frame;
     if (!gst_video_frame_map(&frame, &m_info, buf, GST_MAP_READ)) return false;
     const int planes = GST_VIDEO_FRAME_N_PLANES(&frame);
@@ -294,8 +312,95 @@ void CrtRenderer::updateLowRes(const QSize& size)
     m_lowDirty = false;
 }
 
-void CrtRenderer::computeBlur()
+bool CrtRenderer::updateFmv(const QSize& grid, const CrtParams& p)
 {
+    const QRect win = fmvWindowRect(grid, p.fmvWindow);
+    const QVector<float> key{float(grid.width()), float(grid.height()), float(win.width()), float(win.height()),
+                             float(p.fmvColors), float(p.fmvFps), p.fmvBlocks, p.fmvDither, float(p.fmvMode)};
+    // The codec frame this video frame belongs to: a new one only every 1/fps of video time.
+    const qint64 frame = p.fmvFps > 0 && m_framePts >= 0 ? qint64(std::floor(m_framePts / 1e9 * p.fmvFps + 0.02)) : qint64(m_uploads);
+    const bool sizeChanged = m_fmvSize != grid || m_fmvKey.size() != key.size() || m_fmvKey[2] != key[2] || m_fmvKey[3] != key[3];
+    const bool changed = !m_fmvValid || m_fmvKey != key;
+    if (!changed && (!m_lowDirty || frame == m_fmvFrame)) return false;   // held
+
+    updateLowRes(win.size());
+    // Key frames: at the start, after a jump, and every two seconds' worth of frames.
+    const bool key2 = !m_fmvValid || sizeChanged || frame < m_fmvFrame || frame > m_fmvFrame + 8 ||
+                      m_fmvSinceKey >= std::max(8, 2 * (p.fmvFps > 0 ? p.fmvFps : 30));
+    for (int i = 0; i < 2; ++i) ensureTarget(m_fmvDecTex[i], m_fmvDecFbo[i], m_fmvDecSize[i], grid, false, false);
+    ensureTarget(m_fmvTex, m_fmvFbo, m_fmvSize, grid, true, false);
+    const int next = 1 - m_fmvIdx;
+    glDisable(GL_BLEND);
+    glViewport(0, 0, grid.width(), grid.height());
+    glBindFramebuffer(GL_FRAMEBUFFER, m_fmvDecFbo[next]);
+    m_fmvCodec.bind();
+    m_fmvCodec.setUniformValue("uLow", 0);
+    m_fmvCodec.setUniformValue("uPrev", 1);
+    glUniform2i(m_fmvCodec.uniformLocation("uGrid"), grid.width(), grid.height());
+    glUniform2i(m_fmvCodec.uniformLocation("uInner"), win.width(), win.height());
+    glUniform2i(m_fmvCodec.uniformLocation("uOffset"), win.x(), win.y());
+    m_fmvCodec.setUniformValue("uBlocks", p.fmvBlocks);
+    m_fmvCodec.setUniformValue("uHavePrev", !key2);
+    glActiveTexture(GL_TEXTURE1);
+    glBindTexture(GL_TEXTURE_2D, m_fmvDecTex[m_fmvIdx]);
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, m_lowTex);
+    drawQuad();
+    m_fmvCodec.release();
+    m_fmvIdx = next;
+
+    // This frame's palette, from the decoded picture.
+    QByteArray px(grid.width() * grid.height() * 4, Qt::Uninitialized);
+    glPixelStorei(GL_PACK_ALIGNMENT, 4);
+    glReadPixels(0, 0, grid.width(), grid.height(), GL_RGBA, GL_UNSIGNED_BYTE, px.data());
+    const QVector<QRgb> pal = fmvPalette(reinterpret_cast<const uchar*>(px.constData()), grid.width(), grid.height(),
+                                         grid.width() * 4, p.fmvColors);
+    QByteArray pt(256 * 4, '\0');
+    for (int i = 0; i < pal.size() && i < 256; ++i) {
+        pt[i * 4] = char(qRed(pal[i])); pt[i * 4 + 1] = char(qGreen(pal[i])); pt[i * 4 + 2] = char(qBlue(pal[i])); pt[i * 4 + 3] = char(255);
+    }
+    m_fmvColorsUsed = int(std::min<qsizetype>(pal.size(), 256));
+    if (!m_fmvPalTex) {
+        glGenTextures(1, &m_fmvPalTex);
+        glBindTexture(GL_TEXTURE_2D, m_fmvPalTex);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, 256, 1, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    }
+    glBindTexture(GL_TEXTURE_2D, m_fmvPalTex);
+    glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
+    glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, 256, 1, GL_RGBA, GL_UNSIGNED_BYTE, pt.constData());
+
+    glBindFramebuffer(GL_FRAMEBUFFER, m_fmvFbo);
+    m_fmvPal.bind();
+    m_fmvPal.setUniformValue("uSrc", 0);
+    m_fmvPal.setUniformValue("uPalette", 1);
+    m_fmvPal.setUniformValue("uColors", m_fmvColorsUsed);
+    m_fmvPal.setUniformValue("uDither", p.fmvDither);
+    glUniform2i(m_fmvPal.uniformLocation("uGrid"), grid.width(), grid.height());
+    glActiveTexture(GL_TEXTURE1);
+    glBindTexture(GL_TEXTURE_2D, m_fmvPalTex);
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, m_fmvDecTex[m_fmvIdx]);
+    drawQuad();
+    m_fmvPal.release();
+    glBindTexture(GL_TEXTURE_2D, m_fmvTex);
+    glGenerateMipmap(GL_TEXTURE_2D);
+
+    m_fmvSinceKey = key2 ? 0 : m_fmvSinceKey + 1;
+    m_fmvFrame = frame;
+    m_fmvKey = key;
+    m_fmvValid = true;
+    ++m_fmvDrawn;
+    return true;
+}
+
+void CrtRenderer::computeBlur(GLuint src)
+{
+    if (!src) src = m_imgTex;
+    m_blurSrc = src;
     // Work at a fixed size relative to the picture (long side 480 px) so glow radii
     // look the same for SD, HD, ultrawide and vertical sources.
     const double longSide = std::max(m_imgSize.width(), m_imgSize.height());
@@ -310,7 +415,7 @@ void CrtRenderer::computeBlur()
     m_down.setUniformValue("uSrc", 0);
     m_down.setUniformValue("uOutSize", QVector2D(bs.width(), bs.height()));
     glActiveTexture(GL_TEXTURE0);
-    glBindTexture(GL_TEXTURE_2D, m_imgTex);
+    glBindTexture(GL_TEXTURE_2D, src);
     drawQuad();
     m_down.release();
 
@@ -405,9 +510,13 @@ void CrtRenderer::draw(GLuint targetFbo, const DrawParams& d)
 void CrtRenderer::drawCrt(GLuint targetFbo, const DrawParams& d)
 {
     const bool wantBlur = !d.bypass && (d.params.bloom > 0.f || d.params.glow > 0.f) && m_hasFrame;
-    if (wantBlur && m_blurDirty) computeBlur();
     const bool lowRes = !d.bypass && m_hasFrame && !d.pixelSize.isEmpty();
-    if (lowRes) updateLowRes(d.pixelSize);
+    const bool fmv = lowRes && d.params.fmvMode > 0;
+    const bool fmvUpdated = fmv && updateFmv(d.pixelSize, d.params);
+    if (lowRes && !fmv) updateLowRes(d.pixelSize);
+    // The glow comes from what the tube shows: the FMV console's held, windowed picture.
+    const GLuint blurSrc = fmv ? m_fmvTex : m_imgTex;
+    if (wantBlur && (m_blurDirty || fmvUpdated || m_blurSrc != blurSrc)) computeBlur(blurSrc);
 
     glBindFramebuffer(GL_FRAMEBUFFER, targetFbo);
     glViewport(0, 0, d.viewport.width(), d.viewport.height());
@@ -432,8 +541,8 @@ void CrtRenderer::drawCrt(GLuint targetFbo, const DrawParams& d)
     m_crt.setUniformValue("uBlur", 1);
     m_crt.setUniformValue("uImageFull", 2);
     m_crt.setUniformValue("uPixelMode", lowRes ? p.pixelFilter : -1);
-    m_crt.setUniformValue("uColorDepth", p.colorDepth);
-    m_crt.setUniformValue("uDither", p.dither);
+    m_crt.setUniformValue("uColorDepth", fmv ? 0 : p.colorDepth);   // (the FMV console has its own palette)
+    m_crt.setUniformValue("uDither", fmv ? 0 : p.dither);
     m_crt.setUniformValue("uGridSize", lowRes ? QVector2D(d.pixelSize.width(), d.pixelSize.height())
                                               : QVector2D(m_imgSize.width(), m_imgSize.height()));
     m_crt.setUniformValue("uVideoStd", p.videoStandard);
@@ -443,6 +552,7 @@ void CrtRenderer::drawCrt(GLuint targetFbo, const DrawParams& d)
     m_crt.setUniformValue("uOsd", 3);
     m_crt.setUniformValue("uOsdAlpha", m_osdTex ? d.osdAlpha : 0.f);
     m_crt.setUniformValue("uOsdRect", QVector4D(d.osdRect.x(), d.osdRect.y(), d.osdRect.width(), d.osdRect.height()));
+    m_crt.setUniformValue("uOsdSmear", d.osdRect.width() < 0.99);   // (not for a picture-sized overlay)
     if (lowRes) {
         const QSizeF ps(d.pixelSize);
         m_crt.setUniformValue("uPixelSize", QVector2D(float(ps.width()), float(ps.height())));
@@ -501,7 +611,7 @@ void CrtRenderer::drawCrt(GLuint targetFbo, const DrawParams& d)
     glActiveTexture(GL_TEXTURE1);
     glBindTexture(GL_TEXTURE_2D, m_blurTex[0] ? m_blurTex[0] : m_imgTex);
     glActiveTexture(GL_TEXTURE0);
-    glBindTexture(GL_TEXTURE_2D, lowRes ? m_lowTex : m_imgTex);
+    glBindTexture(GL_TEXTURE_2D, fmv ? m_fmvTex : lowRes ? m_lowTex : m_imgTex);
     drawQuad();
     m_crt.release();
     glDisable(GL_BLEND);
@@ -520,7 +630,7 @@ GLuint CrtRenderer::renderToTexture(const DrawParams& d)
 GLuint CrtRenderer::blurTexture()
 {
     if (!m_hasFrame) return 0;
-    if (m_blurDirty || !m_blurTex[0]) computeBlur();
+    if (m_blurDirty || !m_blurTex[0]) computeBlur(m_blurSrc);
     return m_blurTex[0];
 }
 
@@ -540,6 +650,10 @@ CrtRenderer::DrawParams CrtRenderer::makeDrawParams(const ViewSettings& vs, cons
     d.time = time;
     d.frameRand = float((frameCounter * 2654435761u % 1000u) / 1000.0);
     d.pixelSize = pixelatedSize(src, vs.aspectOverride, vs.params.pixelHeight, vs.params.pixelWidth);
+    if (vs.params.fmvMode > 0 && src.isValid()) {   // the console's own screen grid, whatever the video's size
+        const QSizeF ds = displaySize(src, vs.aspectOverride);
+        d.pixelSize = fmvGridSize(ds.height() > 0 ? ds.width() / ds.height() : 0.0, vs.params.pixelHeight, vs.params.pixelWidth);
+    }
     // Rows of the picture as the CRT sees it: the lowered resolution when one is set.
     const int pictureRows = d.pixelSize.isEmpty() ? orientedStorageSize(src).height() : d.pixelSize.height();
     if (vs.params.scanLines > 0) {
@@ -576,6 +690,16 @@ QImage CrtRenderer::renderToImage(const DrawParams& dIn)
     glDeleteFramebuffers(1, &fbo);
     glDeleteTextures(1, &tex);
     return img.mirrored(false, true).convertToFormat(QImage::Format_RGB32);
+}
+
+QImage CrtRenderer::fmvImage()
+{
+    if (!m_fmvValid || m_fmvSize.isEmpty()) return {};
+    QImage img(m_fmvSize, QImage::Format_RGBA8888);
+    glBindFramebuffer(GL_FRAMEBUFFER, m_fmvFbo);
+    glPixelStorei(GL_PACK_ALIGNMENT, 4);
+    glReadPixels(0, 0, m_fmvSize.width(), m_fmvSize.height(), GL_RGBA, GL_UNSIGNED_BYTE, img.bits());
+    return img.convertToFormat(QImage::Format_RGB32);   // (the picture's textures have row 0 at the top)
 }
 
 QImage CrtRenderer::renderOriginal(const QSize& outSize)

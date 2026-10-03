@@ -8,8 +8,8 @@ class QLabel;
 class QProgressBar;
 class QPushButton;
 
-// "Save GIF clip": the A–B section (or the next 5 seconds) as an animated GIF, recorded
-// as shown, with the CRT look or without, or the desk-mode scene.
+// "Save GIF clip": the A–B section (or the next 5 seconds) as an animated GIF, drawn
+// as shown at any size up to 4K, with the CRT look or without, or the desk-mode scene.
 class GifDialog : public QDialog {
     Q_OBJECT
 public:
@@ -31,6 +31,7 @@ public:
     bool isBusy() const { return m_rec.isBusy(); }
     GifRecorder::Result lastResult() const { return m_last; }
     Settings settings() const;
+    static QSize boxFor(int width);
 
 signals:
     void finished(const GifRecorder::Result& r);

@@ -56,6 +56,9 @@ private:
     QCheckBox* m_vcrOsd = nullptr;
     void syncResPreset();
     QSpinBox* m_lines = nullptr;
+    QComboBox* m_fmvMode = nullptr;
+    QSpinBox* m_fmvColors = nullptr;
+    QComboBox* m_fmvFps = nullptr;
     QCheckBox* m_includeBars = nullptr;
     bool m_updating = false;
 };

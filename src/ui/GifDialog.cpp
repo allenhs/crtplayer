@@ -20,8 +20,9 @@ GifDialog::GifDialog(const Host& host, const Settings& st, QWidget* parent)
     setWindowTitle(tr("Save GIF clip"));
     setModal(false);
     auto* v = new QVBoxLayout(this);
-    auto* intro = new QLabel(tr("Plays the A–B section once (or the next 5 seconds when A and B aren't set) and saves it "
-                                "as an animated GIF, just as it looks on screen."));
+    auto* intro = new QLabel(tr("Saves the A–B section (or the next 5 seconds when A and B aren't set) as an animated GIF, "
+                                "just as it looks on screen. It is drawn frame by frame at the size you pick, so every "
+                                "frame is there on any computer; big sizes just take longer."));
     intro->setWordWrap(true);
     intro->setObjectName("paramValue");
     v->addWidget(intro);
@@ -32,6 +33,11 @@ GifDialog::GifDialog(const Host& host, const Settings& st, QWidget* parent)
     auto* form = new QFormLayout();
     m_width = new QComboBox;
     for (int w : {320, 480, 640, 800, 1024}) m_width->addItem(tr("%1 pixels wide").arg(w), w);
+    // The HD sizes fit the picture inside the named frame (a 4:3 picture in Full HD is 1440 × 1080).
+    m_width->addItem(tr("HD 720p (1280 × 720)"), 1280);
+    m_width->addItem(tr("Full HD 1080p (1920 × 1080)"), 1920);
+    m_width->addItem(tr("1440p (2560 × 1440)"), 2560);
+    m_width->addItem(tr("4K (3840 × 2160)"), 3840);
     m_fps = new QComboBox;
     for (int f : {10, 15, 20, 25, 30}) m_fps->addItem(tr("%1 frames a second").arg(f), f);
     m_look = new QComboBox;
@@ -42,6 +48,7 @@ GifDialog::GifDialog(const Host& host, const Settings& st, QWidget* parent)
     form->addRow(tr("Picture"), m_look);
     v->addLayout(form);
     auto* note = new QLabel(tr("Bigger and smoother means a larger file: 480 pixels at 15 frames a second is a good start. "
+                               "HD and 4K GIFs get very large (hundreds of megabytes for a few seconds of 4K). "
                                "At most %1 seconds.").arg(GifRecorder::kMaxLengthNs / 1000000000));
     note->setWordWrap(true);
     note->setObjectName("paramValue");
@@ -80,9 +87,11 @@ GifDialog::GifDialog(const Host& host, const Settings& st, QWidget* parent)
     connect(m_openFolder, &QPushButton::clicked, this, [this] {
         QDesktopServices::openUrl(QUrl::fromLocalFile(QFileInfo(m_last.path).absolutePath()));
     });
-    connect(&m_rec, &GifRecorder::progress, this, [this](double done, double total) {
+    connect(&m_rec, &GifRecorder::progress, this, [this](double done, double total, int frames, qint64 bytes) {
         m_progress->setValue(int(1000 * done / std::max(0.001, total)));
-        m_status->setText(tr("Recording… %1 of %2 s").arg(QLocale().toString(done, 'f', 1), QLocale().toString(total, 'f', 1)));
+        m_status->setText(tr("Drawing… %1 of %2 s, %3 frames, %4 so far")
+                              .arg(QLocale().toString(done, 'f', 1), QLocale().toString(total, 'f', 1)).arg(frames)
+                              .arg(QLocale().formattedDataSize(bytes)));
     });
     connect(&m_rec, &GifRecorder::encoding, this, [this](int left) {
         m_progress->setRange(0, 0);
@@ -100,10 +109,8 @@ GifDialog::GifDialog(const Host& host, const Settings& st, QWidget* parent)
                             .arg(QFileInfo(r.path).fileName().toHtmlEscaped()).arg(r.frames).arg(r.width).arg(r.height)
                             .arg(QLocale().toString(r.seconds, 'f', 1), QLocale().formattedDataSize(r.bytes));
             if (r.truncated) t += "<br>" + tr("The section was longer than %1 s: its start was saved.").arg(GifRecorder::kMaxLengthNs / 1000000000);
-            const double got = r.seconds > 0 ? r.frames / r.seconds : 0;
-            if (got > 0 && got < 0.8 * settings().fps)
-                t += "<br>" + tr("This computer managed %1 frames a second, not %2: the GIF still plays at the right speed.")
-                                  .arg(QLocale().toString(got, 'f', 0)).arg(settings().fps);
+            t += "<br>" + tr("%1 frames a second; it took %2 s to make.")
+                              .arg(QLocale().toString(r.fps, 'f', 1), QLocale().toString(r.tookSeconds, 'f', 1));
             m_status->setText(t);
             m_openFolder->show();
         } else {
@@ -112,6 +119,12 @@ GifDialog::GifDialog(const Host& host, const Settings& st, QWidget* parent)
         emit finished(r);
     });
     refresh();
+}
+
+// Up to 1024: that many pixels wide. From 1280: fitted inside the 16:9 frame of that width.
+QSize GifDialog::boxFor(int width)
+{
+    return width >= 1280 ? QSize(width, width * 9 / 16) : QSize(width, 0);
 }
 
 GifDialog::Settings GifDialog::settings() const
@@ -159,8 +172,8 @@ bool GifDialog::record(const QString& pathIn)
     m_close->setText(tr("Stop"));
     m_progress->setValue(0);
     m_progress->show();
-    m_status->setText(tr("Getting ready…"));
-    if (!m_rec.start(a, b, s.fps, s.width, path)) {
+    m_status->setText(tr("Going to the start…"));
+    if (!m_rec.start(a, b, s.fps, boxFor(s.width), path)) {
         if (m_host.recording) m_host.recording(false);
         m_record->setEnabled(true);
         m_progress->hide();

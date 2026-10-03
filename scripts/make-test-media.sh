@@ -8,6 +8,12 @@ cp "$HERE/tests/automation/en.srt" "$HERE/tests/automation/fr.srt" .
 F="-hide_banner -loglevel error -y"
 ffmpeg $F -f lavfi -i "testsrc2=size=640x480:rate=30:duration=20" -f lavfi -i "sine=f=1000:beep_factor=4:duration=20" \
   -c:v libx264 -pix_fmt yuv420p -g 60 -c:a aac -shortest sd_4x3_h264.mp4
+# Smooth gradients, a detailed moving shape and camera-like noise: for the Sega CD FMV look (palettes, dither, codec blocks).
+ffmpeg $F -f lavfi -i "gradients=s=640x480:r=30:c0=0x203060:c1=0xe0a060:c2=0x306030:c3=0xd0d0f0:n=4:speed=0.02,format=yuv420p" \
+  -f lavfi -i "mandelbrot=s=320x240:r=30:start_scale=2.2:end_scale=0.4:end_pts=600" \
+  -f lavfi -i "sine=f=330:r=44100,volume=0.4" -f lavfi -i "anoisesrc=r=44100:a=0.08:c=pink" \
+  -filter_complex "[1:v]format=yuv420p,scale=320:240[m];[0:v][m]overlay=x='160+120*sin(t*1.3)':y='120+60*cos(t*0.9)',drawbox=x='mod(t*90,640)':y=380:w=60:h=40:c=white@0.9:t=fill,noise=alls=10:allf=t,drawtext=text='FMV %{eif\:t*10\:d}':x=30:y=30:fontsize=40:fontcolor=white[v];[2:a][3:a]amix=inputs=2,aformat=channel_layouts=stereo[a]" \
+  -map "[v]" -map "[a]" -t 20 -c:v libx264 -crf 30 -pix_fmt yuv420p -g 30 -c:a aac -b:a 128k fmv_natural.mp4
 ffmpeg $F -f lavfi -i "smptehdbars=size=1280x720:rate=25:duration=30" -f lavfi -i "sine=f=440:duration=30" -f lavfi -i "sine=f=880:duration=30" \
   -i en.srt -i fr.srt -map 0:v -map 1:a -map 2:a -map 3 -map 4 -c:v libx264 -pix_fmt yuv420p -g 50 -c:a aac -c:s srt \
   -metadata:s:a:0 language=eng -metadata:s:a:0 title="Main 440 Hz" -metadata:s:a:1 language=jpn -metadata:s:a:1 title="Alt 880 Hz" \

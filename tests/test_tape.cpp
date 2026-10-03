@@ -187,6 +187,28 @@ int main(int argc, char** argv)
         std::snprintf(d, sizeof d, "%d dips in 5.5 s", dips);
         check("dropouts: the level dips now and then", dips >= 1, d);
     }
+    {   // console PCM: held samples (a staircase) with few levels
+        TapeParams p;
+        p.crush = 1.f;
+        const std::vector<float> out = run(sine(440, 2.0), p);
+        // At full: 11.025 kHz from 48 kHz, so a new value about every 4.35 samples; 8 bits.
+        size_t changes = 0, n = 0;
+        bool onGrid = true;
+        for (size_t i = settle + 1; i < out.size() / 2; ++i) {
+            ++n;
+            if (out[i * 2] != out[(i - 1) * 2]) ++changes;
+            const double steps = double(out[i * 2]) * 128.0;
+            if (std::fabs(steps - std::round(steps)) > 1e-4) onGrid = false;
+        }
+        const double rate = double(changes) / n * kRate;
+        std::snprintf(d, sizeof d, "the value changes %.0f times a second; on the 8-bit grid: %s", rate, onGrid ? "yes" : "no");
+        check("console PCM at full: samples held at about 11 kHz, 256 levels", rate > 9500 && rate < 11100 && onGrid, d);
+        p.crush = 0.f;
+        const std::vector<float> in = sine(440, 1.0), clean = run(in, p);
+        bool same = clean.size() == in.size();
+        for (size_t i = 0; same && i < in.size(); ++i) same = clean[i] == in[i];
+        check("console PCM at 0: untouched", same, same ? "bit-exact" : "differs");
+    }
     std::printf(g_fail ? "\n%d tape sound check(s) failed\n" : "\nAll tape sound checks passed\n", g_fail);
     return g_fail ? 1 : 0;
 }

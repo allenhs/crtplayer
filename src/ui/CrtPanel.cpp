@@ -222,6 +222,31 @@ CrtPanel::CrtPanel(QWidget* parent) : QWidget(parent)
             emitChanged();
         });
 
+        if (QString::fromUtf8(d.key) == "fmvBlocks") {
+            // The FMV console's switches sit above its sliders.
+            m_fmvMode = new QComboBox;
+            m_fmvMode->addItems(fmvModeNames());
+            m_fmvMode->setToolTip(tr("Shows the video as an early-90s CD console played it. Sega CD: blocky 4×4 codec, a few dozen\n"
+                                     "dithered colours from the console's 512, a low frame rate. It uses the Resolution above\n"
+                                     "(224 rows with the console's wide pixels when that is left at Native)."));
+            m_fmvColors = new QSpinBox;
+            m_fmvColors->setRange(8, 256);
+            m_fmvColors->setSuffix(tr(" colours"));
+            m_fmvColors->setToolTip(tr("Colours on screen at once, picked afresh for every frame. The console managed about 64;\n"
+                                       "16 is harsher, 128 or more is cleaner than it ever was."));
+            m_fmvFps = new QComboBox;
+            m_fmvFps->addItem(tr("The video's own"), 0);
+            for (int f : {10, 12, 15, 20, 24, 30}) m_fmvFps->addItem(tr("%1 frames a second").arg(f), f);
+            m_fmvFps->setToolTip(tr("How often the picture changes. Sega CD video ran at about 12 to 15 frames a second."));
+            form->insertRow(0, fixedLabel(tr("Console")), m_fmvMode);
+            form->insertRow(1, fixedLabel(tr("Colours")), m_fmvColors);
+            form->insertRow(2, fixedLabel(tr("Frame rate")), m_fmvFps);
+            connect(m_fmvMode, &QComboBox::currentIndexChanged, this, [this](int i) { if (!m_updating) { m_params.fmvMode = i; emitChanged(); } });
+            connect(m_fmvColors, &QSpinBox::valueChanged, this, [this](int n) { if (!m_updating) { m_params.fmvColors = n; emitChanged(); } });
+            connect(m_fmvFps, &QComboBox::currentIndexChanged, this, [this](int) {
+                if (!m_updating) { m_params.fmvFps = m_fmvFps->currentData().toInt(); emitChanged(); }
+            });
+        }
         if (QString::fromUtf8(d.key) == "scanWidth") {
             m_lines = new QSpinBox;
             m_lines->setRange(0, 2160);
@@ -349,6 +374,13 @@ void CrtPanel::setParams(const CrtParams& p)
     m_pixFilter->setCurrentIndex(p.pixelFilter);
     m_colorDepth->setCurrentIndex(p.colorDepth);
     m_dither->setCurrentIndex(p.dither);
+    if (m_fmvMode) {
+        m_fmvMode->setCurrentIndex(p.fmvMode);
+        m_fmvColors->setValue(p.fmvColors);
+        int fi = m_fmvFps->findData(p.fmvFps);
+        if (fi < 0) { m_fmvFps->addItem(tr("%1 frames a second").arg(p.fmvFps), p.fmvFps); fi = m_fmvFps->count() - 1; }
+        m_fmvFps->setCurrentIndex(fi);
+    }
     m_videoStd->setCurrentIndex(p.videoStandard);
     m_power->setChecked(p.powerEffects);
     m_static->setChecked(p.channelStatic);

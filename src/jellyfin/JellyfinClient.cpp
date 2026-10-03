@@ -344,6 +344,36 @@ void JellyfinClient::loadChildren(const QString& parentId, int startIndex)
     });
 }
 
+void JellyfinClient::loadAllVideos(const QString& parentId, std::function<void(const QVector<JfItem>&, const QString&)> done)
+{
+    loadAllVideosPage(parentId, 0, std::make_shared<QVector<JfItem>>(), done);
+}
+
+void JellyfinClient::loadAllVideosPage(const QString& parentId, int startIndex, std::shared_ptr<QVector<JfItem>> acc,
+                                       std::function<void(const QVector<JfItem>&, const QString&)> done)
+{
+    constexpr int kPage = 200;
+    auto q = userQuery();
+    q << qMakePair(QStringLiteral("ParentId"), parentId) << qMakePair(QStringLiteral("Recursive"), QStringLiteral("true"))
+      << qMakePair(QStringLiteral("IncludeItemTypes"), QStringLiteral("Movie,Episode,Video,MusicVideo"))
+      << qMakePair(QStringLiteral("SortBy"), QStringLiteral("SeriesSortName,ParentIndexNumber,IndexNumber,SortName"))
+      << qMakePair(QStringLiteral("SortOrder"), QStringLiteral("Ascending"))
+      << qMakePair(QStringLiteral("StartIndex"), QString::number(startIndex))
+      << qMakePair(QStringLiteral("Limit"), QString::number(kPage))
+      << qMakePair(QStringLiteral("EnableTotalRecordCount"), QStringLiteral("true"));
+    QNetworkReply* r = get(itemsPath(), q);
+    connect(r, &QNetworkReply::finished, this, [this, r, parentId, startIndex, acc, done] {
+        r->deleteLater();
+        if (r->error() != QNetworkReply::NoError) { done(*acc, describeError(r)); return; }
+        int total = -1;
+        const QVector<JfItem> items = parseItems(r->readAll(), &total);
+        *acc += items;
+        const bool more = total >= 0 ? acc->size() < total && !items.isEmpty() : items.size() == kPage;
+        if (more && acc->size() < 50000) loadAllVideosPage(parentId, startIndex + items.size(), acc, done);
+        else done(*acc, QString());
+    });
+}
+
 void JellyfinClient::search(const QString& term)
 {
     auto q = userQuery();

@@ -154,7 +154,7 @@ CrtRenderer::DrawParams VideoWidget::makeDrawParams(const QSize& viewport, const
 
 QString VideoWidget::momentName() const
 {
-    if (m_staticHold || m_staticRelease >= 0) return QStringLiteral("static");
+    if (m_staticHold || m_snow || m_staticRelease >= 0) return QStringLiteral("static");
     if (m_moment == 1) return QStringLiteral("power-on");
     if (m_moment == 2) return m_poweredOn ? QStringLiteral("power-off") : QStringLiteral("off");
     return QStringLiteral("none");
@@ -165,7 +165,7 @@ bool VideoWidget::momentsAnimating() const
     // Only what is actually changing: a running power-on/off, static, a timed OSD message
     // (a finished power-off is just a dark screen; "PAUSE" shown until resume is static).
     const double now = effectClock();
-    if (m_moment == 1) return true;
+    if (m_moment == 1 || m_snow) return true;   // (snow keeps moving)
     if (m_moment == 2 && now - m_momentStart < 0.9) return true;
     if (m_staticHold || m_staticRelease >= 0) return true;
     return m_osdOn && m_osdUntil < 1e17;
@@ -229,6 +229,14 @@ void VideoWidget::setOsdText(const QString& text, double seconds)
     update();
 }
 
+void VideoWidget::setOverlayImage(const QImage& img)
+{
+    m_overlayOn = !img.isNull();
+    m_overlayImage = img;
+    ++m_osdVersion;   // (also when it goes: the VCR text's image is uploaded again)
+    update();
+}
+
 void VideoWidget::decorate(CrtRenderer::DrawParams& d)
 {
     const double now = effectClock();
@@ -238,7 +246,7 @@ void VideoWidget::decorate(CrtRenderer::DrawParams& d)
         m_staticHold = false;
         m_staticRelease = now;
     }
-    if (m_staticHold) d.staticLevel = 1.f;
+    if (m_staticHold || m_snow) d.staticLevel = 1.f;
     else if (m_staticRelease >= 0) {
         const double k = (now - m_staticRelease) / 0.35;
         if (k >= 1.0 || k < 0.0) m_staticRelease = -1;
@@ -258,7 +266,10 @@ void VideoWidget::decorate(CrtRenderer::DrawParams& d)
     }
     // VCR text in the picture's top-left corner, sized relative to the picture height.
     if (m_osdOn && now > m_osdUntil) m_osdOn = false;
-    if (m_osdOn && m_params.vcrOsd && !m_osdImage.isNull()) {
+    if (m_overlayOn) {   // Cable TV's overlay covers the whole picture
+        d.osdAlpha = 1.f;
+        d.osdRect = QRectF(0, 0, 1, 1);
+    } else if (m_osdOn && m_params.vcrOsd && !m_osdImage.isNull()) {
         const QSizeF ds = displaySizeNow();
         const double h = 0.075;
         const double w = h * (double(m_osdImage.width()) / m_osdImage.height()) * (ds.height() / std::max(1.0, ds.width()));
@@ -273,20 +284,9 @@ double VideoWidget::currentScanlines() const
     return makeDrawParams(QSize(int(width() * dpr), int(height() * dpr)), videoAreaPx()).lines;
 }
 
-void VideoWidget::paintGL()
+// Uploads the newest decoded frame, if there is one that hasn't been shown. (GL context current.)
+void VideoWidget::takeNewFrame()
 {
-    if (!m_renderer.isInitialized()) {
-        auto* f = context()->functions();
-        f->glClearColor(0.1f, 0.f, 0.f, 1.f);
-        f->glClear(GL_COLOR_BUFFER_BIT);
-        return;
-    }
-    QElapsedTimer paintTimer;
-    paintTimer.start();
-    if (m_orientDirty) {
-        m_renderer.setOrientation(m_orient);
-        m_orientDirty = false;
-    }
     quint64 serial = 0;
     GstSample* s = m_player->latestSample(&serial);
     if (s && serial == m_shownSerial && m_hasFrame) { gst_sample_unref(s); s = nullptr; }   // nothing new
@@ -320,12 +320,29 @@ void VideoWidget::paintGL()
         }
         gst_sample_unref(s);
     }
+}
+
+void VideoWidget::paintGL()
+{
+    if (!m_renderer.isInitialized()) {
+        auto* f = context()->functions();
+        f->glClearColor(0.1f, 0.f, 0.f, 1.f);
+        f->glClear(GL_COLOR_BUFFER_BIT);
+        return;
+    }
+    QElapsedTimer paintTimer;
+    paintTimer.start();
+    if (m_orientDirty) {
+        m_renderer.setOrientation(m_orient);
+        m_orientDirty = false;
+    }
+    takeNewFrame();
     ++m_frameCounter;
     const qreal dpr = devicePixelRatioF();
     const QSize vp(int(width() * dpr), int(height() * dpr));
     CrtRenderer::DrawParams d = makeDrawParams(vp, videoAreaPx());
     decorate(d);
-    if (m_osdUploaded != m_osdVersion && !m_osdImage.isNull()) { m_renderer.setOsdImage(m_osdImage); m_osdUploaded = m_osdVersion; }
+    if (m_osdUploaded != m_osdVersion && !osdImage().isNull()) { m_renderer.setOsdImage(osdImage()); m_osdUploaded = m_osdVersion; }
     if (!m_hasFrame) d.image = QRectF();
     m_renderer.draw(defaultFramebufferObject(), d);
     if (needsAnimation() && !m_animTimer.isActive()) m_animTimer.start();
@@ -358,6 +375,40 @@ QImage VideoWidget::grabFilteredFrame()
     doneCurrent();
     img.setDevicePixelRatio(1.0);
     Q_UNUSED(dpr);
+    return img;
+}
+
+QSize VideoWidget::pictureSizeIn(const QSize& box) const
+{
+    const LayoutResult L = currentLayout();
+    if (!L.valid || L.visibleRect.height() < 1) return {};
+    const double aspect = L.visibleRect.width() / L.visibleRect.height();
+    double w = box.width(), h = w / aspect;
+    if (box.height() > 0 && h > box.height()) { h = box.height(); w = h * aspect; }
+    return QSize(std::max(2, int(std::lround(w)) & ~1), std::max(2, int(std::lround(h)) & ~1));
+}
+
+QImage VideoWidget::renderPictureAt(const QSize& size, bool filtered, double clock)
+{
+    if (!m_renderer.isInitialized() || size.isEmpty()) return {};
+    makeCurrent();
+    if (m_orientDirty) { m_renderer.setOrientation(m_orient); m_orientDirty = false; }
+    takeNewFrame();
+    QImage img;
+    if (m_hasFrame && !filtered) {
+        img = m_renderer.renderOriginal(size);
+    } else if (m_hasFrame) {
+        // The picture alone, filling `size`: the same look as on screen, drawn for this size.
+        CrtRenderer::DrawParams dp = CrtRenderer::makeDrawParams(viewSettings(), m_source, size, QRectF(QPointF(0, 0), QSizeF(size)),
+                                                                 float(clock >= 0 ? clock : effectClock()), m_frameCounter);
+        dp.split = -1;
+        decorate(dp);
+        if (m_osdUploaded != m_osdVersion && !osdImage().isNull()) { m_renderer.setOsdImage(osdImage()); m_osdUploaded = m_osdVersion; }
+        ++m_frameCounter;
+        img = m_renderer.renderToImage(dp);
+    }
+    doneCurrent();
+    img.setDevicePixelRatio(1.0);
     return img;
 }
 

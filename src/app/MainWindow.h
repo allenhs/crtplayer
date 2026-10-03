@@ -31,6 +31,8 @@ class QActionGroup;
 class DeskWindow;
 class CutDialog;
 class GifDialog;
+class TvController;
+class TvPanel;
 class JellyfinClient;
 class JellyfinPanel;
 struct JfItem;
@@ -83,6 +85,11 @@ public:
     void setLoop(qint64 aNs, qint64 bNs);
     CutDialog* showCutDialog();
     GifDialog* showGifDialog();
+
+    // Cable TV
+    TvController* tv() const { return m_tv; }
+    bool tvOn() const;
+    void setTvMode(bool on);
     void setGifOptions(int width, int fps, bool look);
     void seekKeyframe(bool forward);
 
@@ -244,15 +251,27 @@ private:
     qint64 m_loopA = -1, m_loopB = -1;          // ns
     CutDialog* m_cutDialog = nullptr;
     GifDialog* m_gifDialog = nullptr;
+    TvController* m_tv = nullptr;
+    TvPanel* m_tvPanel = nullptr;
+    bool m_tvBurst = false;
+    bool m_tvLoaded = false;          // the programme the TV asked for is open
+    quint64 m_tvLoadedSerial = 0;     // the frame count when it opened
+    QString m_tvTitle;
+    QString m_lastSource;          // what was last opened, to open it again another way
+    int m_lastSourceIndex = -1;
     class LosslessCutter* m_keyframes = nullptr;   // finds keyframes for Shift+← / Shift+→
     bool m_kfBusy = false, m_kfForward = true, m_kfRefining = false;
     qint64 m_kfFrom = 0, m_kfStep = 0, m_kfBest = -1;
     QString m_kfSource;
     bool m_gifRecording = false;   // the A–B loop waits meanwhile
     bool m_gifLook = true;
+    double m_gifClockSaved = -1.0;
     QTimer m_resumeTimer;
     void jellyfinStopCurrent(bool waitForServer);
     void openResolved(int index, const QString& uri, qint64 start, const QString& shown, const QString& note);
+    void playSource(const QString& path, int index);
+    void tvPlay(const QString& source, qint64 offsetNs, const QString& title, bool burst);
+    void tvSnow();
     QString jellyfinPlayDescription() const;   // "original file" / "converted by the server (…)"
     void vcr(const QString& text, double seconds);   // VCR on-screen display, when enabled
     bool m_deskActive = false;

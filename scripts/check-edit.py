@@ -3,6 +3,7 @@
 source by scripts/check-copy.py, ffmpeg as an independent reference) and GIF clips.
 Usage: check-edit.py OUT_DIR MEDIA_DIR"""
 import glob, hashlib, json, os, subprocess, sys
+import numpy as np
 from PIL import Image, ImageStat
 
 out, media = os.path.abspath(sys.argv[1]), os.path.abspath(sys.argv[2])
@@ -127,12 +128,22 @@ def texture(im):
             n += 1
     return d / max(1, n)
 
+def scanlines(im):
+    """How many scanlines the picture shows over its full height, from the strongest fine
+    ripple in the brightness down a narrow strip (the slow shading of the tube is ignored)."""
+    a = np.asarray(im.convert('L'), dtype=float)
+    h, w = a.shape
+    prof = a[int(h * .15):int(h * .85), int(w * .45):int(w * .50)].mean(axis=1)
+    f = np.abs(np.fft.rfft(prof - prof.mean()))
+    f[:20] = 0
+    return f.argmax() / len(prof) * h
+
 g = {os.path.basename(e['path']): e for e in gifs}
 look, orig, five, desk = (g.get(n) for n in ('gif-look.gif', 'gif-original.gif', 'gif-5s.gif', 'gif-desk.gif'))
 if look and look['ok']:
     im, n, secs = gifinfo(look['path'])
-    check('A–B (2–5 s) is saved as an animated GIF at the chosen size', im.size[0] == 480 and n >= 20 and abs(secs - 3.0) < 0.35,
-          f"{im.size[0]}×{im.size[1]}, {n} frames ({n / max(secs, 0.1):.0f} a second here, with software OpenGL), plays {secs:.2f} s, {look['bytes'] / 1e6:.2f} MB")
+    check('A–B (2–5 s) is saved as an animated GIF at the chosen size and frame rate', im.size == (480, 360) and n == 45 and abs(secs - 3.0) < 0.02,
+          f"{im.size[0]}×{im.size[1]}, {n} frames (15 a second, exactly), plays {secs:.2f} s, {look['bytes'] / 1e6:.2f} MB; made in {look['tookSeconds']:.1f} s")
     check('it loops', im.info.get('loop') == 0, f"loop={im.info.get('loop')}")
     look_im = im.convert('RGB')
 else:
@@ -140,25 +151,63 @@ else:
 if orig and orig['ok']:
     im, n, secs = gifinfo(orig['path'])
     orig_im = im.convert('RGB')
-    check('the original picture option: 320 wide, 10 frames a second', im.size == (320, 240) and 25 <= n <= 33 and abs(secs - 3.0) < 0.35,
+    check('the original picture option: 320 wide, 10 frames a second', im.size == (320, 240) and n == 30 and abs(secs - 3.0) < 0.02,
           f"{im.size[0]}×{im.size[1]}, {n} frames, {secs:.2f} s")
     if look_im is not None:
         lcn, ocn, lt, ot = corners_dark(look_im), corners_dark(orig_im), texture(look_im), texture(orig_im)
         check('with the look the GIF shows the CRT (curved screen, textured picture); without it, the plain picture',
-              lcn >= 3 and ocn == 0 and lt > 2 * max(ot, 0.3) and look_im.size == (480, 358) or (lcn >= 3 and ocn == 0 and lt > 2 * max(ot, 0.3)),
-              f"dark corners {lcn} vs {ocn}; texture {lt:.1f} vs {ot:.1f}; the look is cropped to the picture: {look_im.size[0]}×{look_im.size[1]} (4:3)")
+              lcn >= 3 and ocn == 0 and lt > 2 * max(ot, 0.3),
+              f"dark corners {lcn} vs {ocn}; texture {lt:.1f} vs {ot:.1f}")
 else:
     check('original-picture GIF', False, orig.get('error') if orig else 'missing')
 if five and five['ok']:
     im, n, secs = gifinfo(five['path'])
-    check('without A–B: the next 5 seconds', abs(secs - 5.0) < 0.4 and abs(five['startMs'] - 10000) < 1200, f"from {five['startMs']:.0f} ms, plays {secs:.2f} s")
+    check('without A–B: the next 5 seconds', n == 75 and abs(secs - 5.0) < 0.02 and abs(five['startMs'] - 10000) < 120, f"from {five['startMs']:.0f} ms, {n} frames, plays {secs:.2f} s")
 else:
     check('5-second GIF', False, five.get('error') if five else 'missing')
+
+# ---- 2.10: Full HD and 4K
+fhd, uhd, wide, deskhd = (g.get(n) for n in ('gif-fhd.gif', 'gif-4k.gif', 'gif-4k-wide.gif', 'gif-desk-hd.gif'))
+if fhd and fhd['ok'] and uhd and uhd['ok']:
+    fim, fn, fsecs = gifinfo(fhd['path'])
+    uim, un, usecs = gifinfo(uhd['path'])
+    check('Full HD: a 4:3 picture is 1440×1080', fim.size == (1440, 1080) and fn == 10 and abs(fsecs - 1.0) < 0.02,
+          f"{fim.size[0]}×{fim.size[1]}, {fn} frames, {fsecs:.2f} s, {fhd['bytes'] / 1e6:.1f} MB; made in {fhd['tookSeconds']:.1f} s")
+    check('4K: a 4:3 picture is 2880×2160', uim.size == (2880, 2160) and un == 10 and abs(usecs - 1.0) < 0.02,
+          f"{uim.size[0]}×{uim.size[1]}, {un} frames, {usecs:.2f} s, {uhd['bytes'] / 1e6:.1f} MB; made in {uhd['tookSeconds']:.1f} s")
+    fl, ul = scanlines(fim), scanlines(uim)
+    # The video has 480 lines. A tube 2160 pixels tall has room to show every one of them
+    # (4.5 pixels each); enlarging a smaller picture could not add them.
+    check('the 4K GIF is drawn at 4K, not enlarged: the tube shows all of the video\'s 480 scanlines', 440 < ul < 500 and ul > 1.8 * fl,
+          f"{ul:.0f} scanlines counted at 4K ({2160 / ul:.1f} pixels each); {fl:.0f} at Full HD, where 480 would not fit")
+    after = rep['after-big']
+    check('afterwards the player is as it was: paused, same look, A–B still set', after['state'] == 'paused' and after['loopAMs'] == 2000 and after['loopBMs'] == 3000
+          and after['preset'] == 'Clean Broadcast Monitor',
+          f"{after['state']}, {after['preset']}, A–B {after['loopAMs']:.0f}–{after['loopBMs']:.0f} ms")
+else:
+    check('Full HD and 4K GIFs', False, (fhd or {}).get('error') or (uhd or {}).get('error') or 'missing')
+if wide and wide['ok']:
+    im, n, secs = gifinfo(wide['path'])
+    check('4K: a 16:9 video fills 3840×2160', im.size == (3840, 2160) and n == 10, f"{im.size[0]}×{im.size[1]}, {n} frames, {wide['bytes'] / 1e6:.1f} MB; made in {wide['tookSeconds']:.1f} s")
+else:
+    check('4K wide GIF', False, wide.get('error') if wide else 'missing')
 if desk and desk['ok']:
     im, n, secs = gifinfo(desk['path'])
     ratio = im.size[0] / im.size[1]
-    check('in desk mode, the whole scene is recorded', ratio > 1.5 and abs(secs - 2.0) < 0.35, f"{im.size[0]}×{im.size[1]} (the window, not the 4:3 picture), {secs:.2f} s")
+    check('in desk mode, the whole scene is recorded', im.size[0] == 480 and ratio > 1.15 and n == 30 and abs(secs - 2.0) < 0.02, f"{im.size[0]}×{im.size[1]} (the room, not just the picture), {n} frames, {secs:.2f} s")
 else:
     check('desk GIF', False, desk.get('error') if desk else 'missing')
+if deskhd and deskhd['ok']:
+    im, n, secs = gifinfo(deskhd['path'])
+    # Drawn at that size: it has fine detail that the 480-wide GIF, enlarged, does not.
+    def fine(g):
+        a = np.asarray(g, dtype=float)   # (the mean step from one pixel to the next)
+        return float(np.abs(np.diff(a, axis=1)).mean() + np.abs(np.diff(a, axis=0)).mean())
+    d_hd = fine(im.convert('L'))
+    d_up = fine(Image.open(desk['path']).convert('L').resize(im.size, Image.BICUBIC)) if desk and desk['ok'] else 0.0
+    check('desk mode in HD: the scene is drawn at the GIF\'s size', im.size == (1280, 720) and n == 20 and d_hd > 1.5 * d_up,
+          f"{im.size[0]}×{im.size[1]}, {n} frames; fine detail {d_hd:.2f} against {d_up:.2f} for the small GIF enlarged; made in {deskhd['tookSeconds']:.1f} s")
+else:
+    check('desk HD GIF', False, deskhd.get('error') if deskhd else 'missing')
 print(f"\n{fails} edit check(s) failed" if fails else "\nAll edit checks passed")
 sys.exit(1 if fails else 0)

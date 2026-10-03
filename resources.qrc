@@ -8,6 +8,8 @@
     <file>shaders/desk.vert</file>
     <file>shaders/persist.frag</file>
     <file>shaders/copy.frag</file>
+    <file>shaders/fmv_codec.frag</file>
+    <file>shaders/fmv_palette.frag</file>
     <file>shaders/scene_desk.frag</file>
     <file>shaders/haze.frag</file>
     <file>shaders/theater.frag</file>

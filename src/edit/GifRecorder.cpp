@@ -3,13 +3,14 @@
 #include <QDir>
 #include <QFileInfo>
 #include <QRegularExpression>
+#include <cmath>
 #include <thread>
 
 GifRecorder::GifRecorder(const Host& host, QObject* parent) : QObject(parent), m_host(host)
 {
     qRegisterMetaType<GifRecorder::Result>();
     connect(&m_timer, &QTimer::timeout, this, &GifRecorder::tick);
-    m_timer.setTimerType(Qt::PreciseTimer);
+    m_timer.setInterval(2);
 }
 
 GifRecorder::~GifRecorder()
@@ -32,7 +33,7 @@ QString GifRecorder::pathFor(const QString& dir, const QString& titleIn, qint64 
     return path;
 }
 
-bool GifRecorder::start(qint64 startNs, qint64 endNs, int fps, int width, const QString& path)
+bool GifRecorder::start(qint64 startNs, qint64 endNs, int fps, const QSize& box, const QString& path)
 {
     if (m_state != State::Idle) return false;
     m_r = Result();
@@ -41,17 +42,23 @@ bool GifRecorder::start(qint64 startNs, qint64 endNs, int fps, int width, const 
     m_end = endNs;
     if (m_end - m_start > kMaxLengthNs) { m_end = m_start + kMaxLengthNs; m_r.truncated = true; }
     if (m_end <= m_start) { finish(false, tr("The end must come after the start.")); return false; }
-    m_fps = std::clamp(fps, 5, 30);
-    m_width = std::clamp(width, 120, 3840);
+    m_fps = std::clamp(fps, 5, 60);
+    m_box = QSize(std::clamp(box.width(), 120, 7680), std::max(0, box.height()));
     m_r.startNs = m_start;
     m_r.endNs = m_end;
-    m_lastPos = m_heldPos = -1;
     m_held = QImage();
+    m_heldPts = m_lastPts = -1;
+    m_writtenCs = 0;
+    m_nextTarget = double(m_start);
     m_enc.reset(new GifEncoder);
-    m_state = State::Waiting;
-    m_clock.start();
-    m_host.seekAndPlay(m_start);
-    m_timer.start(1000 / m_fps);
+    m_wasPlaying = m_host.isPlaying();
+    m_clock0 = m_host.effectClock();
+    m_total.start();
+    m_serial = m_host.frameSerial();
+    m_state = State::Seeking;
+    m_wait.start();
+    m_host.seekPaused(m_start);
+    m_timer.start();
     return true;
 }
 
@@ -60,58 +67,105 @@ void GifRecorder::cancel()
     if (m_state == State::Idle || m_state == State::Encoding) return;   // (encoding finishes on its own)
     m_timer.stop();
     if (m_enc) m_enc->abort();
+    m_host.restore(m_wasPlaying);
     finish(false, tr("Cancelled"));
+}
+
+void GifRecorder::fail(const QString& error)
+{
+    m_timer.stop();
+    if (m_enc) m_enc->abort();
+    m_host.restore(m_wasPlaying);
+    finish(false, error);
 }
 
 void GifRecorder::tick()
 {
-    const qint64 pos = m_host.position();
-    if (m_state == State::Waiting) {
-        // Until the seek has landed and the video is moving from the start.
-        if (m_clock.elapsed() > 15000) { m_timer.stop(); m_enc->abort(); finish(false, tr("The video didn't start playing.")); return; }
-        if (!m_host.isPlaying() || pos < m_start - 60000000 || pos > m_start + 1500000000) return;
-        m_state = State::Recording;
-        m_clock.restart();
+    switch (m_state) {
+    case State::Seeking: {
+        // Until the seek has landed on a frame at the start.
+        const qint64 pts = m_host.framePts();
+        const bool landed = !m_host.isSeeking() && m_host.frameSerial() != m_serial && pts >= m_start - 100'000'000 &&
+                            pts <= m_start + 1'500'000'000;
+        if (landed && m_wait.elapsed() > 150) { m_state = State::Frame; break; }
+        if (m_wait.elapsed() > 15000) fail(tr("The video didn't get to the start of the section."));
+        break;
     }
-    if (pos >= m_end || (m_lastPos >= 0 && pos < m_lastPos - 500000000) || !m_host.isPlaying() ||
-        m_clock.elapsed() > (m_end - m_start) / 1000000 * 3 + 10000) {
-        stopRecording();
-        return;
-    }
-    if (pos == m_lastPos) return;   // no new picture yet
-    m_lastPos = pos;
-    QImage img = m_host.grab();
-    if (img.isNull()) return;
-    if (!m_enc || m_r.width == 0) {
-        m_r.width = m_width & ~1;
-        m_r.height = std::max(2, int(std::lround(double(img.height()) * m_r.width / std::max(1, img.width())))) & ~1;
-        if (!m_enc->open(m_r.path, m_r.width, m_r.height)) {
-            m_timer.stop();
-            finish(false, tr("Could not create %1").arg(m_r.path));
-            return;
+    case State::Frame:
+        // The encoder works in the background; don't pile up frames faster than it writes them.
+        if (m_enc->pendingFrames() > 8) break;
+        takeFrame();
+        break;
+    case State::Stepping:
+        if (m_host.frameSerial() != m_serial && !m_host.isSeeking()) {
+            const qint64 pts = m_host.framePts();
+            if (pts <= m_lastPts) {   // not a later frame: the end of the video
+                stopRecording();
+                break;
+            }
+            m_state = State::Frame;
+        } else if (m_wait.elapsed() > 4000) {
+            // No further frame: the end of the video (or a stream that can't be stepped).
+            if (m_r.frames == 0 && m_held.isNull()) fail(tr("This video can't be stepped through frame by frame."));
+            else stopRecording();
         }
+        break;
+    default:
+        break;
     }
-    if (!m_held.isNull()) {
-        const int cs = int(std::lround((pos - m_heldPos) / 1e7));
-        m_enc->addFrame(m_held, std::max(2, cs));
-        ++m_r.frames;
+}
+
+void GifRecorder::takeFrame()
+{
+    const qint64 pts = m_host.framePts();
+    m_lastPts = pts;
+    if (pts >= m_end) { stopRecording(); return; }
+    // One GIF frame every 1/fps of video time: this frame is taken if it is the one on
+    // screen at the next due time (or the first).
+    if (m_held.isNull() || double(pts) >= m_nextTarget - 1e6) {
+        if (m_r.width == 0) {
+            const QSize size = m_host.pictureSize(m_box);
+            if (size.isEmpty()) { fail(tr("There is no picture to record.")); return; }
+            m_r.width = size.width();
+            m_r.height = size.height();
+            if (!m_enc->open(m_r.path, m_r.width, m_r.height)) { fail(tr("Could not create %1").arg(m_r.path)); return; }
+        }
+        const QImage img = m_host.render(QSize(m_r.width, m_r.height), m_clock0 + (pts - m_start) / 1e9);
+        if (img.isNull()) { fail(tr("The picture could not be rendered at this size.")); return; }
+        if (!m_held.isNull()) {
+            // The held frame showed from its own time until this one's.
+            const qint64 untilCs = std::llround((pts - m_start) / 1e7);
+            m_enc->addFrame(m_held, int(std::max<qint64>(2, untilCs - m_writtenCs)));
+            m_writtenCs = std::max(untilCs, m_writtenCs + 2);
+            ++m_r.frames;
+        }
+        m_held = img;
+        m_heldPts = pts;
+        const double period = 1e9 / m_fps;
+        while (m_nextTarget <= double(pts) + 1e6) m_nextTarget += period;
+        emit progress((pts - m_start) / 1e9, (m_end - m_start) / 1e9, m_r.frames, QFileInfo(m_r.path).size());
     }
-    m_held = img;
-    m_heldPos = pos;
-    emit progress((pos - m_start) / 1e9, (m_end - m_start) / 1e9);
+    m_serial = m_host.frameSerial();
+    m_state = State::Stepping;
+    m_wait.restart();
+    m_host.step();
 }
 
 void GifRecorder::stopRecording()
 {
     m_timer.stop();
-    if (m_held.isNull()) { if (m_enc) m_enc->abort(); finish(false, tr("No frames were recorded.")); return; }
-    // The last frame shows until the end of the section.
-    const int cs = int(std::lround((std::max(m_end, m_heldPos) - m_heldPos) / 1e7));
-    m_enc->addFrame(m_held, std::clamp(cs, 2, 100 / m_fps + 2));
+    if (m_held.isNull()) { fail(tr("No frames were recorded.")); return; }
+    // The last frame shows until the end of the section (or of the video).
+    const qint64 endPts = std::min(m_end, std::max(m_lastPts, m_heldPts + qint64(1e9 / m_fps)));
+    const qint64 untilCs = std::llround((endPts - m_start) / 1e7);
+    m_enc->addFrame(m_held, int(std::clamp<qint64>(untilCs - m_writtenCs, 2, 200)));
+    m_writtenCs = std::max(untilCs, m_writtenCs + 2);
     ++m_r.frames;
-    m_r.seconds = (std::min(m_end, std::max(m_heldPos, m_lastPos)) - m_start) / 1e9;
+    m_r.seconds = m_writtenCs / 100.0;
+    m_r.fps = m_r.seconds > 0 ? m_r.frames / m_r.seconds : 0;
     m_held = QImage();
     m_state = State::Encoding;
+    m_host.restore(m_wasPlaying);
     emit encoding(m_enc->pendingFrames());
     // Waiting for the encoder happens off the GUI thread.
     GifEncoder* enc = m_enc.get();
@@ -129,6 +183,7 @@ void GifRecorder::finish(bool ok, const QString& error)
     m_state = State::Idle;
     m_r.ok = ok;
     m_r.error = error;
+    m_r.tookSeconds = m_total.isValid() ? m_total.elapsed() / 1000.0 : 0;
     m_enc.reset();
     emit finished(m_r);
 }

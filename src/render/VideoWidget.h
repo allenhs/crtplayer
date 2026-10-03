@@ -48,6 +48,7 @@ public:
     void setClockOverride(double seconds) { m_clockOverride = seconds; update(); }
     // The effect clock (seconds): shared by every view of the picture, so time-based effects
     // (grain, flicker, VHS jitter, static) match between them; pinned by tests.
+    double clockOverride() const { return m_clockOverride; }
     double effectTime() const { return m_clockOverride >= 0.0 ? m_clockOverride : m_clock.elapsed() / 1000.0; }
     double effectClock() const;
 
@@ -59,7 +60,14 @@ public:
     // Adds the set-moment and OSD state for the current effect clock to draw parameters.
     // Shared with the desk view, so both show the same moments.
     void decorate(CrtRenderer::DrawParams& d);
-    const QImage& osdImage() const { return m_osdImage; }
+    const QImage& osdImage() const { return m_overlayOn ? m_overlayImage : m_osdImage; }
+    // A picture-sized overlay drawn into the signal (Cable TV: channel number, banners, the
+    // guide). It goes through the tube like the picture. A null image removes it.
+    void setOverlayImage(const QImage& img);
+    bool hasOverlay() const { return m_overlayOn; }
+    void releaseStatic() { m_staticHold = false; m_staticRelease = -1; update(); }   // ends held static
+    void setSnow(bool on) { if (m_snow != on) { m_snow = on; update(); } }           // static until switched off (a channel with nothing on)
+    bool snow() const { return m_snow; }
     int osdVersion() const { return m_osdVersion; }
     QString momentName() const;
     bool momentsAnimating() const;
@@ -74,6 +82,9 @@ public:
     QString glInfo() const { return m_glInfo; }
     QString glError() const { return m_glError; }
     qint64 framesPresented() const { return m_framesPresented; }
+    QImage grabFmvFrame() { makeCurrent(); QImage i = m_renderer.fmvImage(); doneCurrent(); return i; }
+    int fmvColorsUsed() const { return m_renderer.fmvColorsUsed(); }
+    quint64 fmvFramesDrawn() const { return m_renderer.fmvFramesDrawn(); }
 
     // Layout of the current frame in device pixels (for the info overlay and tests).
     LayoutResult currentLayout() const;
@@ -82,6 +93,11 @@ public:
 
     QImage grabOriginalFrame();
     QImage grabFilteredFrame();
+    // The visible picture's size fitted into `box` (height 0: by width only), even numbers.
+    QSize pictureSizeIn(const QSize& box) const;
+    // The newest frame's picture rendered for exactly `size` (any size, up to 4K and beyond):
+    // with the look as on screen, or the original. clock < 0: the live effect clock.
+    QImage renderPictureAt(const QSize& size, bool filtered, double clock = -1);
 
     SyncStats syncStats() const;
     void resetSyncStats();
@@ -106,6 +122,7 @@ protected:
 private:
     CrtRenderer::DrawParams makeDrawParams(const QSize& viewport, const QRectF& area) const;
     void updateCompareLabels();
+    void takeNewFrame();
     bool needsAnimation() const;
     double splitX() const; // logical px
 
@@ -140,6 +157,9 @@ private:
     quint64 m_holdSerial = 0;
     double m_staticRelease = -1;
     QImage m_osdImage;
+    QImage m_overlayImage;
+    bool m_overlayOn = false;
+    bool m_snow = false;
     int m_osdVersion = 0, m_osdUploaded = -1;
     double m_osdUntil = 0;
     bool m_osdOn = false;

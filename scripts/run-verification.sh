@@ -47,12 +47,49 @@ edit_suite() {
   echo "== cut and GIF checks"
   checker "$O/edit-checks.txt" python3 "$HERE/scripts/check-edit.py" "$O" "$M"
 }
+# 2.10: the Sega CD FMV look.
+console_suite() {
+  rm -rf "$XDG_CONFIG_HOME"
+  run console console.txt
+  echo "== Sega CD FMV look checks"
+  checker "$O/console-checks.txt" python3 "$HERE/scripts/check-console.py" "$O"
+}
+# 2.10: Cable TV, with folder channels and one from the mock Jellyfin server.
+tv_suite() {
+  rm -rf "$XDG_CONFIG_HOME" "$XDG_DATA_HOME" "$O/tv-media" "$O/tv-jf"
+  mkdir -p "$O/tv-media/movies/sub" "$O/tv-media/toons" "$O/tv-media/idents" "$O/tv-media/empty" "$O/tv-jf"
+  cp "$M/sd_4x3_h264.mp4" "$O/tv-media/movies/Big.Movie.1994.mp4"
+  cp "$M/hd_16x9_multitrack.mkv" "$O/tv-media/movies/sub/Another_Film.mkv"
+  cp "$M/vertical_9x16_h264.mp4" "$O/tv-media/movies/Tall Story.mp4"
+  cp "$M/fmv_natural.mp4" "$O/tv-media/toons/Toon Episode 1.mp4"
+  cp "$M/ultrawide_64x27_vp9.webm" "$O/tv-media/toons/Toon Episode 2.webm"
+  cp "$M/anamorphic_dvd_mpeg2.mkv" "$O/tv-media/toons/Toon Episode 10.mkv"
+  ffmpeg -v error -y -i "$M/solid_red.mp4" -t 5 -c copy "$O/tv-media/idents/ident-a.mp4"
+  ffmpeg -v error -y -i "$M/solid_white.mp4" -t 4 -c copy "$O/tv-media/idents/ident-b.mp4"
+  echo "not a video" > "$O/tv-media/movies/notes.txt"
+  local port=$((18900 + RANDOM % 90))
+  python3 "$HERE/tests/jellyfin_mock.py" --media "$M" --port $port --version 10.10.3 --log "$O/tv-jf/requests.jsonl" > "$O/tv-jf/mock.log" 2>&1 &
+  local mock=$!; sleep 1
+  for t in tv tv-restore; do
+    render "$t.txt"; sed -i "s#@JF@#http://127.0.0.1:$port#g" "$O/$t.txt"
+    echo "== $t"
+    timeout 600 "$BIN" --automation "$O/$t.txt" --automation-log "$O/$t.json" > "$O/$t.log" 2>&1
+    echo "   exit code $?"
+  done
+  kill $mock 2>/dev/null
+  echo "== Cable TV checks"
+  checker "$O/tv-checks.txt" python3 "$HERE/scripts/check-tv.py" "$O" "$XDG_CONFIG_HOME" "$XDG_DATA_HOME"
+}
 desk_suite() {
   rm -rf "$XDG_CONFIG_HOME"
   run desk desk.txt
   echo "== desk image checks"
   checker "$O/desk-checks.txt" python3 "$HERE/scripts/check-desk.py" "$O"
 }
+if [[ -n "${RUN_ONLY:-}" ]]; then   # development: just these suites, e.g. RUN_ONLY="tv console edit"
+  for s in $RUN_ONLY; do "${s}_suite"; done
+  exit 0
+fi
 if [[ "${RUN_WAYLAND_ONLY:-0}" == 1 ]]; then
   run wayland wayland.txt
   desk_suite
@@ -102,6 +139,8 @@ else
   echo "== arcade cabinet checks"
   checker "$O/arcade-checks.txt" python3 "$HERE/scripts/check-arcade.py" "$O"
   edit_suite
+  console_suite
+  if python3 -c "import PIL" 2>/dev/null; then tv_suite; fi
   rm -rf "$XDG_CONFIG_HOME"
   run sound sound.txt
   echo "== sound checks"

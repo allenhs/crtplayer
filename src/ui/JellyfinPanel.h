@@ -27,11 +27,13 @@ public:
     void setMaxBitrateMbps(int mbps, bool notify = false);
     void scrollToEnd();
     bool playConvertedByName(const QString& name);
+    bool tvChannelByName(const QString& name);
     int maxBitrateMbps() const;
 
 signals:
     void playRequested(const JfItem& item, bool fromStart);
-    void convertedPlayRequested(const JfItem& item);   // "Play converted by the server"
+    void convertedPlayRequested(const JfItem& item);
+    void tvChannelRequested(const JfItem& folder);     // "Add as TV channel"   // "Play converted by the server"
     void maxBitrateChanged(int mbps);
     void enqueueRequested(const JfItem& item);
     void listingChanged();

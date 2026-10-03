@@ -347,7 +347,7 @@ bool Player::openInternal(const QString& uri, bool autoplay, qint64 startNs, boo
             m_tape = tape;
             TapeParams tp;
             tp.hiss = m_tapeValues[0]; tp.wow = m_tapeValues[1]; tp.saturation = m_tapeValues[2]; tp.tone = m_tapeValues[3];
-            tp.speaker = m_tapeValues[4]; tp.crackle = m_tapeValues[5]; tp.dropouts = m_tapeValues[6];
+            tp.speaker = m_tapeValues[4]; tp.crackle = m_tapeValues[5]; tp.dropouts = m_tapeValues[6]; tp.crush = m_tapeValues[7];
             crtTapeSetParams(m_tape, tp);
         } else {
             gst_object_unref(bin);
@@ -509,7 +509,7 @@ void Player::seekKeyframe(bool forward)
 
 void Player::setTapeParams(const TapeParams& p)
 {
-    const float v[7] = {p.hiss, p.wow, p.saturation, p.tone, p.speaker, p.crackle, p.dropouts};
+    const float v[8] = {p.hiss, p.wow, p.saturation, p.tone, p.speaker, p.crackle, p.dropouts, p.crush};
     std::copy(std::begin(v), std::end(v), m_tapeValues);
     if (m_tape) crtTapeSetParams(m_tape, p);
 }
@@ -648,6 +648,12 @@ QString Player::clockName() const
     QString n = QString::fromUtf8(GST_OBJECT_NAME(c));
     gst_object_unref(c);
     return n;
+}
+
+quint64 Player::frameSerial()
+{
+    QMutexLocker lock(&m_mutex);
+    return m_serial;
 }
 
 GstSample* Player::latestSample(quint64* serial)

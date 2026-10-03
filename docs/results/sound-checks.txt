@@ -1,6 +1,6 @@
 PASS  clean looks leave the sound alone: active: False
 PASS  the VHS look brings tape sound: active: True
-PASS  playback runs on with tape sound: 2328 ms played in 2.5 s
+PASS  playback runs on with tape sound: 2817 ms played in 2.5 s
 PASS  noise volume 200%: the hiss and crackle twice as loud, the rest unchanged: gain 2.00, hiss 0.55, speaker 0.65
 PASS  noise volume 0%: the noise silent: gain 0.00
 PASS  effect strength 50%: the speaker, wobble, treble loss and saturation halved, the noise unchanged: wow 0.450 -> 0.225, speaker 0.650 -> 0.325

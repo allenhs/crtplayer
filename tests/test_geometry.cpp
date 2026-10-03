@@ -122,7 +122,7 @@ int main()
         CrtParams r2; r2.scanType = 42; r2.clamp();
         CHECK(r2.scanType == 10);
         CHECK(CrtParams::fromJson(r.toJson()) == r);
-        CHECK(builtinPresets().size() == 23);
+        CHECK(builtinPresets().size() == 25);
     }
     std::printf(failures ? "%d geometry test(s) FAILED\n" : "All geometry tests passed\n", failures);
     return failures ? 1 : 0;
