@@ -80,6 +80,7 @@ configurable, GPU-rendered CRT presentation that respects every aspect ratio:
 5. [Scaling and aspect ratio](#scaling-and-aspect-ratio)
 6. [CRT presets and parameters](#crt-presets-and-parameters)
 7. [Screenshots, frame stepping, playlist](#screenshots-frame-stepping-playlist)
+   - [Cutting without re-encoding, and GIF clips](#cutting-without-re-encoding-and-gif-clips)
 8. [Desk mode: a 3D TV on your desktop](#desk-mode-a-3d-tv-on-your-desktop)
 9. [Jellyfin](#jellyfin)
 10. [Where settings are stored](#where-settings-are-stored)
@@ -379,6 +380,9 @@ Hover any button to see its shortcut.
 | T | Desk mode on/off (3D TV on the desktop) |
 | − / + (or =) | Slower / faster (0.25× steps, 0.25×–4×); Backspace: normal speed |
 | R | A–B loop: set the start, then the end, then off |
+| Shift+← / Shift+→ | Previous / next keyframe (for cut points) |
+| X | Cut A–B into a new file, without re-encoding |
+| G | Save A–B (or the next 5 s) as a GIF clip, as shown |
 | Shift+PgUp / Shift+PgDn | Previous / next chapter |
 | Ctrl+J | Jellyfin panel |
 | Ctrl+Q | Quit |
@@ -679,6 +683,56 @@ even after GStreamer clips timestamps.
 - Double-click an item to play it.
 - Playback advances automatically at the end of each file.
 - The playlist is saved between sessions.
+
+---
+
+## Cutting without re-encoding, and GIF clips
+
+Both work on the **A–B section**. Press **R** at the start, then **R** at the end (or use
+the buttons in the dialogs). Both are also on the screenshot button's menu.
+
+**Cutting (X).** This saves A–B as a new file. The video, sound and subtitles are copied
+as they are, like Avidemux's *copy* mode: nothing is re-encoded, so there's no loss and
+it takes seconds.
+
+- **Where it starts:** a copied video can only begin on a **keyframe**, a frame that
+  decodes on its own (I-frames, strictly IDR/sync frames). The cut starts at the
+  keyframe at or before A; the dialog says where before you save.
+- **Choosing A:** **Shift+←** and **Shift+→** jump between keyframes, so A can sit
+  exactly on one.
+- **Where it ends:** at B, frame-accurately. Every frame up to B is kept, plus at most a
+  couple of B-frames needed to show them.
+- **What it keeps:** every track the container can hold: all audio tracks, all subtitle
+  tracks, chapters aside.
+- **The file type:** the same as the original (MP4, MKV, WebM, MOV, TS, AVI, OGG…).
+  Matroska is used when GStreamer can't write the original's type.
+- **The original is never changed or overwritten.** The cut is a new file next to it:
+  *Movie - cut 00-01-02 to 00-01-45.mkv*, with *(2)*, *(3)*… if that name is taken.
+  - It's written under a hidden temporary name and renamed only when complete, so a
+    stopped or failed cut leaves nothing behind.
+  - If the video's folder is read-only, the cut goes to your *Videos* folder.
+- **Only files on this computer** can be cut, not Jellyfin or network streams.
+- **A subtitle already on screen at the keyframe is left out.** Subtitle lines are
+  stored at the moment they appear, so one that started before the cut isn't carried
+  over. Lines that start inside the section are kept, and end at B.
+
+**GIF clips (G).** This plays A–B once (or the next 5 seconds when A and B aren't set)
+and saves it as a looping animated GIF, just as it looks. It is saved in the screenshot
+folder.
+
+| Option | Choices |
+|---|---|
+| Size | 320 to 1024 pixels wide (480 is a good start) |
+| Smoothness | 10 to 30 frames a second |
+| Picture | With the CRT look, or the original picture |
+
+- **Desk mode** records the whole scene: the TV and the room around it.
+- **The GIF runs at the true speed** even if the computer can't grab every frame in time.
+  The dialog says how many frames a second it managed.
+- **Colours:** each frame gets its own 256-colour palette, with dithering. The picture
+  is softened slightly before shrinking, so the scanlines and shadow mask don't turn
+  into moiré rings.
+- **Length:** at most 30 seconds (GIFs get big).
 
 ---
 
@@ -1303,6 +1357,10 @@ src/
   ui/JellyfinPanel.*       sign-in form and poster browser
   render/DeskRenderer.*    procedural 3D cabinet, projection, silhouette, shading
   render/DeskView.*        desk mode view: poses, flight, crossfade to flat, mouse interaction
+  edit/LosslessCutter.*    cutting without re-encoding (parsebin → muxer, keyframe start, decode-order end)
+  edit/GifEncoder.*        animated GIF writer (median-cut palettes, dithering, LZW, parallel)
+  edit/GifRecorder.*       records a section as shown, at the true speed
+  ui/CutDialog.*, ui/GifDialog.*  the two dialogs
 shaders/                   quad.vert, convert.frag, downsample.frag, blur.frag, crt.frag,
                            desk.vert, desk.frag (3D cabinet, glass, shadow)
 tests/                     unit tests + automation scripts

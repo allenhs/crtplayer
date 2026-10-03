@@ -72,6 +72,11 @@ buttons and shortcuts use.
 | `deskmouse X Y` | Send a mouse-move event to the desk view (wakes the control strip) |
 | `jfsignin URL USER PASSWORD` | Sign in to a Jellyfin server (the password is never logged) |
 | `jfwait signedin\|signedout\|listing TIMEOUT_MS` | Wait for the Jellyfin sign-in state, or for a listing to finish loading |
+| `keyframe next\|prev` | Jump to the next / previous keyframe (Shift+→ / Shift+←) |
+| `cut [OUT_PATH]` | Save A–B without re-encoding (the X dialog's *Save cut*); waits, and logs the result |
+| `dialog cut\|gif` | Open the Cut or GIF dialog |
+| `gifopts WIDTH FPS LOOK` | GIF options: width in pixels, frames a second, 1 = with the CRT look, 0 = original picture |
+| `gif [OUT_PATH]` | Record A–B (or the next 5 s) as a GIF; waits, and logs the result |
 | `jfwait count N TIMEOUT_MS` | Wait until the listing holds N items, scrolling to its end meanwhile (pages load as you scroll) |
 | `jfopen NAME` | In the current Jellyfin listing, open a folder, or play a video, by name |
 | `jfconverted NAME` | Play a video in the listing converted by the server (its context menu's *Play converted by the server*) |

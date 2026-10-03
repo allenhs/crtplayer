@@ -3,6 +3,8 @@
 #include <QFileInfo>
 #include <memory>
 #include "Automation.h"
+#include "ui/CutDialog.h"
+#include "ui/GifDialog.h"
 #include "MainWindow.h"
 #include "playback/Player.h"
 #include "render/VideoWidget.h"
@@ -467,6 +469,69 @@ void Automation::next()
         const bool ok = m_w->jellyfinPanel()->openByName(rest);
         if (!ok) ++m_failures;
         log(line, {{"ok", ok}});
+    } else if (cmd == "keyframe") {
+        // keyframe next|prev : jump to the next / previous keyframe
+        m_w->seekKeyframe(a.value(1) != "prev");
+        log(line);
+    } else if (cmd == "dialog") {
+        // dialog cut|gif : opens the Cut or GIF dialog (for screenshots of it)
+        if (a.value(1) == "gif") m_w->showGifDialog(); else m_w->showCutDialog();
+        log(line);
+    } else if (cmd == "gifopts") {
+        // gifopts WIDTH FPS LOOK(1|0)
+        GifDialog* dlg = m_w->showGifDialog();
+        Q_UNUSED(dlg);
+        m_w->setGifOptions(a.value(1).toInt(), a.value(2).toInt(), a.value(3) != "0");
+        log(line);
+    } else if (cmd == "gif") {
+        // gif [OUT_PATH] : record the A–B section (or the next 5 s) as a GIF; waits for it
+        GifDialog* dlg = m_w->showGifDialog();
+        const qint64 t0 = m_clock.elapsed();
+        if (!dlg->record(rest)) {
+            ++m_failures;
+            log(line, {{"ok", false}, {"error", dlg->lastResult().error}});
+        } else {
+            auto* poll = new QTimer(this);
+            poll->setInterval(50);
+            connect(poll, &QTimer::timeout, this, [=] {
+                if (dlg->isBusy() && m_clock.elapsed() - t0 < 180000) return;
+                poll->deleteLater();
+                const GifRecorder::Result r = dlg->lastResult();
+                if (!r.ok) ++m_failures;
+                log(line, {{"ok", r.ok}, {"error", r.error}, {"path", r.path}, {"frames", r.frames}, {"width", r.width},
+                           {"height", r.height}, {"seconds", r.seconds}, {"bytes", double(r.bytes)}, {"startMs", r.startNs / 1e6},
+                           {"endMs", r.endNs / 1e6}, {"truncated", r.truncated}, {"waitedMs", double(m_clock.elapsed() - t0)}});
+                QTimer::singleShot(10, this, &Automation::next);
+            });
+            poll->start();
+            return;
+        }
+    } else if (cmd == "cut") {
+        // cut [OUT_PATH] : save A–B without re-encoding (as the X dialog's Save); waits for it
+        CutDialog* dlg = m_w->showCutDialog();
+        const qint64 t0 = m_clock.elapsed();
+        const QString before = dlg->lastResult().output;
+        if (!dlg->save(rest)) {
+            ++m_failures;
+            log(line, {{"ok", false}, {"error", "could not start"}});
+        } else {
+            auto* poll = new QTimer(this);
+            poll->setInterval(50);
+            connect(poll, &QTimer::timeout, this, [=] {
+                if (dlg->isBusy() && m_clock.elapsed() - t0 < 120000) return;
+                poll->deleteLater();
+                const LosslessCutter::Result r = dlg->lastResult();
+                if (!r.ok) ++m_failures;
+                log(line, {{"ok", r.ok}, {"error", r.error}, {"output", r.output}, {"startMs", r.startNs / 1e6},
+                           {"requestedStartMs", r.requestedStartNs / 1e6}, {"stopMs", r.stopNs / 1e6},
+                           {"durationMs", r.durationNs / 1e6}, {"bytes", double(r.bytes)}, {"container", r.container},
+                           {"kept", QJsonArray::fromStringList(r.kept)}, {"dropped", QJsonArray::fromStringList(r.dropped)},
+                           {"waitedMs", double(m_clock.elapsed() - t0)}});
+                QTimer::singleShot(10, this, &Automation::next);
+            });
+            poll->start();
+            return;
+        }
     } else if (cmd == "jfconverted") {
         // jfconverted NAME: play a video in the listing converted by the server
         const bool ok = m_w->jellyfinPanel()->playConvertedByName(rest);

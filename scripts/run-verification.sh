@@ -31,6 +31,22 @@ run() { # name script [env...]
   env "$@" timeout 600 "$BIN" --automation "$O/$script" --automation-log "$O/$name.json" > "$O/$name.log" 2>&1
   echo "   exit code $?"
 }
+# 2.9: lossless cut and GIF clips, on copies of the media (cuts land next to them).
+edit_suite() {
+  [[ -d "$O/edit-ro" && $(id -u) == 0 ]] && chattr -i "$O/edit-ro" 2>/dev/null
+  rm -rf "$XDG_CONFIG_HOME" "$O/edit-media" "$O/edit-ro" "$O/edit-home"
+  mkdir -p "$O/edit-media" "$O/edit-ro" "$O/edit-home"
+  for f in sd_4x3_h264.mp4 hd_16x9_multitrack.mkv ultrawide_64x27_vp9.webm anamorphic_dvd_mpeg2.mkv; do cp "$M/$f" "$O/edit-media/"; done
+  # A folder no one can write to (as root, only the immutable attribute stops writes).
+  cp "$M/sd_4x3_h264.mp4" "$O/edit-ro/" && chmod 555 "$O/edit-ro"
+  [[ $(id -u) == 0 ]] && chattr +i "$O/edit-ro" 2>/dev/null
+  (cd "$O" && sha256sum edit-media/* edit-ro/* > edit-before.sha256)
+  run edit edit.txt HOME="$O/edit-home"
+  [[ $(id -u) == 0 ]] && chattr -i "$O/edit-ro" 2>/dev/null
+  chmod 755 "$O/edit-ro"
+  echo "== cut and GIF checks"
+  checker "$O/edit-checks.txt" python3 "$HERE/scripts/check-edit.py" "$O" "$M"
+}
 desk_suite() {
   rm -rf "$XDG_CONFIG_HOME"
   run desk desk.txt
@@ -85,6 +101,7 @@ else
   run arcade arcade.txt
   echo "== arcade cabinet checks"
   checker "$O/arcade-checks.txt" python3 "$HERE/scripts/check-arcade.py" "$O"
+  edit_suite
   rm -rf "$XDG_CONFIG_HOME"
   run sound sound.txt
   echo "== sound checks"

@@ -70,6 +70,7 @@ public:
     void seek(qint64 posNs, SeekMode mode);
     void seekRelative(qint64 deltaNs);
     void stepFrame(bool forward);
+    void seekKeyframe(bool forward);   // to the previous / next keyframe (cut points)
 
     void setVolume(double cubic01);
     double volume() const { return m_volume; }

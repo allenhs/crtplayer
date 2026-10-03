@@ -1,0 +1,22 @@
+PASS  the script ran without a failed step: all ok
+PASS  the original files are unchanged (SHA-256 before and after): 5 files identical
+PASS  no unfinished .part files are left behind: none
+PASS  Shift+→ / Shift+← step between keyframes (3.3 s → 4 → 2 → 0): 4000 ms, 2000 ms, 0 ms
+PASS  A–B (3.3–7.7 s) is cut from the keyframe at or before A: starts at 2000 ms, MP4, sd_4x3_h264 - cut 00-00-03 to 00-00-07.mp4
+PASS  the cut is the original, frame for frame (decoded video bit-identical, audio packets byte-identical): video frames 60–233 of the source, audio packets 245/245
+PASS  it ends at B: every frame up to 7.7 s, nothing much after: last frame 233 = 7.77 s (B = 7.70 s = frame 231)
+PASS  cutting the same section again makes a new file, never overwriting: sd_4x3_h264 - cut 00-00-03 to 00-00-07 (2).mp4
+PASS  Matroska: every track is kept (video, 2 audio, 2 subtitles): 5 streams: h264,video aac,audio aac,audio subrip,subtitle subrip,subtitle
+PASS  … a lossless copy: {"video": true, "audio": true}
+PASS  … its subtitles are there, timed from the cut, and end at B: cue at 00:00:05,000 --> 00:00:08,500; file 8.52 s for a 8.50 s section
+PASS  WebM (VP9 + Opus): cut losslessly, in its own container: ultrawide_64x27_vp9 - cut 00-00-02 to 00-00-06.webm: {"video": true, "audio": true}
+PASS  MPEG-2 + AC-3 in Matroska: cut losslessly, in its own container: anamorphic_dvd_mpeg2 - cut 00-00-01 to 00-00-06.mkv: {"video": true, "audio": true}
+PASS  a video in a read-only folder is cut into ~/Videos instead: …/edit-home/Videos/sd_4x3_h264 - cut 00-00-08 to 00-00-12.mp4
+PASS  A–B (2–5 s) is saved as an animated GIF at the chosen size: 480×358, 27 frames (9 a second here, with software OpenGL), plays 2.97 s, 1.48 MB
+PASS  it loops: loop=0
+PASS  the original picture option: 320 wide, 10 frames a second: 320×240, 29 frames, 2.88 s
+PASS  with the look the GIF shows the CRT (curved screen, textured picture); without it, the plain picture: dark corners 4 vs 0; texture 1.2 vs 0.0; the look is cropped to the picture: 480×358 (4:3)
+PASS  without A–B: the next 5 seconds: from 10983 ms, plays 4.93 s
+PASS  in desk mode, the whole scene is recorded: 480×270 (the window, not the 4:3 picture), 1.86 s
+
+All edit checks passed

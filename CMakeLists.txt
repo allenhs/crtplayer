@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(CRTPlayer VERSION 2.8.0 LANGUAGES CXX)
+project(CRTPlayer VERSION 2.9.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -63,6 +63,11 @@ add_executable(crtplayer
   src/ui/PlaybackPanel.cpp    src/ui/PlaybackPanel.h
   src/ui/PlaylistPanel.cpp    src/ui/PlaylistPanel.h
   src/settings/AppSettings.cpp  src/settings/AppSettings.h
+  src/edit/LosslessCutter.cpp src/edit/LosslessCutter.h
+  src/ui/CutDialog.cpp        src/ui/CutDialog.h
+  src/edit/GifEncoder.cpp     src/edit/GifEncoder.h
+  src/edit/GifRecorder.cpp    src/edit/GifRecorder.h
+  src/ui/GifDialog.cpp        src/ui/GifDialog.h
   resources.qrc)
 target_include_directories(crtplayer PRIVATE src)
 target_link_libraries(crtplayer PRIVATE crtcore
@@ -93,4 +98,12 @@ if(CRTPLAYER_BUILD_TESTS)
   target_include_directories(test_tape PRIVATE src)
   target_link_libraries(test_tape PRIVATE PkgConfig::GST)
   add_test(NAME tape COMMAND test_tape)
+  add_executable(test_gif tests/test_gif.cpp src/edit/GifEncoder.cpp src/edit/GifEncoder.h)
+  target_include_directories(test_gif PRIVATE src)
+  target_link_libraries(test_gif PRIVATE Qt6::Core Qt6::Gui)
+  add_test(NAME gif COMMAND test_gif)
+  # Command-line front end to the lossless cutter, for the verification scripts.
+  add_executable(cut_tool tests/cut_tool.cpp src/edit/LosslessCutter.cpp src/edit/LosslessCutter.h)
+  target_include_directories(cut_tool PRIVATE src)
+  target_link_libraries(cut_tool PRIVATE Qt6::Core PkgConfig::GST)
 endif()

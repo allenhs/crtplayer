@@ -1,6 +1,6 @@
 # Verification report
 
-This report covers the build delivered alongside it (CRT Player 2.8.0).
+This report covers the build delivered alongside it (CRT Player 2.9.0).
 
 The final X11 and Wayland suites were run against the exact stripped `crtplayer` binary
 that is delivered, and **again against the AppImage with the system's Qt libraries
@@ -286,6 +286,122 @@ was **not measured**, because there is no GPU in this environment.
 - GPU performance;
 - the interlaced style's look at real refresh rates (only its field alternation was
   measured).
+
+## 2.9: cutting without re-encoding, and GIF clips
+
+**Cutting** (`src/edit/LosslessCutter`, the **X** dialog `ui/CutDialog`):
+
+- **Pipeline:** `filesrc ! parsebin ! queue ! <muxer> ! filesink`. parsebin demuxes and
+  parses but never decodes, so packets go into the new file as they are.
+- **Two passes:**
+  1. A quick pass finds the keyframe at or before A (a `KEY_UNIT | SNAP_BEFORE` seek).
+  2. The copy pass seeks the same way. Packets are thrown away until every track has
+     announced its format and the seek's flush has come by, so the muxer sees nothing
+     from before the keyframe. The section's start is moved to the keyframe: some
+     demuxers start it at A, and muxers would then drop the frames between.
+- **The end** is cut in decode order: video packets pass while decoded at or before B,
+  plus the B-frames shown before the last kept frame. So every frame up to B, and every
+  frame it refers to, is kept, and the picture has no gap. For AVI, whose packets carry
+  no display times, B-frames are recognised from the bitstream (H.264 slice type,
+  MPEG-4 VOP type). Other tracks end by time; a subtitle still showing at B ends at B.
+- **The container** is the source's own when GStreamer can write it, otherwise Matroska.
+  - H.264/HEVC is re-framed by a parser where the container needs another form
+    (MPEG-TS, AVI).
+  - Matroska's SRT text is un-escaped back to plain text.
+- **Never overwriting:**
+  - the cut is written as a hidden `.part` file and renamed when complete, to a name not
+    yet taken (*(2)*, *(3)*…);
+  - a cut onto the source or an existing file is refused;
+  - whether the folder can be written is found by really creating a file there, and
+    otherwise the cut goes to `~/Videos`.
+- **Keyframe stepping** (**Shift+←/→**) looks the keyframe up on the file with a
+  demuxer of its own, then seeks the player there exactly.
+
+**GIF clips** (`src/edit/GifEncoder`, `GifRecorder`, the **G** dialog `ui/GifDialog`):
+
+- **Recording:** the section is played once and grabbed as shown: the filtered frame
+  cropped to the picture, the original frame, or the desk view's framebuffer. Each frame
+  is given the time the video really took to reach the next one, so the GIF runs at the
+  true speed when grabbing falls behind.
+- **Encoding:** the player's own GIF89a writer. Per-frame 256-colour palettes (median
+  cut over a 15-bit histogram), Floyd–Steinberg dithering at ¾ strength, LZW. Frames are
+  encoded on worker threads and written in order.
+- **Shrinking:** frames are softened in proportion to the reduction first. Without that,
+  the scanlines and shadow mask alias into moiré rings (seen in the first test GIF).
+- **Never overwriting:** the file is opened with "new only".
+
+**Unit test** (`tests/test_gif.cpp`, read back with Qt's GIF reader):
+
+| Check | Result |
+|---|---|
+| 256-colour noise frames decode pixel for pixel (LZW, with dictionary resets) | PASS |
+| A smooth gradient stays close (4×4 averages within 2 of 255) | PASS |
+| Frame delays, frame count | PASS |
+| Refuses to write over an existing file | PASS |
+
+**Format matrix** (`build/cut_tool` + `scripts/check-copy.py`, with ffmpeg as an
+independent reference; `docs/results/cut-formats.txt`). Three sections (3.3–7.7 s,
+0–3 s, 12 s to the end) of each file. "Lossless" means every decoded video frame of the
+cut is bit-identical to a contiguous run of the source's, and every audio packet is
+byte-identical and contiguous.
+
+| Source | Result |
+|---|---|
+| H.264 + AAC in MP4, MOV | PASS: lossless, same container |
+| H.264 + 2× AAC + 2× SRT in Matroska; with chapters | PASS: lossless, all five tracks kept |
+| VP9 + Opus in WebM | PASS |
+| MPEG-2 + AC-3 in Matroska | PASS |
+| HEVC in MP4 | PASS |
+| Theora + Vorbis in Ogg | PASS |
+| H.264 + AAC in MPEG-TS | PASS (re-framed to byte-stream by the parser; decoded frames identical) |
+| H.264 + AAC in AVI; Xvid + MP3 in AVI (B-frames, no display times) | PASS |
+
+36 of 36 cuts passed.
+
+The MPEG-2 clip is a still picture (9 distinct frames, repeating every 12), so for it the
+comparison proves the frames are identical but not which 12-frame group they came from;
+its frame count (156 for 0.80–6.00 s in the player run) confirms the range.
+
+**In the player** (`tests/automation/edit.txt`, `scripts/check-edit.py`,
+`docs/results/edit-checks.txt`), on copies of the media:
+
+| Check | Result |
+|---|---|
+| The original files are unchanged (SHA-256 before and after) | PASS: 5 files identical |
+| No unfinished `.part` files are left behind | PASS |
+| Shift+→ / Shift+← step between keyframes (3.3 s → 4 → 2 → 0) | PASS: 4000, 2000, 0 ms |
+| A–B (3.3–7.7 s) is cut from the keyframe at or before A | PASS: starts at 2000 ms |
+| The cut is the original, frame for frame | PASS: source frames 60–233, audio packets 245/245 |
+| It ends at B | PASS: last frame 233 = 7.77 s (B = frame 231, plus two B-frames' reference) |
+| Cutting the same section again makes a new file | PASS: *… (2).mp4* |
+| Matroska: every track kept; subtitles timed from the cut and ending at B | PASS: 5 streams; file 8.52 s for an 8.50 s section |
+| WebM and MPEG-2/AC-3: lossless, in their own container | PASS |
+| A video in a read-only folder is cut into `~/Videos` | PASS |
+| A–B (2–5 s) as an animated, looping GIF at the chosen size | PASS: 480×358, plays 3.0 s |
+| Original picture option: 320 wide, 10 frames a second | PASS: 320×240, 29 frames |
+| With the look the GIF shows the CRT; without, the plain picture | PASS: 4 dark (curved) corners vs 0; texture 1.2 vs 0.0 |
+| Without A–B: the next 5 seconds | PASS: plays 4.9 s |
+| In desk mode, the whole scene is recorded | PASS: 480×270 |
+
+**Full suites for 2.9.0:** native X11 (281 checks) and Wayland (18), and the same on the
+AppImage with the system's Qt removed. No failures. The cut and GIF checks are in
+`docs/results/edit-checks.txt` and `edit-checks-appimage.txt`.
+
+**A checker fault found on the way:** `check-copy.py` at first skipped the video of the
+MPEG-2 cut (it misread ffprobe's stream list), so that row passed on its audio alone.
+The checker now fails when a track of the source has no counterpart in the cut. The
+saved results are from the corrected checker, re-run on the same cuts.
+
+**Known limits:**
+
+- **Grab rate here:** with software OpenGL this machine grabs about 9 filtered frames
+  a second, so the 15 fps GIF holds 27 frames, at the right speed. A real GPU should
+  reach the chosen rate; that is not measured here.
+- **Subtitles at the start:** a subtitle already on screen at the keyframe is not
+  carried into the cut.
+- **Not tested:** files with open-GOP or broken-link keyframes, DVD/PGS picture
+  subtitles in a cut, very large files (the copy is linear in the section's size), and
+  network shares.
 
 ## 2.8: Jellyfin: big libraries and conversion on the server
 

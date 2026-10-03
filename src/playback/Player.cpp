@@ -490,6 +490,23 @@ void Player::doSeek(qint64 posNs, SeekMode mode)
     }
 }
 
+void Player::seekKeyframe(bool forward)
+{
+    if (!m_pipe) return;
+    const qint64 pos = position();
+    // Just past the current frame, snapping to the keyframe after it (or before it).
+    const qint64 target = forward ? pos + 40000000 : std::max<qint64>(0, pos - 1000000);
+    const int flags = GST_SEEK_FLAG_FLUSH | GST_SEEK_FLAG_KEY_UNIT | (forward ? GST_SEEK_FLAG_SNAP_AFTER : GST_SEEK_FLAG_SNAP_BEFORE);
+    m_seekTarget = target;
+    m_seekInFlight = true;
+    m_seekWatchdog.start();
+    if (!gst_element_seek(m_pipe, m_rate, GST_FORMAT_TIME, GstSeekFlags(flags), GST_SEEK_TYPE_SET, target,
+                          GST_SEEK_TYPE_NONE, GST_CLOCK_TIME_NONE)) {
+        m_seekInFlight = false;
+        m_seekWatchdog.stop();
+    }
+}
+
 void Player::setTapeParams(const TapeParams& p)
 {
     const float v[7] = {p.hiss, p.wow, p.saturation, p.tone, p.speaker, p.crackle, p.dropouts};

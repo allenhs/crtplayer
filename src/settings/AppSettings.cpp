@@ -84,6 +84,9 @@ void AppSettings::load()
     keepAwake = s.value("playback/keepAwake", true).toBool();
     lookSound = s.value("playback/lookSound", true).toBool();
     jfMaxBitrateMbps = std::clamp(s.value("jellyfin/maxBitrateMbps", 0).toInt(), 0, 1000);
+    gifWidth = std::clamp(s.value("gif/width", 480).toInt(), 120, 3840);
+    gifFps = std::clamp(s.value("gif/fps", 15).toInt(), 5, 30);
+    gifLook = s.value("gif/look", true).toBool();
     noiseVolume = std::clamp(s.value("playback/noiseVolume", 1.0).toDouble(), 0.0, 2.0);
     effectStrength = std::clamp(s.value("playback/effectStrength", 1.0).toDouble(), 0.0, 1.0);
     hiddenPluginNotice = s.value("ui/hiddenPluginNotice").toString();
@@ -151,6 +154,9 @@ void AppSettings::save() const
     s.setValue("playback/keepAwake", keepAwake);
     s.setValue("playback/lookSound", lookSound);
     s.setValue("jellyfin/maxBitrateMbps", jfMaxBitrateMbps);
+    s.setValue("gif/width", gifWidth);
+    s.setValue("gif/fps", gifFps);
+    s.setValue("gif/look", gifLook);
     s.setValue("playback/noiseVolume", noiseVolume);
     s.setValue("playback/effectStrength", effectStrength);
     s.setValue("ui/hiddenPluginNotice", hiddenPluginNotice);

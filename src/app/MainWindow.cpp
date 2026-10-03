@@ -24,6 +24,9 @@
 #include "settings/ResumeStore.h"
 #include "ui/JellyfinPanel.h"
 #include "ui/ControlBar.h"
+#include "ui/CutDialog.h"
+#include "edit/LosslessCutter.h"
+#include "ui/GifDialog.h"
 #include "ui/CrtPanel.h"
 #include "ui/DisplayPanel.h"
 #include "ui/Icons.h"
@@ -423,6 +426,9 @@ void MainWindow::buildUi()
     shotMenu->addAction(tr("Save filtered frame, as shown\tCtrl+S"), this, [this] { takeScreenshot(true); });
     shotMenu->addAction(tr("Save original frame, no effects\tShift+S"), this, [this] { takeScreenshot(false); });
     shotMenu->addSeparator();
+    shotMenu->addAction(tr("Save GIF clip of A–B…"), this, [this] { showGifDialog(); });
+    shotMenu->addAction(tr("Cut A–B without re-encoding…\tX"), this, [this] { showCutDialog(); });
+    shotMenu->addSeparator();
     shotMenu->addAction(tr("Open screenshot folder"), this, [this] {
         QDir().mkpath(m_settings.screenshotDir);
         QDesktopServices::openUrl(QUrl::fromLocalFile(m_settings.screenshotDir));
@@ -488,6 +494,10 @@ void MainWindow::buildActions()
     add({QKeySequence(Qt::SHIFT | Qt::Key_PageDown)}, [this] { jumpChapter(+1); });
     add({QKeySequence(Qt::SHIFT | Qt::Key_PageUp)}, [this] { jumpChapter(-1); });
     add({Qt::Key_Period}, [this] { m_player->stepFrame(true); });
+    add({QKeySequence(Qt::SHIFT | Qt::Key_Right)}, [this] { seekKeyframe(true); });
+    add({QKeySequence(Qt::SHIFT | Qt::Key_Left)}, [this] { seekKeyframe(false); });
+    add({Qt::Key_X}, [this] { showCutDialog(); });
+    add({Qt::Key_G}, [this] { showGifDialog()->record(); });   // record straight away, with the last options
     add({Qt::Key_Comma}, [this] { m_player->stepFrame(false); });
     add({Qt::Key_Up}, [this] { m_controls->volumeSlider()->setValue(m_controls->volumeSlider()->value() + 5); showOsd(tr("Volume %1%").arg(m_controls->volumeSlider()->value())); });
     add({Qt::Key_Down}, [this] { m_controls->volumeSlider()->setValue(m_controls->volumeSlider()->value() - 5); showOsd(tr("Volume %1%").arg(m_controls->volumeSlider()->value())); });
@@ -1626,6 +1636,134 @@ void MainWindow::setLoop(qint64 aNs, qint64 bNs)
     m_loopA = aNs;
     m_loopB = bNs;
     updateSeekMarks();
+    if (m_cutDialog && m_cutDialog->isVisible()) m_cutDialog->refresh();
+    if (m_gifDialog && m_gifDialog->isVisible()) m_gifDialog->refresh();
+}
+
+void MainWindow::seekKeyframe(bool forward)
+{
+    // Local files: keyframes are looked up on the file itself (quick seeks with a demuxer of
+    // its own; "the keyframe at or before T" is what every demuxer answers reliably), then
+    // the player goes there exactly. Streams: the player's own key-unit seek.
+    const QString src = m_jfItemId.isEmpty() ? m_currentLocal : QString();
+    if (src.isEmpty()) { m_player->seekKeyframe(forward); return; }
+    if (!m_keyframes) {
+        m_keyframes = new LosslessCutter(this);
+        connect(m_keyframes, &LosslessCutter::keyframeFound, this, [this](qint64, qint64 k) {
+            auto done = [this](qint64 at) {
+                m_kfBusy = false;
+                if (at < 0) { showOsd(m_kfForward ? tr("No keyframe after this") : tr("No keyframe before this")); return; }
+                m_player->seek(at, Player::SeekMode::Accurate);
+                const qint64 ms = at / 1000000;
+                showOsd(tr("Keyframe %1").arg(formatTime(ms) + QString::asprintf(".%03lld", ms % 1000)), 1500);
+            };
+            if (!m_kfForward) { done(k); return; }
+            // Forward: widen the look-ahead until a keyframe beyond here turns up, then
+            // step back from it to the first one after here.
+            const qint64 from = m_kfFrom + 10000000;
+            if (k > from) {
+                m_kfBest = k;
+                m_kfRefining = true;
+                QTimer::singleShot(0, this, [this, k] { m_keyframes->findKeyframe(m_kfSource, k - 1000000); });
+                return;
+            }
+            if (m_kfRefining) { done(m_kfBest); return; }
+            const qint64 dur = m_player->duration();
+            if (dur > 0 && m_kfFrom + m_kfStep > dur) { done(-1); return; }   // looked up to the end
+            m_kfStep *= 2;
+            if (m_kfStep > 256'000'000'000LL) { done(-1); return; }
+            QTimer::singleShot(0, this, [this] { m_keyframes->findKeyframe(m_kfSource, m_kfFrom + m_kfStep); });
+        });
+    }
+    if (m_kfBusy) return;
+    m_kfBusy = true;
+    m_kfForward = forward;
+    m_kfSource = src;
+    m_kfFrom = m_player->position();
+    m_kfStep = 500000000;
+    m_kfBest = -1;
+    m_kfRefining = false;
+    m_keyframes->findKeyframe(src, forward ? m_kfFrom + m_kfStep : std::max<qint64>(0, m_kfFrom - 20000000));
+}
+
+GifDialog* MainWindow::showGifDialog()
+{
+    if (!m_gifDialog) {
+        GifDialog::Host h;
+        h.position = [this] { return m_player->position(); };
+        h.duration = [this] { return m_player->duration(); };
+        h.loopA = [this] { return m_loopA; };
+        h.loopB = [this] { return m_loopB; };
+        h.title = [this] { return mediaTitle(); };
+        h.folder = [this] { return m_settings.screenshotDir; };
+        h.deskMode = [this] { return m_deskActive && m_desk; };
+        h.recorder.grab = [this]() -> QImage {
+            if (m_deskActive && m_desk) return m_desk->view()->grabFramebuffer();   // the whole scene
+            if (!m_gifLook) return m_video->grabOriginalFrame();
+            // The picture as shown, without the empty bars around it.
+            QImage img = m_video->grabFilteredFrame();
+            const LayoutResult L = m_video->currentLayout();
+            const QRect r = L.visibleRect.toAlignedRect().intersected(img.rect());
+            return L.valid && r.width() > 16 && r.height() > 16 ? img.copy(r) : img;
+        };
+        h.recorder.position = [this] { return m_player->position(); };
+        h.recorder.isPlaying = [this] { return m_player->isPlaying(); };
+        h.recorder.seekAndPlay = [this](qint64 ns) {
+            m_player->seek(ns, Player::SeekMode::Accurate);
+            if (!m_player->isPlaying()) m_player->play();
+        };
+        h.setLook = [this](bool on) { m_gifLook = on; };
+        h.recording = [this](bool on) {
+            m_gifRecording = on;
+            if (on) showOsd(tr("● Recording GIF…"), 2000);
+        };
+        h.saveSettings = [this](const GifDialog::Settings& s) {
+            m_settings.gifWidth = s.width;
+            m_settings.gifFps = s.fps;
+            m_settings.gifLook = s.look;
+        };
+        m_gifDialog = new GifDialog(h, {m_settings.gifWidth, m_settings.gifFps, m_settings.gifLook}, this);
+        connect(m_gifDialog, &GifDialog::finished, this, [this](const GifRecorder::Result& r) {
+            showOsd(r.ok ? tr("GIF saved: %1").arg(QFileInfo(r.path).fileName()) : tr("GIF not saved: %1").arg(r.error), 3000);
+        });
+    }
+    m_gifDialog->refresh();
+    m_gifDialog->show();
+    m_gifDialog->raise();
+    return m_gifDialog;
+}
+
+void MainWindow::setGifOptions(int width, int fps, bool look)
+{
+    m_settings.gifWidth = width;
+    m_settings.gifFps = fps;
+    m_settings.gifLook = look;
+    delete m_gifDialog;   // rebuilt with the new options
+    m_gifDialog = nullptr;
+    showGifDialog();
+}
+
+CutDialog* MainWindow::showCutDialog()
+{
+    if (!m_cutDialog) {
+        CutDialog::Host h;
+        h.sourceFile = [this] { return m_jfItemId.isEmpty() ? m_currentLocal : QString(); };
+        h.position = [this] { return m_player->position(); };
+        h.duration = [this] { return m_player->duration(); };
+        h.loopA = [this] { return m_loopA; };
+        h.loopB = [this] { return m_loopB; };
+        h.setLoop = [this](qint64 a, qint64 b) { setLoop(a, b); };
+        h.seek = [this](qint64 ns) { m_player->seek(ns, Player::SeekMode::Accurate); };
+        h.open = [this](const QString& path) { openFiles({path}, true); };
+        m_cutDialog = new CutDialog(h, this);
+        connect(m_cutDialog, &CutDialog::finished, this, [this](const LosslessCutter::Result& r) {
+            showOsd(r.ok ? tr("Cut saved: %1").arg(QFileInfo(r.output).fileName()) : tr("Cut not saved"), 3000);
+        });
+    }
+    m_cutDialog->refresh();
+    m_cutDialog->show();
+    m_cutDialog->raise();
+    return m_cutDialog;
 }
 
 void MainWindow::cycleLoop()
@@ -1888,7 +2026,7 @@ void MainWindow::showOsd(const QString& text, int ms)
 
 void MainWindow::updatePosition()
 {
-    if (m_loopB > m_loopA && m_loopA >= 0 && m_player->isPlaying() && !m_controls->seek()->isScrubbing() &&
+    if (m_loopB > m_loopA && m_loopA >= 0 && m_player->isPlaying() && !m_controls->seek()->isScrubbing() && !m_gifRecording &&
         m_player->position() >= m_loopB)
         m_player->seek(m_loopA, Player::SeekMode::Accurate);
     const qint64 pos = m_player->position() / 1000000;

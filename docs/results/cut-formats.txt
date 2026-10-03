@@ -1,0 +1,80 @@
+# Lossless cut, format matrix (build/cut_tool + scripts/check-copy.py; ffmpeg as the reference).
+# Per file: ok, container, real start (ms, the keyframe), duration (ms), tracks kept, tracks left out.
+# Then per track: (lossless copy?, first and last source frame of the cut, packets byte-identical, packets).
+# Video 'lossless' = every decoded frame bit-identical to a contiguous run of the source's; audio = every packet byte-identical, contiguous.
+# anamorphic_dvd_mpeg2.mkv is a still picture (9 distinct frames, repeating every GOP): its frame indices are the first matching run, not unique.
+### A–B = 3300 7700 ms
+== sd_4x3_h264.mp4: True MP4 2000 5800 ['video (H.264 (High Profile))', 'audio (MPEG-4 AAC)'] [] 
+    {'video': (True, 60, 233, 173, 174), 'audio': (True, None, None, 245, 245)}
+== hd_16x9_multitrack.mkv: True Matroska 2000 5666 ['video (H.264 (High Profile))', 'audio (MPEG-4 AAC)', 'audio (MPEG-4 AAC)', 'subtitles (Timed Text)', 'subtitles (Timed Text)'] [] 
+    {'video': (True, 50, 190, 140, 141), 'audio': (True, None, None, 245, 245)}
+== ultrawide_64x27_vp9.webm: True WebM 0 7709 ['video (VP9)', 'audio (Opus)'] [] 
+    {'video': (True, 0, 184, 184, 185), 'audio': (True, None, None, 386, 386)}
+== anamorphic_dvd_mpeg2.mkv: True Matroska 3203 4528 ['video (MPEG-2 Video (Main Profile))', 'audio (AC-3 (ATSC A/52))'] [] 
+    {'video': (True, 12, 146, 134, 135), 'audio': (True, None, None, 130, 130)}
+== vertical_9x16_h264.mp4: True MP4 0 7833 ['video (H.264 (High Profile))', 'audio (MPEG-4 AAC)'] [] 
+    {'video': (True, 0, 234, 234, 235), 'audio': (True, None, None, 332, 332)}
+== base_only.ogv: True Ogg 2400 5302 ['video (Theora)', 'audio (Vorbis)'] [] 
+    {'video': (True, 0, 11, 11, 12), 'audio': (True, None, None, 229, 229)}
+== hevc_only.mp4: True MP4 0 5000 ['video (H.265 (Main Profile))'] [] 
+    {'video': (True, 0, 149, 149, 150)}
+== chapters.mkv: True Matroska 3000 4668 ['video (H.264 (High Profile))', 'audio (MPEG-4 AAC)'] [] 
+    {'video': (True, 90, 228, 138, 139), 'audio': (True, None, None, 202, 202)}
+== test_ts.ts: True MPEG-TS 1533 6224 ['video (H.264 (High Profile))', 'audio (MPEG-4 AAC)'] [] 
+    {'video': (True, 60, 210, 148, 151), 'audio': (True, None, None, 265, 265)}
+== test_avi.avi: True AVI 2000 5689 ['video (ITU H.264 (High Profile))', 'audio (MPEG-4 AAC)'] [] 
+    {'video': (True, 60, 233, 0, 174), 'audio': (True, None, None, 245, 245)}
+== test_mov.mov: True QuickTime 2000 5800 ['video (H.264 (High Profile))', 'audio (MPEG-4 AAC)'] [] 
+    {'video': (True, 60, 233, 173, 174), 'audio': (True, None, None, 245, 245)}
+== test_xvid.avi: True AVI 3133 4600 ['video (MPEG-4 Video (Advanced Simple Profile))', 'audio (MPEG-1 Layer 3 (MP3))'] [] 
+    {'video': (True, 96, 231, 137, 138), 'audio': (True, None, None, 175, 175)}
+### A–B = 0 3000 ms
+== sd_4x3_h264.mp4: True MP4 0 3167 ['video (H.264 (High Profile))', 'audio (MPEG-4 AAC)'] [] 
+    {'video': (True, 0, 94, 94, 95), 'audio': (True, None, None, 130, 130)}
+== hd_16x9_multitrack.mkv: True Matroska 0 3000 ['video (H.264 (High Profile))', 'audio (MPEG-4 AAC)', 'audio (MPEG-4 AAC)', 'subtitles (Timed Text)', 'subtitles (Timed Text)'] [] 
+    {'video': (True, 0, 74, 74, 75), 'audio': (True, None, None, 130, 130)}
+== ultrawide_64x27_vp9.webm: True WebM 0 3042 ['video (VP9)', 'audio (Opus)'] [] 
+    {'video': (True, 0, 72, 72, 73), 'audio': (True, None, None, 151, 151)}
+== anamorphic_dvd_mpeg2.mkv: True Matroska 0 3031 ['video (MPEG-2 Video (Main Profile))', 'audio (AC-3 (ATSC A/52))'] [] 
+    {'video': (True, 0, 89, 89, 90), 'audio': (True, None, None, 87, 87)}
+== vertical_9x16_h264.mp4: True MP4 0 3133 ['video (H.264 (High Profile))', 'audio (MPEG-4 AAC)'] [] 
+    {'video': (True, 0, 93, 93, 94), 'audio': (True, None, None, 130, 130)}
+== base_only.ogv: True Ogg 0 2988 ['video (Theora)', 'audio (Vorbis)'] [] 
+    {'video': (True, 0, 5, 5, 6), 'audio': (True, None, None, 131, 131)}
+== hevc_only.mp4: True MP4 0 3233 ['video (H.265 (Main Profile))'] [] 
+    {'video': (True, 0, 96, 96, 97)}
+== chapters.mkv: True Matroska 0 3033 ['video (H.264 (High Profile))', 'audio (MPEG-4 AAC)'] [] 
+    {'video': (True, 0, 90, 90, 91), 'audio': (True, None, None, 130, 130)}
+== test_ts.ts: True MPEG-TS 767 2424 ['video (H.264 (High Profile))', 'audio (MPEG-4 AAC)'] [] 
+    {'video': (True, 0, 72, 71, 73), 'audio': (True, None, None, 96, 96)}
+== test_avi.avi: True AVI 0 3019 ['video (ITU H.264 (High Profile))', 'audio (MPEG-4 AAC)'] [] 
+    {'video': (True, 0, 90, 0, 91), 'audio': (True, None, None, 130, 130)}
+== test_mov.mov: True QuickTime 0 3167 ['video (H.264 (High Profile))', 'audio (MPEG-4 AAC)'] [] 
+    {'video': (True, 0, 94, 94, 95), 'audio': (True, None, None, 130, 130)}
+== test_xvid.avi: True AVI 0 3033 ['video (MPEG-4 Video (Advanced Simple Profile))', 'audio (MPEG-1 Layer 3 (MP3))'] [] 
+    {'video': (True, 0, 90, 90, 91), 'audio': (True, None, None, 115, 115)}
+### A–B = 12000 40000 ms
+== sd_4x3_h264.mp4: True MP4 10000 10000 ['video (H.264 (High Profile))', 'audio (MPEG-4 AAC)'] [] 
+    {'video': (True, 300, 599, 299, 300), 'audio': (True, None, None, 347, 347)}
+== hd_16x9_multitrack.mkv: True Matroska 12000 18000 ['video (H.264 (High Profile))', 'audio (MPEG-4 AAC)', 'audio (MPEG-4 AAC)', 'subtitles (Timed Text)', 'subtitles (Timed Text)'] [] 
+    {'video': (True, 50, 499, 449, 450), 'audio': (True, None, None, 776, 776)}
+== ultrawide_64x27_vp9.webm: True WebM 5333 4667 ['video (VP9)', 'audio (Opus)'] [] 
+    {'video': (True, 128, 239, 111, 112), 'audio': (True, None, None, 234, 234)}
+== anamorphic_dvd_mpeg2.mkv: True Matroska 9610 418 ['video (MPEG-2 Video (Main Profile))', 'audio (AC-3 (ATSC A/52))'] [] 
+    {'video': (True, 12, 22, 10, 11), 'audio': (True, None, None, 12, 12)}
+== vertical_9x16_h264.mp4: True MP4 8333 6667 ['video (H.264 (High Profile))', 'audio (MPEG-4 AAC)'] [] 
+    {'video': (True, 250, 449, 199, 200), 'audio': (True, None, None, 287, 287)}
+== base_only.ogv: True Ogg 7200 759 ['video (Theora)', 'audio (Vorbis)'] [] 
+    {'video': (True, 0, 0, 0, 1), 'audio': (True, None, None, 34, 34)}
+== hevc_only.mp4: True MP4 0 5000 ['video (H.265 (Main Profile))'] [] 
+    {'video': (True, 0, 149, 149, 150)}
+== chapters.mkv: True Matroska 12000 18000 ['video (H.264 (High Profile))', 'audio (MPEG-4 AAC)'] [] 
+    {'video': (True, 360, 899, 539, 540), 'audio': (True, None, None, 776, 776)}
+== test_ts.ts: True MPEG-TS 10400 10470 ['video (H.264 (High Profile))', 'audio (MPEG-4 AAC)'] [] 
+    {'video': (True, 300, 599, 295, 300), 'audio': (True, None, None, 447, 447)}
+== test_avi.avi: True AVI 12000 8034 ['video (ITU H.264 (High Profile))', 'audio (MPEG-4 AAC)'] [] 
+    {'video': (True, 360, 599, 0, 240), 'audio': (True, None, None, 346, 346)}
+== test_mov.mov: True QuickTime 10000 10000 ['video (H.264 (High Profile))', 'audio (MPEG-4 AAC)'] [] 
+    {'video': (True, 300, 599, 299, 300), 'audio': (True, None, None, 347, 347)}
+== test_xvid.avi: True AVI 11933 8124 ['video (MPEG-4 Video (Advanced Simple Profile))', 'audio (MPEG-1 Layer 3 (MP3))'] [] 
+    {'video': (True, 360, 599, 241, 242), 'audio': (True, None, None, 311, 311)}

@@ -29,6 +29,8 @@ class QMenu;
 class QTabWidget;
 class QActionGroup;
 class DeskWindow;
+class CutDialog;
+class GifDialog;
 class JellyfinClient;
 class JellyfinPanel;
 struct JfItem;
@@ -74,6 +76,15 @@ public:
     void enqueueJellyfin(const JfItem& item);
     void showJellyfin(bool on);
     DeskWindow* deskWindow() const { return m_desk; }
+
+    // Editing: A–B section (the R key), lossless cut and GIF clips
+    qint64 loopA() const { return m_loopA; }
+    qint64 loopB() const { return m_loopB; }
+    void setLoop(qint64 aNs, qint64 bNs);
+    CutDialog* showCutDialog();
+    GifDialog* showGifDialog();
+    void setGifOptions(int width, int fps, bool look);
+    void seekKeyframe(bool forward);
 
 protected:
     void closeEvent(QCloseEvent* e) override;
@@ -209,7 +220,6 @@ private:
     CrtParams m_preTheaterParams;
 public:
     void cycleLoop();
-    void setLoop(qint64 aNs, qint64 bNs);
     void jumpChapter(int dir);
     QString systemReport() const;
     class Thumbnailer* thumbnailer() const { return m_thumbs; }
@@ -232,6 +242,14 @@ private:
     QList<QPair<QString, QString>> m_extSubs;   // external subtitles on offer: label, URI
     QString m_extSubLabel;                      // the one loaded, if any
     qint64 m_loopA = -1, m_loopB = -1;          // ns
+    CutDialog* m_cutDialog = nullptr;
+    GifDialog* m_gifDialog = nullptr;
+    class LosslessCutter* m_keyframes = nullptr;   // finds keyframes for Shift+← / Shift+→
+    bool m_kfBusy = false, m_kfForward = true, m_kfRefining = false;
+    qint64 m_kfFrom = 0, m_kfStep = 0, m_kfBest = -1;
+    QString m_kfSource;
+    bool m_gifRecording = false;   // the A–B loop waits meanwhile
+    bool m_gifLook = true;
     QTimer m_resumeTimer;
     void jellyfinStopCurrent(bool waitForServer);
     void openResolved(int index, const QString& uri, qint64 start, const QString& shown, const QString& note);

@@ -1,0 +1,67 @@
+# 2.9: cutting without re-encoding, and GIF clips. The media are copies in @O@/edit-media
+# (the cuts are written next to them); edit-ro is a read-only folder.
+open @O@/edit-media/sd_4x3_h264.mp4
+waitstate playing 15000
+pause
+preset Clean Broadcast Monitor
+# Keyframe stepping (Shift+→ / Shift+←): the file has a keyframe every 2 s
+seek 3.3
+wait 800
+keyframe next
+wait 1200
+report kf-next
+keyframe prev
+wait 1200
+report kf-prev1
+keyframe prev
+wait 1200
+report kf-prev2
+# A = 3.3 s, B = 7.7 s: the cut starts at the keyframe at 2.0 s
+loop 3300 7700
+cut
+cut
+report after-cuts
+# Matroska with two audio tracks and two subtitle tracks: all kept
+open @O@/edit-media/hd_16x9_multitrack.mkv
+waitstate playing 15000
+pause
+loop 4000 12500
+cut
+open @O@/edit-media/ultrawide_64x27_vp9.webm
+waitstate playing 15000
+pause
+loop 2500 6000
+cut
+open @O@/edit-media/anamorphic_dvd_mpeg2.mkv
+waitstate playing 15000
+pause
+loop 1000 6000
+cut
+# A read-only folder: the cut goes to ~/Videos instead
+open @O@/edit-ro/sd_4x3_h264.mp4
+waitstate playing 15000
+pause
+loop 8000 12000
+cut
+# GIFs: A–B with the look, then the original picture, then 5 s from here, then desk mode
+open @O@/edit-media/sd_4x3_h264.mp4
+waitstate playing 15000
+pause
+loop 2000 5000
+gifopts 480 15 1
+gif @O@/gif-look.gif
+gifopts 320 10 0
+gif @O@/gif-original.gif
+loop off
+seek 10
+wait 800
+gifopts 480 15 1
+gif @O@/gif-5s.gif
+desk on
+wait 2500
+loop 2000 4000
+gif @O@/gif-desk.gif
+desk off
+wait 800
+report end
+quit
