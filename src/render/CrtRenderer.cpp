@@ -1,4 +1,5 @@
 #include "CrtRenderer.h"
+#include <QElapsedTimer>
 #include "render/FmvPalette.h"
 
 #include <QDebug>
@@ -35,10 +36,22 @@ static bool glContextUsable(QString* error)
     return false;
 }
 
-bool CrtRenderer::loadProgram(QOpenGLShaderProgram& prog, const char* frag, QString* error)
+bool CrtRenderer::loadProgram(QOpenGLShaderProgram& prog, const char* frag, QString* error, const char* defines)
 {
-    if (!prog.addCacheableShaderFromSourceFile(QOpenGLShader::Vertex, QStringLiteral(":/shaders/quad.vert")) ||
-        !prog.addCacheableShaderFromSourceFile(QOpenGLShader::Fragment, QString::fromLatin1(frag)) ||
+    bool fragOk;
+    if (defines) {   // a variant of the shader: the defines go in after its #version line
+        QFile f(QString::fromLatin1(frag));
+        QByteArray src = f.open(QIODevice::ReadOnly) ? f.readAll() : QByteArray();
+        const int eol = src.indexOf('\n');
+        if (eol >= 0) src.insert(eol + 1, defines);
+        // (Cacheable like the vertex shader: Qt's on-disk program cache is keyed by the cacheable
+        // sources only, so a fragment shader left out of the key would be served stale from the
+        // cache after it changes.)
+        fragOk = !src.isEmpty() && prog.addCacheableShaderFromSourceCode(QOpenGLShader::Fragment, src);
+    } else {
+        fragOk = prog.addCacheableShaderFromSourceFile(QOpenGLShader::Fragment, QString::fromLatin1(frag));
+    }
+    if (!prog.addCacheableShaderFromSourceFile(QOpenGLShader::Vertex, QStringLiteral(":/shaders/quad.vert")) || !fragOk ||
         !prog.link()) {
         if (error) *error = QStringLiteral("Shader %1 failed to build:\n%2").arg(QString::fromLatin1(frag), prog.log());
         return false;
@@ -54,6 +67,8 @@ bool CrtRenderer::initialize(QString* error)
     if (!loadProgram(m_down, ":/shaders/downsample.frag", error)) return false;
     if (!loadProgram(m_blur, ":/shaders/blur.frag", error)) return false;
     if (!loadProgram(m_crt, ":/shaders/crt.frag", error)) return false;
+    if (!loadProgram(m_plain, ":/shaders/plain.frag", error)) return false;
+    if (!loadProgram(m_plainOsd, ":/shaders/plain.frag", error, "#define OSD\n")) return false;
     if (!loadProgram(m_persist, ":/shaders/persist.frag", error)) return false;
     if (!loadProgram(m_copy, ":/shaders/copy.frag", error)) return false;
     if (!loadProgram(m_fmvCodec, ":/shaders/fmv_codec.frag", error)) return false;
@@ -149,8 +164,20 @@ void CrtRenderer::setOrientation(const Orientation& o)
     if (m_hasFrame) convert();
 }
 
+// Profiling: the time since `t` was (re)started, with the GL work done so far completed.
+double CrtRenderer::stageMs(QElapsedTimer& t)
+{
+    if (!m_profiling) return 0;
+    glFinish();
+    const double ms = t.nsecsElapsed() / 1e6;
+    t.restart();
+    return ms;
+}
+
 bool CrtRenderer::uploadSample(GstSample* sample)
 {
+    QElapsedTimer pt;
+    pt.start();
     GstCaps* caps = gst_sample_get_caps(sample);
     GstBuffer* buf = gst_sample_get_buffer(sample);
     if (!caps || !buf) return false;
@@ -180,6 +207,31 @@ bool CrtRenderer::uploadSample(GstSample* sample)
     if (!gst_video_frame_map(&frame, &m_info, buf, GST_MAP_READ)) return false;
     const int planes = GST_VIDEO_FRAME_N_PLANES(&frame);
     glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+    // RGB frames the right way up need no conversion pass: they are the picture texture.
+    float o0[3], o1[3];
+    orientationMatrix(m_orient, o0, o1);
+    const bool upright = o0[0] == 1.f && o0[1] == 0.f && o0[2] == 0.f && o1[0] == 0.f && o1[1] == 1.f && o1[2] == 0.f;
+    m_direct = m_format <= 1 && upright;
+    if (m_direct) {
+        const int w = GST_VIDEO_FRAME_WIDTH(&frame), h = GST_VIDEO_FRAME_HEIGHT(&frame);
+        ensureTarget(m_imgTex, m_imgFbo, m_imgSize, QSize(w, h), true, false);
+        glBindTexture(GL_TEXTURE_2D, m_imgTex);
+        glPixelStorei(GL_UNPACK_ROW_LENGTH, GST_VIDEO_FRAME_PLANE_STRIDE(&frame, 0) / 4);
+        glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, w, h, m_format == 1 ? GL_BGRA : GL_RGBA, GL_UNSIGNED_BYTE, GST_VIDEO_FRAME_PLANE_DATA(&frame, 0));
+        glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
+        glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
+        gst_video_frame_unmap(&frame);
+        m_hasFrame = true;
+        m_profile.upload += stageMs(pt);
+        ++m_profile.frames;
+        // The smaller copies of the picture (for shrinking it, the glow, the looks) are made when something needs them.
+        m_mipsStale = true;
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, m_plainOnly ? GL_LINEAR : GL_LINEAR_MIPMAP_LINEAR);
+        if (!m_plainOnly) { ensureMipmaps(); m_profile.mipmap += stageMs(pt); }
+        m_blurDirty = true;
+        m_lowDirty = true;
+        return true;
+    }
     for (int p = 0; p < planes && p < 3; ++p) {
         const int comp = p;   // for NV12/I420/RGB planes, plane p starts with component p
         const int w = GST_VIDEO_FRAME_COMP_WIDTH(&frame, comp);
@@ -208,6 +260,8 @@ bool CrtRenderer::uploadSample(GstSample* sample)
     glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
     gst_video_frame_unmap(&frame);
     m_hasFrame = true;
+    m_profile.upload += stageMs(pt);
+    ++m_profile.frames;
     convert();
     return true;
 }
@@ -234,12 +288,24 @@ void CrtRenderer::ensureTarget(GLuint& tex, GLuint& fbo, QSize& cur, const QSize
     cur = size;
 }
 
+void CrtRenderer::ensureMipmaps()
+{
+    if (!m_mipsStale || !m_imgTex) return;
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, m_imgTex);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+    glGenerateMipmap(GL_TEXTURE_2D);
+    m_mipsStale = false;
+}
+
 void CrtRenderer::convert()
 {
     if (!m_hasFrame || !m_infoValid) return;
     const SourceFormat sf = sourceFormat();
     const QSize out = orientedStorageSize(sf);
     if (out.isEmpty()) return;
+    QElapsedTimer pt;
+    pt.start();
     ensureTarget(m_imgTex, m_imgFbo, m_imgSize, out, true, false);
     glBindFramebuffer(GL_FRAMEBUFFER, m_imgFbo);
     glViewport(0, 0, out.width(), out.height());
@@ -284,9 +350,13 @@ void CrtRenderer::convert()
     }
     drawQuad();
     m_convert.release();
+    m_profile.convert += stageMs(pt);
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, m_imgTex);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
     glGenerateMipmap(GL_TEXTURE_2D);
+    m_mipsStale = false;
+    m_profile.mipmap += stageMs(pt);
     m_blurDirty = true;
     m_lowDirty = true;
 }
@@ -353,8 +423,15 @@ bool CrtRenderer::updateFmv(const QSize& grid, const CrtParams& p)
     QByteArray px(grid.width() * grid.height() * 4, Qt::Uninitialized);
     glPixelStorei(GL_PACK_ALIGNMENT, 4);
     glReadPixels(0, 0, grid.width(), grid.height(), GL_RGBA, GL_UNSIGNED_BYTE, px.data());
-    const QVector<QRgb> pal = fmvPalette(reinterpret_cast<const uchar*>(px.constData()), grid.width(), grid.height(),
-                                         grid.width() * 4, p.fmvColors);
+    const uchar* pxData = reinterpret_cast<const uchar*>(px.constData());
+    QVector<QRgb> pal = fmvPalette(pxData, grid.width(), grid.height(), grid.width() * 4, p.fmvColors);
+    // Between key frames the palette before stays for as long as it serves this frame nearly as
+    // well: a new one for every frame makes still areas flicker between neighbouring colours.
+    if (!key2 && !changed && !m_fmvPalette.isEmpty() && m_fmvPalette != pal &&
+        fmvKeepPalette(fmvPaletteError(pxData, grid.width(), grid.height(), grid.width() * 4, m_fmvPalette),
+                       fmvPaletteError(pxData, grid.width(), grid.height(), grid.width() * 4, pal)))
+        pal = m_fmvPalette;
+    m_fmvPalette = pal;
     QByteArray pt(256 * 4, '\0');
     for (int i = 0; i < pal.size() && i < 256; ++i) {
         pt[i * 4] = char(qRed(pal[i])); pt[i * 4 + 1] = char(qGreen(pal[i])); pt[i * 4 + 2] = char(qBlue(pal[i])); pt[i * 4 + 3] = char(255);
@@ -509,6 +586,7 @@ void CrtRenderer::draw(GLuint targetFbo, const DrawParams& d)
 
 void CrtRenderer::drawCrt(GLuint targetFbo, const DrawParams& d)
 {
+    if (!(d.bypass && d.split < 0.f)) ensureMipmaps();   // (the looks sample the picture's smaller copies)
     const bool wantBlur = !d.bypass && (d.params.bloom > 0.f || d.params.glow > 0.f) && m_hasFrame;
     const bool lowRes = !d.bypass && m_hasFrame && !d.pixelSize.isEmpty();
     const bool fmv = lowRes && d.params.fmvMode > 0;
@@ -516,7 +594,13 @@ void CrtRenderer::drawCrt(GLuint targetFbo, const DrawParams& d)
     if (lowRes && !fmv) updateLowRes(d.pixelSize);
     // The glow comes from what the tube shows: the FMV console's held, windowed picture.
     const GLuint blurSrc = fmv ? m_fmvTex : m_imgTex;
-    if (wantBlur && (m_blurDirty || fmvUpdated || m_blurSrc != blurSrc)) computeBlur(blurSrc);
+    QElapsedTimer pt;
+    pt.start();
+    if (wantBlur && (m_blurDirty || fmvUpdated || m_blurSrc != blurSrc)) { computeBlur(blurSrc); m_profile.blur += stageMs(pt); }
+    struct DrawTimer {   // (the rest of this function is the final pass)
+        CrtRenderer* r; QElapsedTimer* t;
+        ~DrawTimer() { r->m_profile.draw += r->stageMs(*t); ++r->m_profile.draws; }
+    } drawTimer{this, &pt};
 
     glBindFramebuffer(GL_FRAMEBUFFER, targetFbo);
     glViewport(0, 0, d.viewport.width(), d.viewport.height());
@@ -536,6 +620,31 @@ void CrtRenderer::drawCrt(GLuint targetFbo, const DrawParams& d)
 
     const CrtParams& p = d.params;
     auto rect = [](const QRectF& r) { return QVector4D(r.x(), r.y(), r.width(), r.height()); };
+    if (d.bypass && d.split < 0.f) {
+        // Effects off: the small program. (Shrinking the picture a lot still wants its smaller copies.)
+        const bool shrinking = d.image.width() / std::max(1e-6, d.src.width()) < m_imgSize.width() * 0.75;
+        if (m_mipsStale && (!m_plainOnly || shrinking)) ensureMipmaps();
+        const bool osd = m_osdTex && d.osdAlpha > 0.f;
+        QOpenGLShaderProgram& prog = osd ? m_plainOsd : m_plain;
+        prog.bind();
+        prog.setUniformValue("uImageFull", 0);
+        prog.setUniformValue("uViewport", QVector2D(d.viewport.width(), d.viewport.height()));
+        prog.setUniformValue("uImg", rect(d.image));
+        prog.setUniformValue("uSrc", rect(d.src));
+        if (osd) {
+            prog.setUniformValue("uOsd", 3);
+            prog.setUniformValue("uOsdAlpha", d.osdAlpha);
+            prog.setUniformValue("uOsdRect", QVector4D(d.osdRect.x(), d.osdRect.y(), d.osdRect.width(), d.osdRect.height()));
+            glActiveTexture(GL_TEXTURE3);
+            glBindTexture(GL_TEXTURE_2D, m_osdTex);
+        }
+        glActiveTexture(GL_TEXTURE0);
+        glBindTexture(GL_TEXTURE_2D, m_imgTex);
+        drawQuad();
+        prog.release();
+        glDisable(GL_BLEND);
+        return;
+    }
     m_crt.bind();
     m_crt.setUniformValue("uImage", 0);
     m_crt.setUniformValue("uBlur", 1);
@@ -630,6 +739,7 @@ GLuint CrtRenderer::renderToTexture(const DrawParams& d)
 GLuint CrtRenderer::blurTexture()
 {
     if (!m_hasFrame) return 0;
+    ensureMipmaps();
     if (m_blurDirty || !m_blurTex[0]) computeBlur(m_blurSrc);
     return m_blurTex[0];
 }

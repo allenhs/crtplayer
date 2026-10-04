@@ -5,7 +5,8 @@
 
 #include <QElapsedTimer>
 #include <QJsonObject>
-#include <QOpenGLWidget>
+#include "GlSurfaceWidget.h"
+#include <gst/gst.h>
 #include <QTimer>
 
 class Player;
@@ -20,10 +21,10 @@ struct SyncStats {
     QJsonObject toJson() const;
 };
 
-class VideoWidget : public QOpenGLWidget {
+class VideoWidget : public GlSurfaceWidget {
     Q_OBJECT
 public:
-    explicit VideoWidget(Player* player, QWidget* parent = nullptr);
+    explicit VideoWidget(Player* player, QWidget* parent = nullptr, GlSurfaceWidget::Mode mode = GlSurfaceWidget::preferredMode());
     ~VideoWidget() override;
 
     void setParams(const CrtParams& p);
@@ -82,7 +83,7 @@ public:
     QString glInfo() const { return m_glInfo; }
     QString glError() const { return m_glError; }
     qint64 framesPresented() const { return m_framesPresented; }
-    QImage grabFmvFrame() { makeCurrent(); QImage i = m_renderer.fmvImage(); doneCurrent(); return i; }
+    QImage grabFmvFrame() { makeCurrent(); uploadCurrent(); QImage i = m_renderer.fmvImage(); doneCurrent(); return i; }
     int fmvColorsUsed() const { return m_renderer.fmvColorsUsed(); }
     quint64 fmvFramesDrawn() const { return m_renderer.fmvFramesDrawn(); }
 
@@ -113,6 +114,7 @@ protected:
     void initializeGL() override;
     void paintGL() override;
     void resizeGL(int w, int h) override;
+    bool paintPlain(QPainter& p) override;   // effects off, without a graphics card: straight from the frame
     void mouseMoveEvent(QMouseEvent* e) override;
     void mousePressEvent(QMouseEvent* e) override;
     void mouseReleaseEvent(QMouseEvent* e) override;
@@ -122,7 +124,16 @@ protected:
 private:
     CrtRenderer::DrawParams makeDrawParams(const QSize& viewport, const QRectF& area) const;
     void updateCompareLabels();
-    void takeNewFrame();
+    // forGl: the frame is uploaded for drawing with OpenGL now. Otherwise that waits until
+    // something draws with OpenGL (the plain picture is painted straight from the frame).
+    void takeNewFrame(bool forGl = true);
+    bool uploadCurrent();
+    bool plainPaintable() const;
+    GstSample* m_curSample = nullptr;   // the frame on screen (a reference)
+    bool m_uploaded = false;            // ... and whether the renderer has it
+    QSize m_curSize;                    // its size as delivered
+    bool m_curConverted = false;        // it was converted or scaled for the screen by the video pipeline (not as decoded)
+    bool m_curRgb = false;              // ... and whether it is 32-bit RGB (paintable as it is)
     bool needsAnimation() const;
     double splitX() const; // logical px
 
@@ -170,6 +181,34 @@ private:
     double m_syncMean = 0, m_syncM2 = 0, m_syncMaxAbs = 0;
     int m_syncWithin = 0;
     QElapsedTimer m_syncTimer;
+    // profiling: Qt putting the widget on screen (compose + present), and the time between frames shown
+    QElapsedTimer m_composeTimer, m_intervalTimer;
+    QElapsedTimer m_cpuWall;        // since the statistics were last reset
+    double m_cpuStart = 0;
+    double m_composeSum = 0, m_intervalSum = 0;
+    int m_composeN = 0, m_intervalN = 0;
+public:
+    void setProfiling(bool on);
+    // Playback without a graphics card
+    bool softwareRenderer() const { return m_softwareGl; }
+    bool uprightSource() const { return m_orient == Orientation(); }
+    QSize fastTargetSize() const;                     // the size frames are needed at for the picture as shown now
+    QSize lookTargetSize() const;                     // ... with a look: empty (the video's own size) unless it is much larger than its picture
+    // Without a graphics card, the look can be drawn at a fraction of the window's size and enlarged (1 = full size).
+    void setLookScale(double s);
+    double lookScale() const { return m_lookScale; }
+private:
+    double m_lookScale = 1.0;
+public:
+    void setPlainOnly(bool on) { m_renderer.setPlainOnly(on); }
+    QSize frameSize() const { return m_curSample ? m_curSize : m_renderer.frameSize(); }   // of the frame on screen, as delivered
+    bool frameDirect() const { return m_curRgb; }            // it came as RGB (no conversion pass)
+    bool frameIsScaled() const;                       // the frame on screen is smaller than the video as decoded
+    bool showNativeFrame();                           // replace the frame on screen by the same frame as decoded, if at hand
+    void pullFrame();                                 // take the newest frame now (without waiting for a repaint)
+    QJsonObject profileReport() const;
+private:
+    bool m_softwareGl = false;
     int m_paintN = 0;
     double m_paintSum = 0, m_paintMax = 0;
 

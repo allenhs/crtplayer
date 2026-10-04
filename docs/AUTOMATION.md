@@ -11,6 +11,10 @@ buttons and shortcuts use.
 - `report` adds a full state snapshot: geometry, decoders, clock, sync statistics,
   tracks, fullscreen/controls state, and in desk mode the phase, flight progress,
   pivot/shape, set rectangle and input-mask rectangle.
+- `report` has `videoPath` (2.12): `software` (no graphics acceleration), `surface`
+  (`raster` or `gl widget`), `output` (`as decoded`, `rgb`, `rgb scaled`), `fastSize`,
+  `frameSize`, `frameDirect` (drawn without a conversion pass), `lookScale`,
+  `decoderThreads` and `cpuThreads`.
 - The exit code is 0 when every `expect` and `waitstate` succeeded.
 
 | Command | Effect |
@@ -87,6 +91,9 @@ buttons and shortcuts use.
 | `enqueue PATH`, `item next\|prev` | Add to the playlist without playing; next / previous item |
 | `playlist save PATH\|clear\|play N\|show\|click shuffle\|click repeat` | Save as .m3u8, empty it, play entry N, show the panel, press its buttons |
 | `sleep MINUTES\|end\|off\|seconds N` | Sleep timer |
+| `videopath auto\|always\|never` | The CPU fast path setting (2.12): frames converted and scaled on the CPU's cores |
+| `lookdetail auto\|full\|half` | Without a graphics card: the size the look is drawn at |
+| `profile on\|off` | Time the drawing stages. `report` then has `profile` (per frame: `uploadMs`, `convertMs`, `mipmapMs`, `blurMs`, `drawMs`, `paintMs`, `composeMs`, `frameIntervalMs`, and `cpuCoresBusy`: the CPU time the whole player used per second since `resetsync`) |
 | `fmvgrab PATH` | Save the Sega CD FMV look's console screen (the 256×224 picture before the TV) as an image |
 | `tvadd NUMBER order\|shuffle FOLDER` | Cable TV: a channel from a folder. Channels made by a script get a fixed place in their rounds, so runs repeat |
 | `tvbumpers NUMBER FOLDER` | Short clips to play between that channel's programmes |

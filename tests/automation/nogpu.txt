@@ -1,0 +1,225 @@
+# 2.12: playback without a graphics card. The fast path (frames converted and scaled on all
+# CPU cores, painted straight into the window) against the old path, in the same run.
+profile on
+preset Clean Broadcast Monitor
+rendertime 2.0
+# ---- effects off, a 1080p video in the window
+open @M@/fhd_plain_30.mp4
+waitstate playing 20000
+bypass on
+wait 1500
+resetsync
+wait 4000
+report fast-play
+pause
+seek 5
+wait 1500
+report fast-paused
+grabwindow @O@/ng-fast.png
+# the same frame the old way
+videopath never
+wait 800
+seek 5
+wait 1500
+report never-paused
+grabwindow @O@/ng-never.png
+screenshot original @O@/ng-orig-never.png
+videopath auto
+wait 800
+seek 5
+wait 1500
+screenshot original @O@/ng-orig-fast.png
+report after-original
+videopath never
+play
+wait 1500
+resetsync
+wait 4000
+report never-play
+videopath auto
+wait 800
+# ---- 4K
+open @M@/uhd_h264.mp4
+waitstate playing 30000
+wait 3000
+resetsync
+wait 4000
+report uhd-fast
+pause
+seek 4
+wait 2000
+grabwindow @O@/ng-uhd-fast.png
+videopath never
+wait 800
+seek 4
+wait 2500
+grabwindow @O@/ng-uhd-never.png
+screenshot original @O@/ng-uhd-orig.png
+play
+wait 1500
+resetsync
+wait 4000
+report uhd-never
+videopath auto
+# ---- the picture's shape: anamorphic video, zoomed to fill, and back
+open @M@/anamorphic_dvd_mpeg2.mkv
+waitstate playing 20000
+wait 3000
+pause
+seek 3
+wait 1500
+report anam-fast
+grabwindow @O@/ng-anam-fast.png
+mode fill
+wait 1200
+seek 3
+wait 1500
+report fill-fast
+grabwindow @O@/ng-fill-fast.png
+videopath never
+wait 800
+seek 3
+wait 1500
+grabwindow @O@/ng-fill-never.png
+mode fit
+wait 800
+seek 3
+wait 1500
+grabwindow @O@/ng-anam-never.png
+videopath auto
+# ---- fullscreen: the frames follow the picture's size
+open @M@/fhd_plain_30.mp4
+waitstate playing 20000
+wait 3000
+report windowed
+fullscreen on
+wait 2500
+resetsync
+wait 3000
+report fullscreen
+fullscreen off
+wait 2500
+report windowed-again
+# paused: the frame on screen (scaled for the window) gives way to the full frame
+pause
+wait 800
+fullscreen on
+wait 3000
+report paused-fullscreen
+fullscreen off
+wait 2500
+# ---- changing the size and the look in quick succession while it plays must not stop the stream
+open @M@/fhd_plain_30.mp4
+waitstate playing 20000
+wait 1000
+fullscreen on
+wait 120
+bypass off
+wait 400
+fullscreen off
+wait 250
+bypass on
+wait 120
+fullscreen on
+wait 400
+bypass off
+wait 120
+fullscreen off
+wait 250
+bypass on
+wait 400
+fullscreen on
+wait 120
+bypass off
+wait 250
+fullscreen off
+wait 120
+bypass on
+wait 1200
+resetsync
+wait 2000
+report after-changes
+# ---- a rotated phone video is drawn the old way (and still right)
+open @M@/rotated_phone_h264.mp4
+waitstate playing 20000
+wait 3000
+pause
+seek 4
+wait 1500
+report rotated
+grabwindow @O@/ng-rotated.png
+videopath never
+wait 800
+seek 4
+wait 1500
+grabwindow @O@/ng-rotated-never.png
+videopath auto
+# ---- with a look: frames converted on the CPU; half size in a big window
+bypass off
+open @M@/fhd_plain_30.mp4
+waitstate playing 20000
+wait 3000
+report look-window
+pause
+seek 5
+wait 1500
+grabwindow @O@/ng-look-window.png
+videopath never
+wait 800
+seek 5
+wait 1500
+grabwindow @O@/ng-look-window-never.png
+videopath auto
+play
+fullscreen on
+lookdetail full
+wait 2000
+resetsync
+wait 3500
+report look-full
+pause
+seek 5
+wait 2000
+grabwindow @O@/ng-look-full.png
+lookdetail half
+wait 800
+seek 5
+wait 2000
+grabwindow @O@/ng-look-half.png
+play
+wait 1000
+resetsync
+wait 3500
+report look-half
+lookdetail auto
+wait 800
+report look-auto
+fullscreen off
+wait 1500
+report look-auto-window
+# desk mode: the set's screen is drawn from frames converted on the CPU, at the video's own size
+desk on
+wait 3000
+report desk
+desk off
+wait 2000
+# ---- 4K with a look: the frames come scaled to the picture
+open @M@/uhd_h264.mp4
+waitstate playing 30000
+wait 3000
+resetsync
+wait 4000
+report uhd-look
+pause
+wait 500
+# ---- Cable TV with effects off: the channel number is painted too
+bypass on
+tvadd 2 order @O@/nogpu-media/tv
+tvwait 30000
+tv on
+waitstate playing 20000
+wait 1500
+grabwindow @O@/ng-tv.png
+report tv
+tv off
+quit

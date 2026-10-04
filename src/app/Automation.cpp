@@ -290,6 +290,9 @@ void Automation::next()
         if (!ok) ++m_failures;
         log(line, {{"ok", ok}});
     }
+    else if (cmd == "videopath") { m_w->setVideoPath(a.value(1) == "always" ? 1 : a.value(1) == "never" ? 2 : 0); log(line); }   // auto|always|never
+    else if (cmd == "lookdetail") { m_w->setLookDetail(a.value(1) == "full" ? 1 : a.value(1) == "half" ? 2 : 0); log(line); }   // auto|full|half
+    else if (cmd == "profile") { m_w->video()->setProfiling(a.value(1) != "off"); log(line); }   // per-stage timing (see report: profile)
     else if (cmd == "hw") { p->setHardwareDecoding(a.value(1) == "on"); log(line); }
     else if (cmd == "moment") {
         // moment poweron|poweroff|static : start a set moment now (on the effect clock)

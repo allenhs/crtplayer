@@ -1,6 +1,6 @@
 # Verification report
 
-This report covers the build delivered alongside it (CRT Player 2.11.0).
+This report covers the build delivered alongside it (CRT Player 2.12.0).
 
 The final X11 and Wayland suites were run against the exact stripped `crtplayer` binary
 that is delivered, and **again against the AppImage with the system's Qt libraries
@@ -286,6 +286,223 @@ was **not measured**, because there is no GPU in this environment.
 - GPU performance;
 - the interlaced style's look at real refresh rates (only its field alternation was
   measured).
+
+## 2.12: playback without a graphics card
+
+From real use: in a QEMU / virt-manager guest (Virtio video, no 3D acceleration, 12
+virtual CPUs with the host's CPU passed through), HD and 4K videos played slowly even
+with effects off.
+
+### Where the time went
+
+Without a graphics card, OpenGL runs on the CPU (Mesa's llvmpipe). Timed per stage on the
+test machine (2 cores, a 1920×1080 screen, fullscreen, effects off, 2.11):
+
+| Video | A frame took | Colour conversion | Qt putting the window together | Drawing | Upload and smaller copies | Frames a second |
+|---|---|---|---|---|---|---|
+| 1080p H.264 | 91 ms | 38 ms | 24 ms | 17 ms | 11 ms | 11 |
+| 4K H.264 | 310 ms | 190 ms | 24 ms | 17 ms | the rest | 3.2 |
+| 4K HEVC 10-bit | 370 ms | — | — | — | — | 2.7 |
+
+Decoding alone ran at 180, 75 and 45 frames a second. So the decoder was never the
+problem: the player's own drawing was, and above all the colour conversion, done by a
+shader at the video's full size, on a renderer that computes each pixel one by one.
+Two more findings:
+
+- Software OpenGL runs **both sides of every branch** of a shader for every pixel. With
+  effects off, the big CRT shader still cost as if its effects were on.
+- A window that contains an OpenGL widget is put together by Qt through OpenGL, even
+  when the widget shows nothing: 24 ms a frame at 1080p here. The same picture painted
+  into a plain widget took 4 ms.
+
+### What was built
+
+- **The video pipeline delivers what the screen needs** (`Player::setOutput`,
+  `src/app/FastPath.cpp`). The player's video sink is now *scale → convert → size and
+  format filter → the player*. GStreamer's scaler and converter run on all CPU cores
+  (`n-threads=0`) with vector code. Scaling comes first, in the video's own format, so
+  conversion works on the smaller picture (measured: 59 against 37 frames a second for 4K
+  shown at 1080p). Three outputs:
+  - *as decoded* (with a graphics card, and wherever the full frame is needed);
+  - *converted* (a look without a graphics card: no conversion pass in OpenGL);
+  - *converted and scaled* (effects off: exactly the size of the picture on screen; with
+    a look: when the video is more than 1.6 times larger than its picture).
+- **A window surface without OpenGL** (`GlSurfaceWidget`). Without a graphics card the
+  video is a plain widget. With effects off it paints the frame as it arrived: a
+  straight copy. With a look it draws the look into an off-screen framebuffer and paints
+  that. With a graphics card it is the OpenGL widget it always was.
+- **A program of its own for effects off** (`shaders/plain.frag`), for the cases that
+  still go through OpenGL.
+- **Looks at half size** in a large window without a graphics card (*Look detail*:
+  Automatic, Full, Half).
+- **Frames converted on the CPU are uploaded as they are**; the smaller copies the
+  looks need are only made when a look is on.
+- **The full frame stays at hand** (`Player::nativeSample`). While frames are delivered
+  converted or scaled, the player keeps the last four frames as decoded: references to
+  the decoder's buffers, no copies. An original-frame screenshot is made from the one
+  behind the picture on screen. A paused picture that is no longer what is asked for
+  (scaled for a window that has since gone fullscreen, say) gives way to it. Nothing is
+  sought for, so nothing on screen is lost (a subtitle line, see the faults below). Only
+  when that frame is gone does the player seek to the frame's own time.
+- **GIF recording, rotated video and the split view** get frames as decoded. **Desk
+  mode** gets frames converted on the CPU at the video's own size, the same frames as
+  the flat view with a look, so that flying in still lands on exactly the fullscreen
+  picture.
+- **Playsink's own converter is kept out of the way.** It would have converted (single
+  threaded) before the player's sink saw the frames; a query probe on the sink's input
+  answers with every format, so frames arrive as decoded.
+
+### Results
+
+Speed on the test machine (the same clips and settings as the table above: fullscreen
+at 1920×1080, 2 cores, video at 30 frames a second; the last two rows are from the checks
+below):
+
+| | 2.11 | 2.12 |
+|---|---|---|
+| 1080p H.264, effects off | 11 frames a second (91 ms a frame) | **30** (full rate; 2 ms to draw a frame) |
+| 4K H.264, effects off | 3.2 | **30** (full rate) |
+| 4K HEVC 10-bit, effects off | 2.7 | 9.3 |
+| 1080p, Clean Broadcast Monitor look | 7.5 | 24 (the look at half size) |
+| 1080p, Consumer Television look | 2.9 | 12.8 (the look at half size) |
+| 4K H.264, Clean Broadcast Monitor look | not measured | 15.6 |
+| 1080p in a 1280×800 window, effects off | 17.4 | **30** |
+| CPU used for that (of 2 cores) | 1.80 cores | 0.45 cores |
+
+| Check (`tests/automation/nogpu.txt`, `scripts/check-nogpu.py`; run on both window surfaces) | Result |
+|---|---|
+| The script ran without a failed step | PASS: all ok |
+| The window surface is the one asked for | PASS: raster |
+| Software OpenGL is recognised | PASS: llvmpipe (LLVM 20.1.2, 256 bits), OpenGL 4.5 core (Mesa) |
+| Effects off: frames arrive converted, at exactly the size they are shown at | PASS: 1262 × 710 for a picture of 1262 × 710 (the video is 1920 × 1080) |
+| 1080p at 30 frames a second plays at full rate | PASS: 30.0 frames a second (17.4 the old way) |
+| Drawing a frame takes a fraction of the time | PASS: 0.6 ms a frame against 54.1 ms the old way |
+| No OpenGL is used at all with effects off | PASS: 0 OpenGL draws |
+| It also costs less CPU | PASS: 0.45 cores busy against 1.80, of 2 |
+| The picture is the same as the old way shows (same frame, paused) | PASS: mean difference 1.65 of 255, 0.08% of areas differ visibly |
+| An original-frame screenshot is still the full video frame, identical either way | PASS: 1920 × 1080, largest difference 0 |
+| After the screenshot the fast frames are asked for again | PASS: rgb scaled |
+| With the fast path set to Never, frames stay as decoded | PASS: as decoded, 1920 × 1080 |
+| 4K at 30 frames a second | PASS: 30.1 frames a second (4.2 the old way), scaled to 1262 × 710 on the CPU |
+| 4K shrunk on the CPU shows the same picture | PASS: mean difference 1.87 from the old way, 0.25% of areas differ visibly |
+| And it is shrunk properly (every pixel averaged in: no jagged, noisy fine detail) | PASS: fine detail 2.08; the 4K frame averaged down has 1.74 (the old way showed 1.42) |
+| The decoder uses every CPU thread | PASS: 2 decoder threads, 2 CPU threads |
+| An anamorphic DVD keeps its 16:9 shape | PASS: 1.778; frames 853 × 480 with square pixels (stored as 720 × 480) |
+| And shows the same picture as the old way | PASS: mean difference 2.02 |
+| Zoomed to fill the window (the cropped part of the frame is shown) | PASS: mean difference 2.09; picture 1280 × 710 |
+| Going fullscreen and back, the frames follow the size of the picture | PASS: 1262 × 710 → 1920 × 1080 → 1262 × 710 |
+| Fullscreen 1080p plays at full rate | PASS: 29.9 frames a second |
+| Going fullscreen while paused, the frame scaled for the window gives way to the full frame | PASS: 1920 × 1080, paused |
+| Twelve changes of size and look in five seconds, while playing: the stream carries on | PASS: playing, 30.2 frames a second, at 8.6 s, no error |
+| A rotated phone video is drawn the old way, upright | PASS: as decoded, picture aspect 0.562, difference 0.00 |
+| With a look, frames are converted on the CPU at the video's own size (no conversion pass in OpenGL) | PASS: rgb, 1920 × 1080, conversion 0.0 ms |
+| The look shows the same picture as the old way | PASS: mean difference 1.11 |
+| Look detail: Half draws the look at half size and is faster for it | PASS: 24.9 frames a second against 11.9 at full size (fullscreen, 1080p) |
+| The half-size look is the same picture, softer | PASS: mean difference 5.49; fine detail 8.20 against 19.32 |
+| Automatic: half in a large window, full in a small one | PASS: fullscreen (1080 high) 0.5, window (710 high) 1 |
+| Desk mode gets frames converted on the CPU, at the video's own size | PASS: rgb, 1920 × 1080 |
+| 4K with a look: frames come scaled to the picture | PASS: 1262 × 710, 17.0 frames a second |
+| Cable TV with effects off: the channel number is painted over the picture | PASS: 3492 pixels of the channel number's green in the top right corner |
+
+On the OpenGL widget (forced onto software OpenGL, a case no real machine gets by
+itself) the same checks pass with these figures: 1080p 30.1 frames a second (13.7 the
+old way), 4K 26.7 (3.9), fullscreen 1080p 18.9; a frame takes 12.3 ms to draw against
+56.3 ms; the look is always drawn at full size there.
+
+**The path a graphics card takes was run as a whole suite** (`CRTPLAYER_VIDEO_SURFACE=gl
+CRTPLAYER_FAST_PATH=never`: the OpenGL widget with frames as decoded, as in 2.11):
+429 checks, no failures.
+
+**Full suites for 2.12.0:** native X11 (429 checks) and Wayland (18), and the same on
+the AppImage with the system's Qt removed (429 and 18). No failures. Results:
+`docs/results/nogpu-checks.txt` and `nogpu-checks-appimage.txt`.
+
+Unit tests: `tests/test_fmv.cpp` (how well a palette serves a frame; when the palette
+before is kept).
+
+### Faults found on the way, and fixed
+
+- **4K shrunk to a window was jagged and noisy** in the first version: GStreamer's
+  default scaling filter reads two source pixels for each output pixel and skips the
+  rest. The multi-tap filter averages them all in and costs 6% more time. Check: *it is
+  shrunk properly*.
+- **An anamorphic picture was a fraction of a line short** (0.2%): the scaler adds
+  borders by default when the shapes differ by a rounding. Borders are off. Brightness
+  edges now sit in the same place as the old way to a hundredth of a pixel.
+- **An anamorphic DVD showed as 4:3** in an early version: playsink scaled it before the
+  player's sink, and the "native" format seen was the scaled one. (The first fix,
+  playbin's *native video* flag, turned out to disable subtitles; the query probe above
+  replaced it.)
+- **Cable TV with effects off showed a black picture on the OpenGL widget.** The
+  effects-off program with the channel display was loaded from Qt's on-disk program
+  cache, which is keyed only by a program's "cacheable" shaders: the changed fragment
+  shader was not part of the key, so an old program was served. The shader is now part
+  of the key. It showed here because the shader had changed between builds; for users it
+  would have appeared with graphics cards too, after a later update that changed that
+  shader. Check: *Cable TV with effects off*, on both surfaces.
+- **Playback could stop with "Internal data stream error … not negotiated"** when the
+  size or the look changed while the video played (going fullscreen, resizing, effects
+  on or off): a frame already on its way in the old format met the filter after it had
+  been set to the new one. It happened about once in four tries of a dozen quick changes
+  (3 of 12 runs), and once in the first release run. The filter now lets frames in the
+  previous format through until the new one arrives (`caps-change-mode=delayed`): 0 of
+  12 runs. Check: *twelve changes of size and look in five seconds*.
+- **An original-frame screenshot lost the subtitle line on screen** in an early version:
+  the full frame was fetched by seeking to it, and a file does not send a subtitle line
+  again that began before the point sought to. Found by the 2.11 subtitle checks (*V
+  turns them on*, *subtitle delay*), which take such screenshots. The full frame is now
+  kept at hand instead.
+- **A paused picture could change to its neighbour frame** when the frame was fetched
+  again (entering desk mode, taking a screenshot): the player's position while paused
+  can lie a frame to either side of the one shown. The refresh now asks for the frame on
+  screen by its own time. Found by the desk-mode checks (*lands on the exact fullscreen
+  frame*).
+- **Flying in from desk mode no longer landed on the exact fullscreen picture** in an
+  early version (edges of coloured areas a pixel off): desk mode drew from frames as
+  decoded and the flat view from frames converted on the CPU. Both now use the same
+  frames. The six landing checks pass with a largest difference of 0.
+- **The Sega CD look's still areas flickered between two neighbouring colours** from
+  frame to frame: the palette was picked afresh for every frame, and a colour on the
+  border between two of the console's levels tipped either way with the slightest change.
+  It showed when the conversion moved to the CPU (values 2 to 4 steps different), and
+  made the check *blocks that hardly change are left as they were* fail (13% of blocks
+  unchanged instead of 51%). The palette before is now kept between full frames for as
+  long as it serves the frame nearly as well as a fresh one (within 20% of its error).
+  The check passes on both paths (55% against 33% with the codec off).
+
+### Known limits and what was not tested
+
+- **Not tested in a real QEMU guest,** and not on more than 2 cores. The test machine has
+  no graphics card and uses the same software OpenGL (llvmpipe) a guest without 3D
+  acceleration gets, so the measurements are of the same kind; how the speed grows with
+  12 cores was not measured.
+- **4K HEVC 10-bit is still slow on 2 cores:** 9 frames a second with effects off (2.7
+  before). Decoding and converting 10-bit 4K is the limit there, not drawing: the
+  pipeline alone (decoding, scaling and converting, nothing drawn) manages 16 on these 2
+  cores, and decoding alone 38. More cores should help both; not measured. Turning the
+  10-bit picture into 8-bit before scaling measured 24 against 16 in a test outside the
+  player; that is not built in yet.
+- **Looks are computed by the CPU** and stay slow in a large window: see the table. The
+  half-size look is softer; it is a trade for speed.
+- **Rotated video, the split view and GIF recording** use the old path and are as slow
+  as before without a graphics card. **Desk mode's** 3D scene is drawn by software OpenGL
+  and stays slow; only its video frames got cheaper. Its speed was not measured.
+- **The CPU's colour conversion is not bit-identical to the shader's:** it differs by 2
+  to 4 steps of 255 (mean 1.7 to 2.1 over a picture), and the edges of coloured areas can
+  sit up to one screen pixel differently (the two treat the position of the half-size
+  colour samples differently). Original-frame screenshots always come from the frame as
+  decoded and are identical either way (checked: largest difference 0).
+- **A screenshot with the look** shows what the window shows, from the frame at hand:
+  without a graphics card that is the CPU-converted frame, and for a 4K video in a small
+  window the scaled one.
+- **Switching** between the paths takes a few frames (the pipeline renegotiates); a
+  video's first frames may arrive as decoded.
+- **The four decoded frames kept at hand** hold on to that much more of the decoder's
+  memory while the fast path is on (for 4K 10-bit, about 100 MB). Not measured, and not
+  tried with a hardware decoder (there is none without a graphics card).
+- **With a real graphics card** nothing changes by default (*CPU fast path: Automatic*).
+  *Always* was not tested on a real graphics card.
+- **Windows:** not run. The same code applies there without a graphics card; untested.
 
 ## 2.11: subtitles that stay as set, and everyday playback
 
@@ -2429,6 +2646,7 @@ the native binary failed to start (missing `libQt6OpenGL`). With them gone:
 | Desk-mode scenes: desk (planks, wall, moods, the picture lighting the room, clear-coat reflection), fog, scene settings | **Tested** (measurements above); look judged by eye; GPU speed not measured |
 | AppImage Qt selection (system Qt preferred); composited-screen check; keep the screen awake | **Tested** here (Weston, stand-in D-Bus services). **Not verified** on Bazzite/KWin |
 | Other distributions (install hints, missing plugins, audio fallback, AppImage without libproxy) | **Tested** by simulation (os-release files, plugins removed, libproxy hidden). **Not tested** on real installations |
+| Playback without a graphics card (frames converted and scaled on the CPU's cores, painted without OpenGL; looks at half size) | **Tested** on software OpenGL with 2 cores (measurements above), on both window surfaces, and the graphics-card path as a whole suite. **Not tested** in a real virtual machine or on more cores |
 | Persistence, colour depth + dither, PAL, set moments (power, static, VCR text) | **Tested** (measurements above); not compared with real hardware |
 | Jellyfin: sign-in, browse, search, stream, seek, resume, progress sync, sign-out, HTTPS | **Tested against a mock server** built from the public API (10.8 and 10.10 routes). **Not tested against a real Jellyfin server** |
 | Desk mode: 3D set, transparency, click-through, rotate/move/zoom, fly in/out, pixel-identical landing, screen shapes, context menu | **Tested:** scripted on X11 and Wayland; real input and visible transparency on X11 with picom only. **Not tested on KDE/KWin or gamescope** |

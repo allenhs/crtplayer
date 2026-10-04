@@ -58,7 +58,7 @@ configurable, GPU-rendered CRT presentation that respects every aspect ratio:
   exact sizes like 256×224 and 320×200), with hard, sharp or soft pixels. Scanlines lock
   to one line per pixel row.
 - **Sega CD FMV look.** Video the way an early-90s CD console played it: a 256×224
-  screen, a blocky 4×4 codec, about 64 colours picked afresh for every frame and
+  screen, a blocky 4×4 codec, about 64 colours picked to suit the picture and
   dithered, 15 frames a second, 8-bit sound. See [Sega CD FMV look](#sega-cd-fmv-look).
 - **Cable TV.** Folders of videos (and Jellyfin libraries) become channels that
   broadcast around the clock. Tune in and a programme is already partway through; flip
@@ -79,6 +79,10 @@ configurable, GPU-rendered CRT presentation that respects every aspect ratio:
   leave desk mode.
 - **Hardware decoding when available**, with automatic fallback to software if a
   hardware decoder fails.
+- **Plays without a graphics card.** In a virtual machine without 3D acceleration (or
+  anywhere OpenGL runs in software), the player moves colour conversion and scaling onto
+  all your CPU cores and, with effects off, paints the picture without OpenGL at all.
+  See [Without a graphics card](#without-a-graphics-card).
 - **Wayland and X11**, through Qt 6.
 
 ---
@@ -94,6 +98,7 @@ configurable, GPU-rendered CRT presentation that respects every aspect ratio:
 6. [CRT presets and parameters](#crt-presets-and-parameters)
 7. [Screenshots, frame stepping, playlist](#screenshots-frame-stepping-playlist)
    - [Cutting without re-encoding, and GIF clips](#cutting-without-re-encoding-and-gif-clips)
+   - [Without a graphics card](#without-a-graphics-card)
 8. [Desk mode: a 3D TV on your desktop](#desk-mode-a-3d-tv-on-your-desktop)
 9. [Cable TV](#cable-tv)
 10. [Jellyfin](#jellyfin)
@@ -607,7 +612,7 @@ What the console did, and what the look does:
 |---|---|
 | A 256×224 screen with slightly wide pixels | The video is drawn on that grid (340×224 for 16:9 video, so nothing is stretched) |
 | A video codec working in 4×4 blocks, redrawing only the blocks that changed | Blocks go flat or two-coloured; blocks where little moves stay frozen for a few frames |
-| 64 colours on screen, out of 512 | Each frame gets its own palette of up to 64 colours, all from the console's 512, with a checkered dither faking the rest |
+| 64 colours on screen, out of 512 | A palette of up to 64 colours picked for the picture, all from the console's 512, with a checkered dither faking the rest. It is picked afresh at every full frame (every 2 seconds, and after a jump) and whenever the picture needs different colours; in between it stays, so still areas don't flicker |
 | About 12 to 15 frames a second | The picture changes 15 times a second (12 in the small-window preset); the sound carries on normally |
 | Composite video into a TV | Colour bleed, rainbowing and dot crawl, then scanlines and a slot mask |
 | 8-bit PCM sound | **Console PCM**: fewer bits and a lower sample rate, unsmoothed, through the TV's speaker |
@@ -937,6 +942,97 @@ clipboard for bug reports. It covers:
 It contains no file names, paths, user names or server addresses.
 
 ---
+
+## Without a graphics card
+
+The CRT effects are made for a graphics card. Some machines have none that the player
+can use:
+
+- a **virtual machine** without 3D acceleration, for example QEMU / virt-manager with
+  the Virtio video model and *3D acceleration* off (the usual setup when the host has an
+  NVIDIA card);
+- a remote desktop session, or a machine whose graphics driver is not installed.
+
+There, OpenGL runs in software on the CPU (Mesa's *llvmpipe*), and every pixel the
+player draws is computed one by one. Before 2.12 that made even plain playback slow: a
+1080p video with effects off took 91 ms a frame on the test machine, most of it turning
+the video's colours into screen colours at the video's full size.
+
+From 2.12 the player notices software OpenGL by itself and works differently. **Nothing
+needs to be set.** Press **I** to see which way it is drawing: the *Drawing* line says
+*no graphics acceleration (software OpenGL)* and what is done on the CPU.
+
+**With effects off** (press **B**):
+
+- The video pipeline converts the colours and scales the picture **on all CPU cores**,
+  in the video's own threads, with the CPU's vector instructions.
+- Frames arrive at **exactly the size they are shown at**, so a 4K video in a 1080p
+  window costs no more to draw than a 1080p one.
+- The picture is **painted straight into the window. OpenGL is not used at all.**
+
+**With a look:**
+
+- Colours are converted on the CPU cores; only the look itself goes through software
+  OpenGL.
+- A video much larger than its picture (4K in a 1080p window) is scaled down first.
+- In a large window (more than 800 pixels high) the look is **drawn at half size and
+  enlarged**: a quarter of the pixels to compute. It is a little softer.
+  *Settings → Playback → Decoding → Look detail* chooses **Automatic**, **Full size** or
+  **Half size**.
+
+**Desk mode** gets its frames converted on the CPU cores too. The 3D scene itself is
+still drawn by software OpenGL, so it stays slow without a graphics card.
+
+**What still goes the old way** (and is as slow as before): a rotated phone video, the
+before/after split view, and recording a GIF. *Original frame* screenshots are always
+taken from the full video frame, whichever way is in use: the player keeps the last few
+decoded frames at hand for that.
+
+**Measured** on the test machine (2 CPU cores, software OpenGL, a 1920×1080 screen;
+video at 30 frames a second, fullscreen unless said):
+
+| | 2.11 | 2.12 |
+|---|---|---|
+| 1080p H.264, effects off | 11 frames a second | **30** (full rate) |
+| 4K H.264, effects off | 3.2 | **30** (full rate) |
+| 4K HEVC 10-bit, effects off | 2.7 | 9.3 |
+| 1080p, Clean Broadcast Monitor look | 7.5 | 24 (the look at half size) |
+| 1080p, Consumer Television look | 2.9 | 12.8 (the look at half size) |
+| 1080p in a window, effects off: CPU used | 1.8 of 2 cores (at 17 frames a second) | 0.45 of 2 cores (at 30) |
+
+With effects off, playback is now limited by decoding and converting the video, as it
+should be, and both use every core. On those 2 cores that is plenty for 4K H.264 and not
+yet enough for 4K HEVC 10-bit; more cores should help, which was not measured.
+
+**Settings** (*Settings → Playback → Decoding*):
+
+- **CPU fast path:** *Automatic* (used only without a graphics card), *Always*, or
+  *Never* (everything as before 2.12).
+- **Look detail:** *Automatic*, *Full size*, *Half size* (see above; it only applies
+  without a graphics card).
+
+**Getting the most out of a virtual machine:**
+
+- **Give the guest more CPU cores.** Decoding, colour conversion, scaling and software
+  OpenGL all use every core they are given.
+- **Pass the host's CPU through** (*Copy host CPU configuration* in virt-manager). The
+  fast code paths use the CPU's vector instructions (AVX2), which a generic virtual CPU
+  hides.
+- **Effects off is by far the cheapest.** With a look, a smaller window or *Look detail:
+  Half size* helps most; the lighter looks (Clean Broadcast Monitor) cost less than the
+  heavy ones (Consumer Television, VHS).
+- If the virtual machine can be given real 3D acceleration, the player uses it by
+  itself and none of this applies.
+
+**Good to know:**
+
+- The CPU's colour conversion and the graphics card's agree to within about 3 steps of
+  255 per colour, and the edge of a coloured area can sit up to a pixel differently.
+  Brightness edges are in exactly the same place.
+- For tests: `CRTPLAYER_VIDEO_SURFACE=raster` or `gl` picks the window surface
+  (normally *raster* without a graphics card, *gl* with one), and
+  `CRTPLAYER_FAST_PATH=auto|always|never` and `CRTPLAYER_LOOK_DETAIL=auto|full|half` set
+  the two settings' defaults.
 
 ## Controllers, media keys and Steam Game Mode
 
@@ -1442,6 +1538,17 @@ Settings are saved whenever the player exits: window close, Ctrl+Q, or logout.
 - If only the audio decoder is missing, the video still plays and a notice names the
   missing audio decoder.
 
+**Video plays slowly in a virtual machine** (or anywhere without a graphics card)
+
+- Press **I**. If the *Drawing* line says *no graphics acceleration (software OpenGL)*,
+  everything is drawn by the CPU. See [Without a graphics card](#without-a-graphics-card).
+- With effects off (**B**), 1080p and 4K H.264 should play at full rate from 2.12. If
+  they don't, check that *Settings → Playback → Decoding → CPU fast path* is *Automatic*
+  or *Always*, and give the virtual machine more CPU cores.
+- With a look, choose *Look detail: Half size*, a smaller window, or a lighter look.
+- 4K HEVC 10-bit is heavy to decode and convert on the CPU alone: it needs more cores
+  than 4K H.264.
+
 **"OpenGL 3.3 is required" or a black video area**
 
 - Check the driver with `glxinfo -B` (X11) or `eglinfo` (Wayland).
@@ -1566,7 +1673,9 @@ src/
   playback/Player.*        GStreamer playbin + appsink, seeking, tracks, decoder policy, errors
   render/Geometry.*        pure aspect/scaling/orientation math (unit-tested)
   render/CrtRenderer.*     GL resources: frame upload, conversion, blur, CRT pass, offscreen capture
-  render/VideoWidget.*     QOpenGLWidget: layout, compare divider, screenshots, sync statistics
+  render/GlSurfaceWidget.* the video's window surface: an OpenGL widget with a graphics card; without one, a
+                           plain widget that paints frames itself and draws looks off screen
+  render/VideoWidget.*     the video view: layout, compare divider, screenshots, sync statistics
   settings/CrtParams.*     parameter model, parameter table, built-in presets, preset JSON
   settings/PresetManager.* user presets on disk (save/rename/delete/import/export)
   settings/AppSettings.*   persistent settings (QSettings)
@@ -1575,6 +1684,8 @@ src/
   app/MainWindow.*         wiring, shortcuts, fullscreen and auto-hide, overlays
   app/Everyday.cpp         subtitles and languages that carry over, delays, night mode, shuffle / repeat,
                            playlist files, the next video in a folder, the sleep timer (part of MainWindow)
+  app/FastPath.cpp         playback without a graphics card: which frames the pipeline delivers (as decoded,
+                           converted, converted and scaled) and at what size the look is drawn (part of MainWindow)
   app/Automation.*         scripted driver used for verification
   app/DeskWindow.*         desk mode: transparent screen-sized window, input mask, control strip
   jellyfin/JellyfinClient.* Jellyfin API: sign-in, browsing, images, stream URLs, playback reporting
@@ -1590,6 +1701,7 @@ src/
   ui/TvPanel.*             the TV tab
   ui/CutDialog.*, ui/GifDialog.*  the two dialogs
 shaders/                   quad.vert, convert.frag, downsample.frag, blur.frag, crt.frag,
+                           plain.frag (effects off: a small program of its own),
                            fmv_codec.frag, fmv_palette.frag (Sega CD FMV look),
                            desk.vert, desk.frag (3D cabinet, glass, shadow)
 tests/                     unit tests + automation scripts

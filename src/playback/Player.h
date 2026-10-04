@@ -1,11 +1,13 @@
 #pragma once
 #include <QMutex>
 #include <QObject>
+#include <QSize>
 #include <QString>
 #include <QStringList>
 #include <QTimer>
 #include <QVector>
 #include <atomic>
+#include <deque>
 #include <gst/gst.h>
 #include "TapeAudio.h"
 
@@ -120,6 +122,22 @@ public:
     void setDeinterlace(bool on) { m_deinterlace = on; }   // from the next open()
     bool deinterlace() const { return m_deinterlace; }
     bool deinterlacing() const;   // the current video is interlaced and is being deinterlaced
+
+    // Without a graphics card, the picture is cheapest when the video pipeline itself converts
+    // it to RGB and scales it to the size it is shown at: that work is spread over all CPU
+    // cores (SIMD code, the pipeline's own threads) and off the drawing thread.
+    // AsDecoded: frames as decoded (the renderer converts them on the graphics card).
+    // Rgb: converted to RGB, at the video's own size. RgbScaled: and scaled to `size` (square pixels).
+    enum class Output { AsDecoded, Rgb, RgbScaled };
+    void setOutput(Output mode, const QSize& size = QSize());
+    Output output() const { return m_output; }
+    QSize fastOutput() const { return m_output == Output::RgbScaled ? m_fastSize : QSize(); }
+    // The video as decoded (before any such scaling): size, pixel shape, format name. False until known.
+    bool nativeFormat(int* width, int* height, int* parN, int* parD, QString* format = nullptr) const;
+    // The frame as decoded that `shown` (a converted or scaled frame) was made from, or null
+    // when it is no longer at hand. The caller unrefs it.
+    GstSample* nativeSample(GstSample* shown);
+    int decoderThreads() const;   // worker threads of the software video decoder (0: unknown / hardware)
     // (for the checks) the delays as the sinks hold them, ms: sound, picture, subtitles; and the sound level going out (dB)
     void appliedOffsets(int* audioSinkMs, int* videoSinkMs, int* textMs) const;
     float soundLevelDb() const { return crtTapeLevelDb(m_tape); }
@@ -189,6 +207,23 @@ private:
     bool m_prefMuted = false;      // silent until the preferred language is switched in (no burst of the other one)
     void applyOffsets();
     void applySubtitleStyle();
+    void applyFastOutput();
+    static GstPadProbeReturn onSinkEvent(GstPad*, GstPadProbeInfo* info, gpointer self);
+    static GstPadProbeReturn onSinkBuffer(GstPad*, GstPadProbeInfo* info, gpointer self);
+    void clearNativeFrames();              // (m_mutex held)
+    // The last few frames as decoded, kept while frames are delivered converted or scaled:
+    // references to the decoder's buffers, no copies. Guarded by m_mutex.
+    struct NativeFrame { GstBuffer* buffer; GstCaps* caps; };
+    std::deque<NativeFrame> m_nativeFrames;
+    GstCaps* m_natCaps = nullptr;
+    std::atomic<bool> m_keepNative{false};
+    GstElement* m_capsFilter = nullptr;    // in the video sink bin (owned by the pipeline)
+    GstElement* m_videoDec = nullptr;      // the software video decoder (a reference); guarded by m_mutex
+    QSize m_fastSize;
+    Output m_output = Output::AsDecoded;
+    bool m_canScale = false;
+    int m_natW = 0, m_natH = 0, m_natParN = 1, m_natParD = 1;   // guarded by m_mutex
+    QString m_natFormat;                                        // guarded by m_mutex
     bool m_subsWanted = false;
     QString m_prefAudioLang, m_prefSubLang;
     bool m_audioPicked = false, m_subPicked = false;   // the viewer chose a track in this video

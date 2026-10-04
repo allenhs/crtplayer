@@ -117,6 +117,34 @@ QVector<QRgb> fmvPalette(const uchar* rgba, int width, int height, int stride, i
     return pal;
 }
 
+double fmvPaletteError(const uchar* rgba, int width, int height, int stride, const QVector<QRgb>& palette)
+{
+    if (palette.isEmpty() || width <= 0 || height <= 0) return 0;
+    // Counted on a 5-bit grid: a frame has far fewer distinct colours there than pixels.
+    std::vector<quint32> hist(32768, 0);
+    for (int y = 0; y < height; ++y) {
+        const uchar* p = rgba + qsizetype(y) * stride;
+        for (int x = 0; x < width; ++x, p += 4) ++hist[((p[0] >> 3) << 10) | ((p[1] >> 3) << 5) | (p[2] >> 3)];
+    }
+    double sum = 0;
+    for (int i = 0; i < 32768; ++i) {
+        if (!hist[i]) continue;
+        const int r = ((i >> 10) << 3) + 4, g = (((i >> 5) & 31) << 3) + 4, b = ((i & 31) << 3) + 4;
+        int best = 1 << 30;
+        for (QRgb c : palette) {
+            const int dr = r - qRed(c), dg = g - qGreen(c), db = b - qBlue(c);
+            best = std::min(best, dr * dr + dg * dg + db * db);
+        }
+        sum += double(best) * hist[i];
+    }
+    return std::sqrt(sum / (double(width) * height));
+}
+
+bool fmvKeepPalette(double previousError, double freshError)
+{
+    return previousError <= freshError * 1.2 + 1.5;
+}
+
 QSize fmvGridSize(double displayAspect, int rows, int columns)
 {
     int h = rows > 0 ? rows : 224;

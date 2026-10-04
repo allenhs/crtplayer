@@ -46,6 +46,21 @@ int main()
     for (QRgb c : fmvPalette(px.data(), W, H, W * 4, 16)) if (qRed(c) >= 206 && qGreen(c) <= 87 && qBlue(c) <= 87) hasRed = true;
     check(hasRed, "a small red detail on a big blue background keeps a red of its own (16 colours)");
 
+    // How well a palette serves a frame, and when the one before is kept.
+    {
+        std::vector<uchar> f(size_t(W) * H * 4, 255);
+        for (int i = 0; i < W * H; ++i) { const bool a = (i / W) < H / 2; f[i * 4] = a ? 255 : 52; f[i * 4 + 1] = a ? 255 : 87; f[i * 4 + 2] = a ? 255 : 206; }
+        const QVector<QRgb> own = fmvPalette(f.data(), W, H, W * 4, 64);
+        const double e0 = fmvPaletteError(f.data(), W, H, W * 4, own);
+        const double e1 = fmvPaletteError(f.data(), W, H, W * 4, {qRgb(255, 255, 255)});
+        const double e2 = fmvPaletteError(f.data(), W, H, W * 4, {qRgb(255, 255, 255), qRgb(52, 87, 172)});
+        std::printf("palette error: own %.1f, white only %.1f, white and a near blue %.1f\n", e0, e1, e2);
+        check(own.size() == 2 && e0 < 7.0, "a frame's own palette serves it (error within the measuring grid)");
+        check(e1 > 100 && e2 > 15 && e2 < e1, "a palette without the frame's colours is measured as worse, the further the worse");
+        check(fmvKeepPalette(e0 + 1.0, e0) && !fmvKeepPalette(e2, e0) && !fmvKeepPalette(e1, e0),
+              "the palette before is kept when nearly as good, and replaced when a colour is missing");
+    }
+
     check(fmvGridSize(4.0 / 3.0, 0, 0) == QSize(256, 224), "a 4:3 picture is 256 x 224");
     check(fmvGridSize(16.0 / 9.0, 0, 0) == QSize(340, 224), "a 16:9 picture keeps the console's pixel shape: 340 x 224");
     check(fmvGridSize(4.0 / 3.0, 240, 320) == QSize(320, 240), "explicit rows and columns are used as given");

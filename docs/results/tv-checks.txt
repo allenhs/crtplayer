@@ -4,13 +4,13 @@ PASS  bumpers are read from their folder: channel 5: 3 programmes, 2 bumpers
 PASS  a Jellyfin folder becomes a channel with its episodes: channel 3 "Shows": 2 programmes, 20 s
 PASS  an empty folder is a channel with nothing on: channel 9: 0 programmes
 PASS  turning the TV on tunes the first channel, with static until the picture arrives: channel 2, static
-PASS  it comes on partway through, where the broadcast is: "Another Film": the broadcast is 20.1 s in, the player 19.4 s
+PASS  it comes on partway through, where the broadcast is: "Another Film": the broadcast is 19.9 s in, the player 19.1 s
 PASS  the channel number and what is on show for a few seconds after tuning, then go: just after tuning: "CH 02 MOVIES", "Another Film", "NEXT  7:13 AM  Tall Story"; later the number has gone
-PASS  channel up: the Jellyfin channel plays, in step with its schedule: "Test Show · S01E01 · Pilot": the broadcast is 7.7 s in, the player 7.3 s
+PASS  channel up: the Jellyfin channel plays, in step with its schedule: "Test Show · S01E01 · Pilot": the broadcast is 7.2 s in, the player 6.8 s
 PASS  programmes follow one another on their own, as scheduled: Toon Episode 1 → Toon Episode 1 → Toon Episode 1 → ident-b → Toon Episode 10 (5 of 5 looks in step, 0 during a change-over)
 PASS  bumpers play between programmes: 1 bumper(s), 4 programmes played so far
-PASS  W shows the guide over the lower part of the picture, through the tube: 98% blue in the lower part with the guide, 0% without; the video stays on above (21% blue)
-PASS  number keys tune a channel, and it has moved on meanwhile: "Big Movie 1994": the broadcast is 18.4 s in, the player 18.5 s; 43 s after the first visit
+PASS  W shows the guide over the lower part of the picture, through the tube: 98% blue in the lower part with the guide, 0% without; the video stays on above (22% blue)
+PASS  number keys tune a channel, and it has moved on meanwhile: "Big Movie 1994": the broadcast is 18.0 s in, the player 18.1 s; 43 s after the first visit
 PASS  an empty channel shows static and says so, with the channel number readable over the snow: "NO PROGRAMMES", static; green lettering in 5.0% of the top-right corner, 0.00% green elsewhere
 PASS  a number with no channel leaves the TV where it was: "CH 07 NOT IN USE", still channel 9
 PASS  leaving for the empty channel while a programme is still opening: nothing starts playing behind the static: idle, static, "NO PROGRAMMES"
@@ -22,8 +22,8 @@ PASS  Jellyfin: the channel's episodes are listed in one recursive query: 1 requ
 PASS  Jellyfin: TV mode reports no playback (resume points and "watched" marks stay as they are): 5 stream requests, 0 playback reports
 PASS  Jellyfin: streams still carry the token in the header only: 5 requests
 PASS  the channels are stored without any token: …/CRTPlayer/CRTPlayer/channels.json
-PASS  the channels are back on the next launch, without reading the videos again: channels [2, 3, 5, 9], ready after 47 ms
-PASS  TV on again goes to the channel last watched: channel 3; "Test Show · S01E01 · Pilot": the broadcast is 0.8 s in, the player 0.0 s
+PASS  the channels are back on the next launch, without reading the videos again: channels [2, 3, 5, 9], ready after 48 ms
+PASS  TV on again goes to the channel last watched: channel 3; "Test Show · S01E01 · Pilot": the broadcast is 0.7 s in, the player 0.0 s
 PASS  opening a file of your own turns the TV off: TV on: False; playing sd_4x3_h264.mp4
 
 All Cable TV checks passed

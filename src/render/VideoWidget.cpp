@@ -1,3 +1,12 @@
+#include <QtGlobal>
+#ifdef Q_OS_WIN
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#else
+#include <time.h>
+#endif
 #include <QOpenGLFunctions>
 #include <QOpenGLContext>
 #include "VideoWidget.h"
@@ -18,13 +27,14 @@ QJsonObject SyncStats::toJson() const
             {"paintMsAvg", paintMsAvg}, {"paintMsMax", paintMsMax}};
 }
 
-VideoWidget::VideoWidget(Player* player, QWidget* parent) : QOpenGLWidget(parent), m_player(player)
+VideoWidget::VideoWidget(Player* player, QWidget* parent, GlSurfaceWidget::Mode mode) : GlSurfaceWidget(mode, parent), m_player(player)
 {
     setMouseTracking(true);
     setFocusPolicy(Qt::StrongFocus);
     setMinimumSize(320, 180);
     m_clock.start();
     m_syncTimer.start();
+    m_softwareGl = isSoftwareRenderer(probedRenderer());
     connect(m_player, &Player::frameReady, this, [this] { update(); });
     m_animTimer.setInterval(16);
     m_animTimer.setTimerType(Qt::PreciseTimer);
@@ -46,6 +56,7 @@ VideoWidget::VideoWidget(Player* player, QWidget* parent) : QOpenGLWidget(parent
 
 VideoWidget::~VideoWidget()
 {
+    if (m_curSample) gst_sample_unref(m_curSample);
     makeCurrent();
     m_renderer.destroy();
     doneCurrent();
@@ -63,13 +74,15 @@ void VideoWidget::initializeGL()
     const auto* ver = reinterpret_cast<const char*>(f->glGetString(GL_VERSION));
     const auto* ren = reinterpret_cast<const char*>(f->glGetString(GL_RENDERER));
     m_glInfo = QStringLiteral("%1 | %2").arg(QString::fromUtf8(ren ? ren : "?"), QString::fromUtf8(ver ? ver : "?"));
+    // A software rasteriser: no GPU, or a virtual machine without 3D acceleration.
+    m_softwareGl = isSoftwareRenderer(QString::fromUtf8(ren ? ren : ""));
 }
 
 void VideoWidget::resizeGL(int, int) {}
 
 void VideoWidget::resizeEvent(QResizeEvent* e)
 {
-    QOpenGLWidget::resizeEvent(e);
+    GlSurfaceWidget::resizeEvent(e);
     updateCompareLabels();
 }
 
@@ -77,6 +90,10 @@ bool VideoWidget::needsAnimation() const
 {
     const CrtParams& p = m_params;
     if (momentsAnimating()) return true;
+    // Effects off: nothing of the look is drawn, so nothing of it needs redrawing between frames.
+    if (m_bypass && !m_compare) return false;
+    // Without a graphics card every redraw is expensive: the look moves with the video's frames.
+    if (m_softwareGl) return false;
     const bool animated = p.persistence > 0.f || p.noise > 0.f || p.flicker > 0.f || p.vhsJitter > 0.f || p.vhsTracking > 0.f ||
                           p.filmGrain > 0.f || p.gateWeave > 0.f || p.filmFlicker > 0.f || p.filmDamage > 0.f ||
                           p.vhsHeadSwitch > 0.f || p.vhsDropouts > 0.f || p.dotCrawl > 0.f || p.rainbow > 0.f ||
@@ -85,7 +102,7 @@ bool VideoWidget::needsAnimation() const
 }
 
 void VideoWidget::setParams(const CrtParams& p) { m_params = p; update(); }
-void VideoWidget::setBypass(bool on) { m_bypass = on; updateCompareLabels(); update(); }
+void VideoWidget::setBypass(bool on) { m_bypass = on; setSurfaceScale(on ? 1.0 : m_lookScale); updateCompareLabels(); update(); }
 void VideoWidget::setCompare(bool on) { m_compare = on; updateCompareLabels(); update(); }
 void VideoWidget::setSplitFraction(double f) { m_split = std::clamp(f, 0.02, 0.98); updateCompareLabels(); update(); }
 void VideoWidget::setScaleMode(ScaleMode m) { m_mode = m; update(); }
@@ -106,6 +123,8 @@ void VideoWidget::setOrientationTag(const QString& tag)
 
 void VideoWidget::clearFrame()
 {
+    if (m_curSample) { gst_sample_unref(m_curSample); m_curSample = nullptr; }
+    m_uploaded = false;
     m_hasFrame = false;
     m_source = SourceFormat{};
     m_source.orient = m_orient;
@@ -285,41 +304,157 @@ double VideoWidget::currentScanlines() const
 }
 
 // Uploads the newest decoded frame, if there is one that hasn't been shown. (GL context current.)
-void VideoWidget::takeNewFrame()
+bool VideoWidget::uploadCurrent()
+{
+    if (!m_curSample) return false;
+    if (m_uploaded) return true;
+    m_uploaded = m_renderer.uploadSample(m_curSample);
+    return m_uploaded;
+}
+
+void VideoWidget::takeNewFrame(bool forGl)
 {
     quint64 serial = 0;
     GstSample* s = m_player->latestSample(&serial);
     if (s && serial == m_shownSerial && m_hasFrame) { gst_sample_unref(s); s = nullptr; }   // nothing new
-    if (s) {
-        m_shownSerial = serial;
-        qint64 lateNs = 0;
-        const bool measure = m_player->isPlaying() && !m_player->isSeeking() && m_player->frameLateness(s, &lateNs);
-        if (m_renderer.uploadSample(s)) {
-            const SourceFormat sf = m_renderer.sourceFormat();
-            const QString pf = m_renderer.pixelFormatName();
-            if (!m_hasFrame || sf.width != m_source.width || sf.height != m_source.height ||
-                sf.parN * m_source.parD != m_source.parN * sf.parD || pf != m_pixFmt) {
-                m_source.width = sf.width; m_source.height = sf.height;
-                m_source.parN = sf.parN; m_source.parD = sf.parD;
-                m_pixFmt = pf;
-                m_colorimetry = m_renderer.colorimetryName();
-                m_hasFrame = true;
-                emit sourceChanged();
-            }
-            m_hasFrame = true;
-            ++m_framesPresented;
-            if (measure) {
-                const double ms = lateNs / 1e6;
-                ++m_syncN;
-                const double delta = ms - m_syncMean;
-                m_syncMean += delta / m_syncN;
-                m_syncM2 += delta * (ms - m_syncMean);
-                m_syncMaxAbs = std::max(m_syncMaxAbs, std::abs(ms));
-                if (std::abs(ms) <= 20.0) ++m_syncWithin;
+    if (!s) {
+        if (forGl) uploadCurrent();   // (a frame painted plainly so far is now needed by the renderer)
+        return;
+    }
+    m_shownSerial = serial;
+    qint64 lateNs = 0;
+    const bool measure = m_player->isPlaying() && !m_player->isSeeking() && m_player->frameLateness(s, &lateNs);
+    if (m_curSample) gst_sample_unref(m_curSample);
+    m_curSample = s;   // (keeps the reference)
+    m_uploaded = false;
+    // What was delivered: its size, and whether it is 32-bit RGB.
+    GstVideoInfo vi;
+    GstCaps* caps = gst_sample_get_caps(s);
+    const bool known = caps && gst_video_info_from_caps(&vi, caps);
+    m_curSize = known ? QSize(GST_VIDEO_INFO_WIDTH(&vi), GST_VIDEO_INFO_HEIGHT(&vi)) : QSize();
+    m_curRgb = known && (GST_VIDEO_INFO_FORMAT(&vi) == GST_VIDEO_FORMAT_BGRx || GST_VIDEO_INFO_FORMAT(&vi) == GST_VIDEO_FORMAT_BGRA);
+    if (forGl && !uploadCurrent()) return;   // (otherwise it is uploaded when something draws with OpenGL)
+    if (!known) return;
+    // The video as decoded describes the picture (its size, pixel shape and format),
+    // whatever size and format the frames are delivered in.
+    SourceFormat sf;
+    sf.width = GST_VIDEO_INFO_WIDTH(&vi);
+    sf.height = GST_VIDEO_INFO_HEIGHT(&vi);
+    sf.parN = GST_VIDEO_INFO_PAR_N(&vi) > 0 ? GST_VIDEO_INFO_PAR_N(&vi) : 1;
+    sf.parD = GST_VIDEO_INFO_PAR_D(&vi) > 0 ? GST_VIDEO_INFO_PAR_D(&vi) : 1;
+    QString pf = QString::fromUtf8(gst_video_format_to_string(GST_VIDEO_INFO_FORMAT(&vi)));
+    {
+        int nw = 0, nh = 0, pn = 1, pd = 1;
+        QString nf;
+        if (m_player->nativeFormat(&nw, &nh, &pn, &pd, &nf)) {
+            // Converted for the screen: RGB delivered for a video that is not RGB itself, or another size.
+            const GstVideoFormatInfo* ni = gst_video_format_get_info(gst_video_format_from_string(nf.toUtf8().constData()));
+            m_curConverted = (m_curRgb && ni && !GST_VIDEO_FORMAT_INFO_IS_RGB(ni)) || nw != sf.width || nh != sf.height;
+            sf.width = nw; sf.height = nh; sf.parN = pn; sf.parD = pd; pf = nf;
+        } else {
+            m_curConverted = false;
+        }
+    }
+    if (!m_hasFrame || sf.width != m_source.width || sf.height != m_source.height ||
+        sf.parN * m_source.parD != m_source.parN * sf.parD || pf != m_pixFmt) {
+        m_source.width = sf.width; m_source.height = sf.height;
+        m_source.parN = sf.parN; m_source.parD = sf.parD;
+        m_pixFmt = pf;
+        gchar* cs = gst_video_colorimetry_to_string(&vi.colorimetry);
+        m_colorimetry = cs ? QString::fromUtf8(cs) : QStringLiteral("unknown");
+        g_free(cs);
+        m_hasFrame = true;
+        emit sourceChanged();
+    }
+    m_hasFrame = true;
+    ++m_framesPresented;
+    if (m_intervalTimer.isValid()) { m_intervalSum += m_intervalTimer.nsecsElapsed() / 1e6; ++m_intervalN; }
+    m_intervalTimer.start();
+    if (measure) {
+        const double ms = lateNs / 1e6;
+        ++m_syncN;
+        const double delta = ms - m_syncMean;
+        m_syncMean += delta / m_syncN;
+        m_syncM2 += delta * (ms - m_syncMean);
+        m_syncMaxAbs = std::max(m_syncMaxAbs, std::abs(ms));
+        if (std::abs(ms) <= 20.0) ++m_syncWithin;
+    }
+}
+
+// The frame on screen was delivered converted or scaled; the same frame as decoded takes its
+// place (the picture stays the same picture). False when the player no longer has it.
+bool VideoWidget::showNativeFrame()
+{
+    if (!m_curSample || !m_curConverted) return m_curSample != nullptr;
+    GstSample* n = m_player->nativeSample(m_curSample);
+    if (!n) return false;
+    GstVideoInfo vi;
+    GstCaps* caps = gst_sample_get_caps(n);
+    if (!caps || !gst_video_info_from_caps(&vi, caps)) { gst_sample_unref(n); return false; }
+    gst_sample_unref(m_curSample);
+    m_curSample = n;
+    m_uploaded = false;
+    m_curSize = QSize(GST_VIDEO_INFO_WIDTH(&vi), GST_VIDEO_INFO_HEIGHT(&vi));
+    m_curRgb = GST_VIDEO_INFO_FORMAT(&vi) == GST_VIDEO_FORMAT_BGRx || GST_VIDEO_INFO_FORMAT(&vi) == GST_VIDEO_FORMAT_BGRA;
+    m_curConverted = false;
+    update();
+    return true;
+}
+
+// Effects off without a graphics card: the frame, already RGB and at the size it is shown,
+// is painted straight into the window. No OpenGL is involved at all.
+bool VideoWidget::plainPaintable() const
+{
+    return m_bypass && !m_compare && m_orient == Orientation();
+}
+
+bool VideoWidget::paintPlain(QPainter& p)
+{
+    if (!plainPaintable()) return false;
+    QElapsedTimer paintTimer;
+    paintTimer.start();
+    takeNewFrame(false);
+    if (m_hasFrame && (!m_curSample || !m_curRgb)) return false;   // not a frame that can be painted as it is
+    ++m_frameCounter;
+    const qreal dpr = devicePixelRatioF();
+    {   // (the set's moments still move on: static ends when a frame arrives, and so on)
+        CrtRenderer::DrawParams d = makeDrawParams(QSize(int(width() * dpr), int(height() * dpr)), videoAreaPx());
+        decorate(d);
+    }
+    p.fillRect(rect(), Qt::black);
+    const LayoutResult L = currentLayout();
+    if (m_hasFrame && L.valid) {
+        GstBuffer* buf = gst_sample_get_buffer(m_curSample);
+        GstVideoInfo vi;
+        GstVideoFrame frame;
+        if (buf && gst_video_info_from_caps(&vi, gst_sample_get_caps(m_curSample)) && gst_video_frame_map(&frame, &vi, buf, GST_MAP_READ)) {
+            const int w = GST_VIDEO_FRAME_WIDTH(&frame), h = GST_VIDEO_FRAME_HEIGHT(&frame);
+            const QImage img(static_cast<const uchar*>(GST_VIDEO_FRAME_PLANE_DATA(&frame, 0)), w, h, GST_VIDEO_FRAME_PLANE_STRIDE(&frame, 0),
+                             QImage::Format_RGB32);
+            // The visible part of the picture, in widget coordinates; the matching part of the frame.
+            const QRectF target(L.visibleRect.x() / dpr, L.visibleRect.y() / dpr, L.visibleRect.width() / dpr, L.visibleRect.height() / dpr);
+            const QRectF source(L.srcRect.x() * w, L.srcRect.y() * h, L.srcRect.width() * w, L.srcRect.height() * h);
+            const bool exact = qAbs(source.width() - L.visibleRect.width()) < 1.0 && qAbs(source.height() - L.visibleRect.height()) < 1.0;
+            p.setRenderHint(QPainter::SmoothPixmapTransform, !exact);
+            if (exact && dpr == 1.0) p.drawImage(target.topLeft().toPoint(), img, source.toRect());   // a straight copy
+            else p.drawImage(target, img, source);
+            gst_video_frame_unmap(&frame);
+            // The set's own overlay (Cable TV's channel number, banners and guide) over the whole picture.
+            const QImage osd = osdImage();
+            if (hasOverlay() && !osd.isNull()) {
+                p.setCompositionMode(QPainter::CompositionMode_SourceOver);
+                p.setRenderHint(QPainter::SmoothPixmapTransform, true);
+                p.setClipRect(target);
+                p.drawImage(QRectF(L.imageRect.x() / dpr, L.imageRect.y() / dpr, L.imageRect.width() / dpr, L.imageRect.height() / dpr), osd);
+                p.setClipping(false);
             }
         }
-        gst_sample_unref(s);
     }
+    const double pms = paintTimer.nsecsElapsed() / 1e6;
+    ++m_paintN;
+    m_paintSum += pms;
+    m_paintMax = std::max(m_paintMax, pms);
+    return true;
 }
 
 void VideoWidget::paintGL()
@@ -338,9 +473,11 @@ void VideoWidget::paintGL()
     }
     takeNewFrame();
     ++m_frameCounter;
-    const qreal dpr = devicePixelRatioF();
-    const QSize vp(int(width() * dpr), int(height() * dpr));
-    CrtRenderer::DrawParams d = makeDrawParams(vp, videoAreaPx());
+    // (Without a graphics card the look may be drawn smaller than the widget and enlarged.)
+    const QSize vp = surfacePixelSize();
+    QRectF area = videoAreaPx();
+    if (const double k = surfaceScale(); k < 1.0) area = QRectF(area.x() * k, area.y() * k, area.width() * k, area.height() * k);
+    CrtRenderer::DrawParams d = makeDrawParams(vp, area);
     decorate(d);
     if (m_osdUploaded != m_osdVersion && !osdImage().isNull()) { m_renderer.setOsdImage(osdImage()); m_osdUploaded = m_osdVersion; }
     if (!m_hasFrame) d.image = QRectF();
@@ -357,6 +494,7 @@ QImage VideoWidget::grabOriginalFrame()
     if (!m_hasFrame) return {};
     const QSizeF ds = displaySize(m_source, 0.0);   // original: stream aspect, no override
     makeCurrent();
+    uploadCurrent();
     QImage img = m_renderer.renderOriginal(QSize(qRound(ds.width()), qRound(ds.height())));
     doneCurrent();
     return img;
@@ -369,6 +507,7 @@ QImage VideoWidget::grabFilteredFrame()
     const QRectF area = videoAreaPx();
     const QSize vp(int(area.width()), int(area.height()));
     makeCurrent();
+    uploadCurrent();
     CrtRenderer::DrawParams dp = makeDrawParams(vp, QRectF(QPointF(0, 0), area.size()));
     decorate(dp);
     QImage img = m_renderer.renderToImage(dp);
@@ -427,10 +566,104 @@ SyncStats VideoWidget::syncStats() const
     return s;
 }
 
+QSize VideoWidget::fastTargetSize() const
+{
+    const LayoutResult L = currentLayout();
+    const QSizeF disp = displaySizeNow();
+    if (!L.valid || disp.isEmpty() || !m_source.isValid()) return {};
+    // The whole picture at exactly the size it is drawn, so that putting it on screen is a
+    // straight copy; never larger than the video itself.
+    const double k = std::min(1.0, std::max(L.imageRect.width() / disp.width(), L.imageRect.height() / disp.height()));
+    if (k >= 1.0) return QSize(std::max(16, int(std::lround(disp.width()))), std::max(16, int(std::lround(disp.height()))));
+    return QSize(std::max(16, int(std::lround(L.imageRect.width()))), std::max(16, int(std::lround(L.imageRect.height()))));
+}
+
+QSize VideoWidget::lookTargetSize() const
+{
+    const LayoutResult L = currentLayout();
+    if (!L.valid || !m_source.isValid()) return {};
+    // (compared in stored pixels: an anamorphic video at about its own size is left exactly as it is)
+    const double kx = L.imageRect.width() / m_source.width, ky = L.imageRect.height() / m_source.height;
+    if (std::max(kx, ky) > 0.625) return {};   // the video is under 1.6 times its picture
+    return QSize(std::max(16, int(std::lround(L.imageRect.width()))), std::max(16, int(std::lround(L.imageRect.height()))));
+}
+
+void VideoWidget::setLookScale(double s)
+{
+    s = std::clamp(s, 0.25, 1.0);
+    if (qFuzzyCompare(s, m_lookScale)) return;
+    m_lookScale = s;
+    setSurfaceScale(m_bypass ? 1.0 : s);
+    update();
+}
+
+bool VideoWidget::frameIsScaled() const
+{
+    if (!m_hasFrame || !m_source.isValid()) return false;
+    return m_curSample && m_curConverted;
+}
+
+void VideoWidget::pullFrame()
+{
+    if (!m_renderer.isInitialized()) return;
+    makeCurrent();
+    takeNewFrame();
+    doneCurrent();
+    update();
+}
+
+void VideoWidget::setProfiling(bool on)
+{
+    makeCurrent();
+    m_renderer.setProfiling(on);
+    doneCurrent();
+    static bool connected = false;
+    if (on && !connected) {
+        connected = true;
+        connect(this, &GlSurfaceWidget::aboutToCompose, this, [this] { m_composeTimer.start(); });
+        connect(this, &GlSurfaceWidget::frameSwapped, this, [this] {
+            if (m_composeTimer.isValid()) { m_composeSum += m_composeTimer.nsecsElapsed() / 1e6; ++m_composeN; }
+        });
+    }
+}
+
+// CPU time this process has used so far, on all its threads, in seconds.
+static double processCpuSeconds()
+{
+#ifdef Q_OS_WIN
+    FILETIME c, e, k, u;
+    if (!GetProcessTimes(GetCurrentProcess(), &c, &e, &k, &u)) return 0;
+    auto secs = [](const FILETIME& f) { return double((quint64(f.dwHighDateTime) << 32) | f.dwLowDateTime) / 1e7; };
+    return secs(k) + secs(u);
+#else
+    timespec ts{};
+    if (clock_gettime(CLOCK_PROCESS_CPUTIME_ID, &ts) != 0) return 0;
+    return double(ts.tv_sec) + double(ts.tv_nsec) / 1e9;
+#endif
+}
+
+QJsonObject VideoWidget::profileReport() const
+{
+    // How many CPU cores' worth of work the whole player did (decoding, converting, scaling, drawing).
+    const double wall = m_cpuWall.isValid() ? m_cpuWall.nsecsElapsed() / 1e9 : 0;
+    const double busy = wall > 0.2 ? (processCpuSeconds() - m_cpuStart) / wall : 0;
+    const CrtRenderer::Profile p = m_renderer.profile();
+    const double f = std::max(1, p.frames), dr = std::max(1, p.draws);
+    return QJsonObject{{"frames", p.frames}, {"draws", p.draws}, {"uploadMs", p.upload / f}, {"convertMs", p.convert / f}, {"mipmapMs", p.mipmap / f},
+                       {"blurMs", p.blur / dr}, {"drawMs", p.draw / dr}, {"paintMs", m_paintN ? m_paintSum / m_paintN : 0.0},
+                       {"composeMs", m_composeN ? m_composeSum / m_composeN : 0.0},
+                       {"frameIntervalMs", m_intervalN ? m_intervalSum / m_intervalN : 0.0}, {"cpuCoresBusy", busy}};
+}
+
 void VideoWidget::resetSyncStats()
 {
     m_syncN = 0; m_syncMean = 0; m_syncM2 = 0; m_syncMaxAbs = 0; m_syncWithin = 0;
     m_paintN = 0; m_paintSum = 0; m_paintMax = 0;
+    m_composeSum = m_intervalSum = 0; m_composeN = m_intervalN = 0;
+    m_intervalTimer.invalidate();
+    m_renderer.resetProfile();
+    m_cpuStart = processCpuSeconds();
+    m_cpuWall.start();
     m_syncTimer.restart();
 }
 
@@ -459,7 +692,7 @@ void VideoWidget::mouseMoveEvent(QMouseEvent* e)
     } else if (cursor().shape() == Qt::SplitHCursor) {
         unsetCursor();
     }
-    QOpenGLWidget::mouseMoveEvent(e);
+    QWidget::mouseMoveEvent(e);
 }
 
 void VideoWidget::mousePressEvent(QMouseEvent* e)
@@ -470,13 +703,13 @@ void VideoWidget::mousePressEvent(QMouseEvent* e)
         e->accept();
         return;
     }
-    QOpenGLWidget::mousePressEvent(e);
+    QWidget::mousePressEvent(e);
 }
 
 void VideoWidget::mouseReleaseEvent(QMouseEvent* e)
 {
     m_draggingSplit = false;
-    QOpenGLWidget::mouseReleaseEvent(e);
+    QWidget::mouseReleaseEvent(e);
 }
 
 void VideoWidget::mouseDoubleClickEvent(QMouseEvent* e)

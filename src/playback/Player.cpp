@@ -297,11 +297,23 @@ bool Player::openInternal(const QString& uri, bool autoplay, qint64 startNs, boo
     emit orientationChanged(m_orientationTag);
     ++m_generation;
 
+    if (m_output == Output::RgbScaled) m_output = Output::Rgb;   // (a size chosen for the last video does not fit the next)
+    m_fastSize = QSize();
     m_pipe = gst_element_factory_make("playbin", "crtplayer");
+    // Scaling first, in the video's own format, then conversion at the smaller size: measured
+    // half as fast again as the two in one element for 4K shown at 1080p. Both are multi-threaded.
     GstElement* conv = gst_element_factory_make("videoconvert", nullptr);
+    GstElement* scale = gst_element_factory_make("videoscale", nullptr);   // (optional: without it, no fast path)
+    GstElement* capsf = gst_element_factory_make("capsfilter", nullptr);
+    // The size and format asked for change while the video plays (the window is resized, a look
+    // is switched on). Frames already on their way in the old format must still be let through,
+    // or the stream stops with "not negotiated".
+    if (capsf) gst_util_set_object_arg(G_OBJECT(capsf), "caps-change-mode", "delayed");
     m_appsink = gst_element_factory_make("appsink", "crtsink");
-    if (!m_pipe || !conv || !m_appsink) {
+    if (!m_pipe || !conv || !m_appsink || !capsf) {
         if (conv) gst_object_unref(conv);
+        if (scale) gst_object_unref(scale);
+        if (capsf) gst_object_unref(capsf);
         if (m_appsink) gst_object_unref(m_appsink);
         if (m_pipe) gst_object_unref(m_pipe);
         m_pipe = m_appsink = nullptr;
@@ -316,8 +328,17 @@ bool Player::openInternal(const QString& uri, bool autoplay, qint64 startNs, boo
     // Video sink: videoconvert only converts when upstream cannot provide one of the
     // formats the shader understands (NV12/I420/RGBx variants); otherwise it is passthrough.
     GstElement* bin = gst_bin_new("crt-video-sink");
+    // n-threads 0: as many as there are CPU cores.
     if (g_object_class_find_property(G_OBJECT_GET_CLASS(conv), "n-threads"))
         g_object_set(conv, "n-threads", 0u, nullptr);
+    if (scale && g_object_class_find_property(G_OBJECT_GET_CLASS(scale), "n-threads"))
+        g_object_set(scale, "n-threads", 0u, nullptr);
+    // The multi-tap bilinear filter: shrinking 4K to a window with the default two-tap one leaves
+    // fine detail jagged and noisy; this one averages every source pixel in (6% slower, measured).
+    if (scale) gst_util_set_object_arg(G_OBJECT(scale), "method", "bilinear2");
+    // The whole frame onto the whole size asked for. (By default the scaler adds borders when the
+    // shapes differ by a rounding, which shrank an anamorphic picture by a fraction of a line.)
+    if (scale) g_object_set(scale, "add-borders", FALSE, nullptr);
     GstCaps* caps = gst_caps_from_string("video/x-raw, format=(string){ NV12, I420, BGRx, BGRA, RGBx, RGBA }");
     g_object_set(m_appsink, "caps", caps, "sync", TRUE, "max-buffers", 2u, "drop", TRUE,
                  "enable-last-sample", FALSE, "qos", TRUE, nullptr);
@@ -326,9 +347,41 @@ bool Player::openInternal(const QString& uri, bool autoplay, qint64 startNs, boo
     cb.new_sample = [](GstAppSink* s, gpointer self) { return onNewSample(GST_ELEMENT(s), self); };
     cb.new_preroll = [](GstAppSink* s, gpointer self) { return onNewPreroll(GST_ELEMENT(s), self); };
     gst_app_sink_set_callbacks(GST_APP_SINK(m_appsink), &cb, this, nullptr);
-    gst_bin_add_many(GST_BIN(bin), conv, m_appsink, nullptr);
-    gst_element_link(conv, m_appsink);
-    GstPad* pad = gst_element_get_static_pad(conv, "sink");
+    gst_bin_add_many(GST_BIN(bin), conv, capsf, m_appsink, nullptr);
+    if (scale) {
+        gst_bin_add(GST_BIN(bin), scale);
+        gst_element_link_many(scale, conv, capsf, m_appsink, nullptr);
+    } else {
+        gst_element_link_many(conv, capsf, m_appsink, nullptr);
+    }
+    m_capsFilter = capsf;
+    m_canScale = scale != nullptr;
+    {
+        QMutexLocker lock(&m_mutex);
+        m_natW = m_natH = 0;
+        m_natFormat.clear();
+    }
+    applyFastOutput();
+    GstPad* pad = gst_element_get_static_pad(scale ? scale : conv, "sink");
+    // The video as decoded is seen here, whatever is delivered after conversion and scaling.
+    gst_pad_add_probe(pad, GST_PAD_PROBE_TYPE_EVENT_DOWNSTREAM, &Player::onSinkEvent, this, nullptr);
+    gst_pad_add_probe(pad, GST_PAD_PROBE_TYPE_BUFFER, &Player::onSinkBuffer, this, nullptr);
+    // What the sink would like best (RGB at the screen's size, say) is kept from what is upstream:
+    // playbin's own converter and scaler would otherwise oblige, on a single thread and at the
+    // video's full size. Asked what it accepts, the sink says "any raw video"; it then does the
+    // work itself, scaling first and on all cores.
+    gst_pad_add_probe(pad, GST_PAD_PROBE_TYPE_QUERY_DOWNSTREAM, [](GstPad* p, GstPadProbeInfo* info, gpointer) -> GstPadProbeReturn {
+        GstQuery* q = GST_PAD_PROBE_INFO_QUERY(info);
+        if (GST_QUERY_TYPE(q) != GST_QUERY_CAPS) return GST_PAD_PROBE_OK;
+        GstCaps* filter = nullptr;
+        gst_query_parse_caps(q, &filter);
+        GstCaps* any = gst_pad_get_pad_template_caps(p);
+        GstCaps* res = filter ? gst_caps_intersect_full(filter, any, GST_CAPS_INTERSECT_FIRST) : gst_caps_ref(any);
+        gst_query_set_caps_result(q, res);
+        gst_caps_unref(res);
+        gst_caps_unref(any);
+        return GST_PAD_PROBE_HANDLED;
+    }, nullptr, nullptr);
     gst_element_add_pad(bin, gst_ghost_pad_new("sink", pad));
     gst_object_unref(pad);
 
@@ -417,14 +470,18 @@ void Player::teardown()
         gst_object_unref(m_pipe);
         m_pipe = nullptr;
         m_appsink = nullptr;
+        m_capsFilter = nullptr;
         m_tape = nullptr;   // it belonged to the pipeline
     }
     QMutexLocker lock(&m_mutex);
+    if (m_videoDec) { gst_object_unref(m_videoDec); m_videoDec = nullptr; }
     if (m_textOverlay) { gst_object_unref(m_textOverlay); m_textOverlay = nullptr; }
     if (m_subOverlay) { gst_object_unref(m_subOverlay); m_subOverlay = nullptr; }
     if (m_deintEl) { gst_object_unref(m_deintEl); m_deintEl = nullptr; }
     if (m_sample) { gst_sample_unref(m_sample); m_sample = nullptr; }
     if (m_lastCaps) { gst_caps_unref(m_lastCaps); m_lastCaps = nullptr; }
+    clearNativeFrames();
+    gst_caps_replace(&m_natCaps, nullptr);
     m_videoDecoder.clear();
     m_audioDecoder.clear();
     m_videoDecoderHw = false;
@@ -651,6 +708,124 @@ void Player::applySubtitleStyle()
     else if (m_subStyle.position == 1) g_object_set(ov, "valignment", 3, "ypos", 0.80, nullptr);
     else g_object_set(ov, "valignment", 1, "ypad", 25, nullptr);
     gst_object_unref(ov);
+}
+
+// ---- the fast path without a graphics card ---------------------------------------------
+
+GstPadProbeReturn Player::onSinkEvent(GstPad*, GstPadProbeInfo* info, gpointer self)
+{
+    GstEvent* ev = GST_PAD_PROBE_INFO_EVENT(info);
+    if (GST_EVENT_TYPE(ev) == GST_EVENT_CAPS) {
+        GstCaps* caps = nullptr;
+        gst_event_parse_caps(ev, &caps);
+        GstVideoInfo vi;
+        if (caps && gst_video_info_from_caps(&vi, caps)) {
+            auto* p = static_cast<Player*>(self);
+            QMutexLocker lock(&p->m_mutex);
+            p->m_natW = GST_VIDEO_INFO_WIDTH(&vi);
+            p->m_natH = GST_VIDEO_INFO_HEIGHT(&vi);
+            p->m_natParN = GST_VIDEO_INFO_PAR_N(&vi) > 0 ? GST_VIDEO_INFO_PAR_N(&vi) : 1;
+            p->m_natParD = GST_VIDEO_INFO_PAR_D(&vi) > 0 ? GST_VIDEO_INFO_PAR_D(&vi) : 1;
+            p->m_natFormat = QString::fromUtf8(gst_video_format_to_string(GST_VIDEO_INFO_FORMAT(&vi)));
+            gst_caps_replace(&p->m_natCaps, caps);
+        }
+    } else if (GST_EVENT_TYPE(ev) == GST_EVENT_FLUSH_STOP) {
+        auto* p = static_cast<Player*>(self);
+        QMutexLocker lock(&p->m_mutex);
+        p->clearNativeFrames();   // (a jump: what was kept is no longer what is shown)
+    }
+    return GST_PAD_PROBE_OK;
+}
+
+// Each frame as decoded passes here on its way to being converted or scaled. The last few are
+// remembered, so that the full frame behind the picture on screen is at hand (an original-frame
+// screenshot; a paused picture that is now wanted at another size) without seeking for it.
+GstPadProbeReturn Player::onSinkBuffer(GstPad*, GstPadProbeInfo* info, gpointer self)
+{
+    auto* p = static_cast<Player*>(self);
+    GstBuffer* b = GST_PAD_PROBE_INFO_BUFFER(info);
+    QMutexLocker lock(&p->m_mutex);
+    if (!p->m_keepNative || !p->m_natCaps || !b) {
+        p->clearNativeFrames();
+        return GST_PAD_PROBE_OK;
+    }
+    p->m_nativeFrames.push_back({gst_buffer_ref(b), gst_caps_ref(p->m_natCaps)});
+    while (p->m_nativeFrames.size() > 4) {   // (the sink holds two, the screen one)
+        gst_buffer_unref(p->m_nativeFrames.front().buffer);
+        gst_caps_unref(p->m_nativeFrames.front().caps);
+        p->m_nativeFrames.pop_front();
+    }
+    return GST_PAD_PROBE_OK;
+}
+
+void Player::clearNativeFrames()
+{
+    for (NativeFrame& f : m_nativeFrames) { gst_buffer_unref(f.buffer); gst_caps_unref(f.caps); }
+    m_nativeFrames.clear();
+}
+
+GstSample* Player::nativeSample(GstSample* shown)
+{
+    GstBuffer* b = shown ? gst_sample_get_buffer(shown) : nullptr;
+    if (!b || !GST_BUFFER_PTS_IS_VALID(b)) return nullptr;
+    QMutexLocker lock(&m_mutex);
+    for (auto it = m_nativeFrames.rbegin(); it != m_nativeFrames.rend(); ++it)
+        if (GST_BUFFER_PTS(it->buffer) == GST_BUFFER_PTS(b))
+            return gst_sample_new(it->buffer, it->caps, gst_sample_get_segment(shown), nullptr);
+    return nullptr;
+}
+
+bool Player::nativeFormat(int* width, int* height, int* parN, int* parD, QString* format) const
+{
+    QMutexLocker lock(&m_mutex);
+    if (m_natW <= 0 || m_natH <= 0) return false;
+    *width = m_natW; *height = m_natH; *parN = m_natParN; *parD = m_natParD;
+    if (format) *format = m_natFormat;
+    return true;
+}
+
+void Player::setOutput(Output mode, const QSize& size)
+{
+    if (mode == Output::RgbScaled && (size.isEmpty() || !m_canScale)) mode = Output::Rgb;
+    const QSize s = mode == Output::RgbScaled ? size : QSize();
+    if (mode == m_output && s == m_fastSize) return;
+    m_output = mode;
+    m_fastSize = s;
+    m_keepNative = mode != Output::AsDecoded;
+    applyFastOutput();
+}
+
+void Player::applyFastOutput()
+{
+    if (!m_capsFilter) return;
+    GstCaps* caps;
+    if (m_output == Output::AsDecoded) {
+        caps = gst_caps_from_string("video/x-raw, format=(string){ NV12, I420, BGRx, BGRA, RGBx, RGBA }");
+    } else if (m_output == Output::Rgb) {
+        caps = gst_caps_from_string("video/x-raw, format=(string)BGRx");
+    } else {
+        caps = gst_caps_new_simple("video/x-raw", "format", G_TYPE_STRING, "BGRx", "width", G_TYPE_INT, m_fastSize.width(),
+                                   "height", G_TYPE_INT, m_fastSize.height(), "pixel-aspect-ratio", GST_TYPE_FRACTION, 1, 1, nullptr);
+    }
+    g_object_set(m_capsFilter, "caps", caps, nullptr);   // takes effect with the next frame
+    gst_caps_unref(caps);
+}
+
+int Player::decoderThreads() const
+{
+    GstElement* el = nullptr;
+    {
+        QMutexLocker lock(&m_mutex);
+        if (m_videoDec) el = GST_ELEMENT(gst_object_ref(m_videoDec));
+    }
+    if (!el) return 0;
+    int n = 0;
+    if (g_object_class_find_property(G_OBJECT_GET_CLASS(el), "max-threads")) {
+        g_object_get(el, "max-threads", &n, nullptr);
+        if (n == 0) n = int(std::min<guint>(g_get_num_processors(), 16u));   // libav's "auto"
+    }
+    gst_object_unref(el);
+    return n;
 }
 
 // The first element inside `e` (or `e` itself) that is a sink with a "ts-offset" property; its value in ms.
@@ -989,7 +1164,12 @@ void Player::onDeepElementAdded(GstBin*, GstBin*, GstElement* el, gpointer self)
     const QString name = QString::fromUtf8(gst_plugin_feature_get_name(GST_PLUGIN_FEATURE(f)));
     {
         QMutexLocker lock(&p->m_mutex);
-        if (klassHas(f, "Video")) { p->m_videoDecoder = name; p->m_videoDecoderHw = isHwVideoDecoderFactory(f); }
+        if (klassHas(f, "Video")) {
+            p->m_videoDecoder = name;
+            p->m_videoDecoderHw = isHwVideoDecoderFactory(f);
+            if (p->m_videoDec) gst_object_unref(p->m_videoDec);
+            p->m_videoDec = p->m_videoDecoderHw ? nullptr : GST_ELEMENT(gst_object_ref(el));
+        }
         else if (klassHas(f, "Audio")) p->m_audioDecoder = name;
         else return;
     }

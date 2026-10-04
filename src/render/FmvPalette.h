@@ -15,6 +15,13 @@ int megaDriveLevel(int value8);   // index 0..7 of the nearest level
 // frame's colours on the 3-bit grid. Every returned colour is on the grid. `rgba` is
 // width*height pixels of 4 bytes (R, G, B, A), rows `stride` bytes apart.
 QVector<QRgb> fmvPalette(const uchar* rgba, int width, int height, int stride, int colors);
+// How far the frame's pixels are from their nearest colour in `palette`: the root of the
+// mean squared distance, in 8-bit steps (0: every pixel has its own colour in the palette).
+double fmvPaletteError(const uchar* rgba, int width, int height, int stride, const QVector<QRgb>& palette);
+// The palette to show a frame with when the frame before was shown with `previous`: the
+// previous one for as long as it serves the frame nearly as well as `fresh` (made for this
+// frame) does, so that areas which do not change keep their colours from frame to frame.
+bool fmvKeepPalette(double previousError, double freshError);
 
 // The picture grid of the Sega CD look for a picture of the given display aspect:
 // `rows` rows (224 when 0) and, with `columns` 0, as many columns as give the console's

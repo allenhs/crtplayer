@@ -103,6 +103,16 @@ void AppSettings::load()
     shuffle = s.value("playlist/shuffle", false).toBool();
     repeatMode = std::clamp(s.value("playlist/repeat", 0).toInt(), 0, 2);
     autoNext = s.value("playlist/autoNext", false).toBool();
+    {   // (CRTPLAYER_FAST_PATH=auto|always|never sets the default, for tests of the path a graphics card takes)
+        const QByteArray e = qgetenv("CRTPLAYER_FAST_PATH");
+        const int def = e == "never" ? 2 : e == "always" ? 1 : 0;
+        videoPath = std::clamp(s.value("playback/videoPath", def).toInt(), 0, 2);
+    }
+    {   // (CRTPLAYER_LOOK_DETAIL=auto|full|half: the default before anything is saved; the checks use "full")
+        const QByteArray env = qgetenv("CRTPLAYER_LOOK_DETAIL").toLower();
+        const int def = env == "full" ? 1 : env == "half" ? 2 : 0;
+        lookDetail = std::clamp(s.value("playback/lookDetail", def).toInt(), 0, 2);
+    }
 }
 
 void AppSettings::save() const
@@ -184,5 +194,7 @@ void AppSettings::save() const
     s.setValue("playlist/shuffle", shuffle);
     s.setValue("playlist/repeat", repeatMode);
     s.setValue("playlist/autoNext", autoNext);
+    s.setValue("playback/videoPath", videoPath);
+    s.setValue("playback/lookDetail", lookDetail);
     s.sync();
 }

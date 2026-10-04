@@ -116,6 +116,10 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent)
     m_subRefresh.setSingleShot(true);
     m_subRefresh.setInterval(250);
     connect(&m_subRefresh, &QTimer::timeout, this, [this] { refreshSubtitlesNow(); });
+    // Without a graphics card: which frames the video pipeline should deliver follows what is shown.
+    m_pathTimer.setInterval(250);
+    connect(&m_pathTimer, &QTimer::timeout, this, [this] { updateVideoPath(); });
+    m_pathTimer.start();
     m_sleepTimer.setInterval(500);
     connect(&m_sleepTimer, &QTimer::timeout, this, [this] { sleepTick(); });
     connect(m_player, &Player::orientationChanged, m_video, &VideoWidget::setOrientationTag);
@@ -363,6 +367,8 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent)
     connect(m_playbackPanel, &PlaybackPanel::audioDelayChanged, this, [this](int ms) { setAudioDelay(ms, false); });
     connect(m_playbackPanel, &PlaybackPanel::nightModeChanged, this, [this](bool on) { setNightMode(on, false); });
     connect(m_playbackPanel, &PlaybackPanel::deinterlaceChanged, this, &MainWindow::setDeinterlace);
+    connect(m_playbackPanel, &PlaybackPanel::videoPathChanged, this, &MainWindow::setVideoPath);
+    connect(m_playbackPanel, &PlaybackPanel::lookDetailChanged, this, &MainWindow::setLookDetail);
     connect(m_playbackPanel, &PlaybackPanel::autoNextChanged, this, &MainWindow::setAutoNext);
     connect(m_playbackPanel, &PlaybackPanel::sleepTimerChanged, this, &MainWindow::setSleepTimer);
     connect(m_playbackPanel, &PlaybackPanel::keepAwakeChanged, this, [this, updateSleep](bool on) { m_settings.keepAwake = on; updateSleep(); });
@@ -1937,6 +1943,7 @@ GifDialog* MainWindow::showGifDialog()
         h.setLook = [this](bool on) { m_gifLook = on; };
         h.recording = [this](bool on) {
             m_gifRecording = on;
+            updateVideoPath();   // (a GIF is drawn from frames as decoded)
             if (on) m_gifClockSaved = m_video->clockOverride();
             if (on) showOsd(tr("Making the GIF…"), 2000);
         };
@@ -2114,7 +2121,11 @@ void MainWindow::cycleSubtitle()
 QString MainWindow::takeScreenshot(bool filtered, const QString& pathIn)
 {
     if (!m_video->hasFrame()) { showOsd(tr("Nothing to capture yet")); return {}; }
+    // The original frame is the frame as decoded: not one already scaled for the screen.
+    // (A screenshot with the look shows what the window shows, from the same frame.)
+    if (!filtered) ensureNativeFrame();
     const QImage img = filtered ? m_video->grabFilteredFrame() : m_video->grabOriginalFrame();
+    if (!filtered) releaseNativeFrame();
     if (img.isNull()) { showOsd(tr("Screenshot failed")); return {}; }
     QString path = pathIn;
     if (path.isEmpty()) {
@@ -2305,6 +2316,7 @@ void MainWindow::updateInfoOverlay()
     lines << tr("Video       %1 via %2 [%3]").arg(m_player->videoCodec(), m_player->videoDecoder(),
                                                   m_player->videoDecoderIsHardware() ? "HW" : "SW");
     lines << tr("Audio       %1 via %2").arg(m_player->audioCodec(), m_player->audioDecoder());
+    lines << tr("Drawing     %1").arg(videoPathDescription());
     if (m_player->deinterlacing()) lines << tr("Interlaced  deinterlaced for display");
     if (m_player->audioDelay() != 0) lines << tr("Sound delay %1 ms").arg(m_player->audioDelay());
     if (f.isValid()) {
@@ -2441,6 +2453,8 @@ QJsonObject MainWindow::stateReport() const
     o["currentAudio"] = m_player->currentAudioTrack();
     o["currentSubtitle"] = m_player->currentSubtitleTrack();
     o["everyday"] = everydayReport();
+    o["profile"] = m_video->profileReport();
+    o["videoPath"] = videoPathReport();
     o["missingPlugins"] = QJsonArray::fromStringList(m_player->missingPlugins());
     o["lastError"] = m_lastError;
     o["lastWarning"] = m_lastWarning;

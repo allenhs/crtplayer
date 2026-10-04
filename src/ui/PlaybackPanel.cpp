@@ -64,6 +64,29 @@ PlaybackPanel::PlaybackPanel(QWidget* parent) : QWidget(parent)
     m_deint->setChecked(true);
     connect(m_deint, &QCheckBox::toggled, this, &PlaybackPanel::deinterlaceChanged);
     df->addWidget(m_deint);
+    {
+        auto* row = new QFormLayout;
+        m_videoPath = new QComboBox;
+        m_videoPath->addItems({tr("Automatic"), tr("Always"), tr("Never")});
+        m_videoPath->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
+        m_videoPath->setMinimumContentsLength(10);
+        m_videoPath->setToolTip(tr("Without a graphics card (or in a virtual machine without 3D acceleration), drawing is done by the CPU.\n"
+                                   "With effects off (B), the fast path has the video converted and scaled on all CPU cores before it is drawn,\n"
+                                   "which is what makes HD and 4K play smoothly there.\n"
+                                   "Automatic: when no graphics acceleration is found. Always: also with a graphics card. Never: off."));
+        connect(m_videoPath, &QComboBox::activated, this, &PlaybackPanel::videoPathChanged);
+        row->addRow(tr("CPU fast path"), m_videoPath);
+        m_lookDetail = new QComboBox;
+        m_lookDetail->addItems({tr("Automatic"), tr("Full size"), tr("Half size (faster)")});
+        m_lookDetail->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
+        m_lookDetail->setMinimumContentsLength(10);
+        m_lookDetail->setToolTip(tr("Without a graphics card, a look is computed pixel by pixel on the CPU. Drawn at half size and enlarged,\n"
+                                    "it takes a quarter of the work; fine detail (the shadow mask, thin scanlines) gets coarser.\n"
+                                    "Automatic: half size in a large window or fullscreen. With a graphics card this has no effect."));
+        connect(m_lookDetail, &QComboBox::activated, this, &PlaybackPanel::lookDetailChanged);
+        row->addRow(tr("Look detail"), m_lookDetail);
+        df->addLayout(row);
+    }
     m_status = new QLabel;
     m_status->setWordWrap(true);
     m_status->setObjectName("paramValue");
@@ -239,6 +262,8 @@ void PlaybackPanel::setSubtitleDelay(int ms) { QSignalBlocker b(m_subDelay); m_s
 void PlaybackPanel::setAudioDelay(int ms) { QSignalBlocker b(m_audioDelay); m_audioDelay->setValue(ms); }
 void PlaybackPanel::setNightMode(bool on) { QSignalBlocker b(m_night); m_night->setChecked(on); }
 void PlaybackPanel::setDeinterlace(bool on) { QSignalBlocker b(m_deint); m_deint->setChecked(on); }
+void PlaybackPanel::setVideoPath(int mode) { QSignalBlocker b(m_videoPath); m_videoPath->setCurrentIndex(mode); }
+void PlaybackPanel::setLookDetail(int mode) { QSignalBlocker b(m_lookDetail); m_lookDetail->setCurrentIndex(mode); }
 void PlaybackPanel::setAutoNext(bool on) { QSignalBlocker b(m_autoNext); m_autoNext->setChecked(on); }
 void PlaybackPanel::setSleepTimer(int minutes, const QString& status)
 {

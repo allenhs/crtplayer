@@ -29,6 +29,8 @@ signals:
     void audioDelayChanged(int ms);
     void nightModeChanged(bool on);
     void deinterlaceChanged(bool on);
+    void videoPathChanged(int mode);
+    void lookDetailChanged(int mode);       // 0 automatic, 1 full size, 2 half size        // 0 automatic, 1 always the fast path, 2 never
     void autoNextChanged(bool on);
     void sleepTimerChanged(int minutes);    // 0 off, -1 at the end of this video
 public:
@@ -38,6 +40,8 @@ public:
     void setAudioDelay(int ms);
     void setNightMode(bool on);
     void setDeinterlace(bool on);
+    void setVideoPath(int mode);
+    void setLookDetail(int mode);
     void setAutoNext(bool on);
     void setSleepTimer(int minutes, const QString& status);   // the choice, and what is left ("" when off)
     void setKeepAwake(bool on);
@@ -61,6 +65,8 @@ private:
     class QSpinBox* m_audioDelay = nullptr;
     QCheckBox* m_night = nullptr;
     QCheckBox* m_deint = nullptr;
+    QComboBox* m_videoPath = nullptr;
+    QComboBox* m_lookDetail = nullptr;
     QCheckBox* m_autoNext = nullptr;
     QComboBox* m_sleepCombo = nullptr;
     QLabel* m_sleepStatus = nullptr;

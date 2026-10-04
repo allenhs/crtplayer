@@ -1,4 +1,5 @@
 #pragma once
+#include <QColor>
 #include "render/Geometry.h"
 #include "render/ViewSettings.h"
 #include "settings/CrtParams.h"
@@ -84,7 +85,7 @@ private:
     void computeBlur(GLuint src = 0);
     void drawCrt(GLuint targetFbo, const DrawParams& p);
     void drawQuad();
-    bool loadProgram(QOpenGLShaderProgram& prog, const char* frag, QString* error);
+    bool loadProgram(QOpenGLShaderProgram& prog, const char* frag, QString* error, const char* defines = nullptr);
 
     bool m_initialized = false;
     QOpenGLShaderProgram m_convert, m_down, m_blur, m_crt, m_persist, m_copy, m_fmvCodec, m_fmvPal;
@@ -128,9 +129,31 @@ private:
     int m_fmvSinceKey = 0;
     QVector<float> m_fmvKey;         // the settings it was made with
     int m_fmvColorsUsed = 0;
+    QVector<QRgb> m_fmvPalette;      // the colours the frame shown was drawn with
     quint64 m_fmvDrawn = 0;
     qint64 m_framePts = -1;          // ns, stream time of the uploaded frame
     quint64 m_uploads = 0;
+public:
+    // Where the time goes, stage by stage (ms, summed; frames counted). With profiling on,
+    // every stage is finished (glFinish) before the next starts, so the times are the stages' own.
+    struct Profile { double upload = 0, convert = 0, mipmap = 0, blur = 0, draw = 0; int frames = 0, draws = 0; };
+    // Frames that arrive as RGB the right way up go straight into the picture texture (no
+    // conversion pass). plainOnly: nothing but the effects-off picture will be drawn from
+    // them, at about their own size, so the smaller copies (mipmaps) are not made either.
+    void setPlainOnly(bool on) { m_plainOnly = on; }
+    bool lastUploadDirect() const { return m_direct; }
+    QSize frameSize() const { return m_imgSize; }   // of the picture texture (the frame as delivered, after rotation)
+    void setProfiling(bool on) { m_profiling = on; }
+    bool profiling() const { return m_profiling; }
+    Profile profile() const { return m_profile; }
+    void resetProfile() { m_profile = Profile(); }
+private:
+    bool m_profiling = false;
+    bool m_plainOnly = false, m_direct = false, m_mipsStale = false;
+    QOpenGLShaderProgram m_plain, m_plainOsd;
+    void ensureMipmaps();
+    Profile m_profile;
+    double stageMs(class QElapsedTimer& t);
     GLuint m_blurSrc = 0;            // what the blur was last made from
 
     GstVideoInfo m_info;

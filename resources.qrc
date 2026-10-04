@@ -5,6 +5,7 @@
     <file>shaders/downsample.frag</file>
     <file>shaders/blur.frag</file>
     <file>shaders/crt.frag</file>
+    <file>shaders/plain.frag</file>
     <file>shaders/desk.vert</file>
     <file>shaders/persist.frag</file>
     <file>shaders/copy.frag</file>

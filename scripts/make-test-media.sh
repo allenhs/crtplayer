@@ -75,6 +75,12 @@ done
 # Resume: long enough that a position in the middle is remembered (first/last 30 s are not).
 ffmpeg $F -f lavfi -i "testsrc2=size=320x240:rate=15" -f lavfi -i "sine=f=440:duration=90" \
   -t 90 -c:v libx264 -pix_fmt yuv420p -c:a aac -shortest resume_clip.mp4
+# 2.12: playback without a graphics card. Big frames with film-like grain, so that decoding,
+# colour conversion and scaling all have real work to do.
+ffmpeg $F -f lavfi -i "testsrc2=size=1920x1080:rate=30:duration=20" -f lavfi -i "sine=f=520:duration=20" \
+  -vf "noise=alls=6:allf=t" -c:v libx264 -preset veryfast -crf 22 -pix_fmt yuv420p -g 30 -c:a aac -shortest fhd_plain_30.mp4
+ffmpeg $F -f lavfi -i "testsrc2=size=3840x2160:rate=30:duration=10" -f lavfi -i "sine=f=540:duration=10" \
+  -vf "noise=alls=6:allf=t" -c:v libx264 -preset veryfast -crf 24 -pix_fmt yuv420p -g 30 -c:a aac -shortest uhd_h264.mp4
 # Base plugins only (Ogg, Theora, Vorbis): must play even without gst-plugins-good.
 ffmpeg $F -f lavfi -i "smptebars=size=640x480:rate=25" -f lavfi -i "sine=f=440:duration=8" \
   -t 8 -c:v libtheora -q:v 6 -c:a libvorbis -shortest base_only.ogv

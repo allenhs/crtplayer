@@ -183,6 +183,22 @@ private:
     QTimer m_jfTimer;
     QVector<JfItem> m_jfResume;   // Continue watching, for the desk-mode menu
 
+    // 2.12: playback without a graphics card (FastPath.cpp)
+public:
+    void setVideoPath(int mode);                // 0 automatic, 1 always the fast path, 2 never
+    void setLookDetail(int mode);               // without a graphics card: 0 automatic, 1 full size, 2 half size
+    void updateVideoPath();
+    qint64 shownFrameTime() const;
+    bool ensureNativeFrame();                   // a frame as decoded, for original-frame grabs; then releaseNativeFrame()
+    void releaseNativeFrame();
+    QJsonObject videoPathReport() const;
+    QString videoPathDescription() const;
+private:
+    bool fastPathWanted() const;
+    int m_fastHold = 0;
+    bool m_fastHeld = false;                   // the pipeline is asked for frames as decoded meanwhile
+    QTimer m_pathTimer;
+
     // 2.11: everyday playback (Everyday.cpp)
 public:
     void setSubtitlesWanted(bool on, bool announce = true);   // off until asked for; then it stays as set

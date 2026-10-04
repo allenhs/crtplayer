@@ -23,6 +23,10 @@ BIN=$(readlink -f "${1:?binary}"); M=$(readlink -f "${2:?media dir}"); O=$(mkdir
 HERE=$(cd "$(dirname "$0")/.." && pwd)
 TMPCFG=$(mktemp -d); export XDG_CONFIG_HOME=$TMPCFG/config XDG_DATA_HOME=$TMPCFG/data
 trap 'rm -rf "$TMPCFG"' EXIT
+# Without a graphics card the player draws a look at half size in a big window (2.12). The
+# checks compare pictures pixel by pixel, so they ask for full size; the no-GPU suite
+# tests the half-size drawing itself.
+export CRTPLAYER_LOOK_DETAIL=${CRTPLAYER_LOOK_DETAIL:-full}
 render() { sed -e "s#@M@#$M#g" -e "s#@O@#$O#g" "$HERE/tests/automation/$1" > "$O/$1"; }
 run() { # name script [env...]
   local name=$1 script=$2; shift 2
@@ -96,6 +100,24 @@ everyday_suite() {
   echo "== everyday playback checks"
   checker "$O/everyday-checks.txt" python3 "$HERE/scripts/check-everyday.py" "$O"
 }
+# 2.12: playback without a graphics card (frames converted and scaled on the CPU's cores).
+# Run twice: on the plain window surface a machine without a GPU gets, and on the OpenGL
+# widget (the surface a graphics card gets), where the same fast frames must also work.
+nogpu_suite() {
+  rm -rf "$O/nogpu-media"; mkdir -p "$O/nogpu-media/tv"
+  cp "$M/sd_4x3_h264.mp4" "$O/nogpu-media/tv/Feature.mp4"
+  local surface
+  for surface in raster gl; do
+    rm -rf "$XDG_CONFIG_HOME" "$XDG_DATA_HOME"
+    sed -e "s#ng-#ng-$surface-#g" "$HERE/tests/automation/nogpu.txt" > "$O/nogpu-$surface.src"
+    sed -e "s#@M@#$M#g" -e "s#@O@#$O#g" "$O/nogpu-$surface.src" > "$O/nogpu-$surface.txt"; rm -f "$O/nogpu-$surface.src"
+    echo "== nogpu-$surface"
+    env -u CRTPLAYER_LOOK_DETAIL -u CRTPLAYER_FAST_PATH CRTPLAYER_VIDEO_SURFACE=$surface timeout 600 "$BIN" --automation "$O/nogpu-$surface.txt" --automation-log "$O/nogpu-$surface.json" > "$O/nogpu-$surface.log" 2>&1
+    echo "   exit code $?"
+  done
+  echo "== playback without a graphics card"
+  checker "$O/nogpu-checks.txt" python3 "$HERE/scripts/check-nogpu.py" "$O" "$M"
+}
 desk_suite() {
   rm -rf "$XDG_CONFIG_HOME"
   run desk desk.txt
@@ -158,6 +180,7 @@ else
   console_suite
   if python3 -c "import PIL" 2>/dev/null; then tv_suite; fi
   if python3 -c "import PIL" 2>/dev/null; then everyday_suite; fi
+  if python3 -c "import PIL" 2>/dev/null; then nogpu_suite; fi
   rm -rf "$XDG_CONFIG_HOME"
   run sound sound.txt
   echo "== sound checks"
