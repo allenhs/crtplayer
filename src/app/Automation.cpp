@@ -292,6 +292,19 @@ void Automation::next()
     }
     else if (cmd == "videopath") { m_w->setVideoPath(a.value(1) == "always" ? 1 : a.value(1) == "never" ? 2 : 0); log(line); }   // auto|always|never
     else if (cmd == "lookdetail") { m_w->setLookDetail(a.value(1) == "full" ? 1 : a.value(1) == "half" ? 2 : 0); log(line); }   // auto|full|half
+    else if (cmd == "enhance") {
+        // enhance upscale on|off | sharp 0..1 | motion on|off | grab T PATH [mix] : the picture at phase T between
+        // the frame before and this one, at the video's own size (mix: a plain mix of the two, for comparison)
+        const QString what = a.value(1);
+        if (what == "upscale") { m_w->setEnhanceUpscale(a.value(2) == "on"); log(line); }
+        else if (what == "sharp") { m_w->setEnhanceSharpness(a.value(2).toDouble()); log(line); }
+        else if (what == "motion") { m_w->setSmoothMotion(a.value(2) == "on"); log(line); }
+        else if (what == "grab") {
+            const QImage img = m_w->video()->grabBetween(a.value(2).toDouble(), a.value(4) == "mix" ? 1 : a.value(4) == "flow" ? 2 : a.value(4) == "flowback" ? 3 : 0);
+            const bool ok = !img.isNull() && img.save(a.value(3));
+            log(line, {{"ok", ok}});
+        } else log(line, {{"ok", false}});
+    }
     else if (cmd == "profile") { m_w->video()->setProfiling(a.value(1) != "off"); log(line); }   // per-stage timing (see report: profile)
     else if (cmd == "hw") { p->setHardwareDecoding(a.value(1) == "on"); log(line); }
     else if (cmd == "moment") {

@@ -1,6 +1,6 @@
 # Verification report
 
-This report covers the build delivered alongside it (CRT Player 2.12.1).
+This report covers the build delivered alongside it (CRT Player 2.13.0).
 
 The final X11 and Wayland suites were run against the exact stripped `crtplayer` binary
 that is delivered, and **again against the AppImage with the system's Qt libraries
@@ -287,6 +287,214 @@ was **not measured**, because there is no GPU in this environment.
 - the interlaced style's look at real refresh rates (only its field alternation was
   measured).
 
+## 2.13: Enhance (sharper upscaling, frame generation); a video that never ended
+
+Asked for: something like DLSS upscaling and frame generation for video, on an NVIDIA
+card. DLSS itself works only inside games, and NVIDIA's AI video upscaler was not
+available on Linux when this was written, so 2.13 builds both as ordinary shaders that
+run on any graphics card. Neither is an AI model.
+
+### What was built
+
+**Sharper upscaling** (`shaders/enh_upscale.frag`, `enh_sharpen.frag`,
+`CrtRenderer::upscaledPicture` in `src/render/Enhance.cpp`):
+
+- With effects off, when the whole picture is shown at least 15% larger than the video,
+  it is rebuilt at the size it is shown at (not more than 4 times the video, nor much more
+  than the screen can show): a 16-tap Lanczos-2 reconstruction, its overshoot held to
+  80% within what the four nearest source pixels show.
+- Then a contrast-adaptive sharpening pass at that size (the method of AMD's CAS, written
+  independently): each pixel is sharpened by as much as its neighbourhood leaves room
+  for. *Sharpness* 0 switches the pass off.
+- Made once per frame and size. A CRT look, an original-frame screenshot and a picture
+  that is not enlarged are not touched.
+
+**Frame generation** (`shaders/fi_luma.frag`, `fi_flow.frag`, `fi_blend.frag`,
+`computeFlow` / `renderBetween` in `Enhance.cpp`):
+
+- **The frame before is kept.** When a new frame arrives, the two picture textures
+  change places; nothing is copied.
+- **Motion search,** once for each pair of frames, in both directions: on copies of the
+  two frames 480 pixels wide, in colour, coarse to fine over 5 levels. The coarsest level
+  (30 wide) searches 3 texels each way (a tenth of the picture's width per frame). Each
+  finer level starts from the level before, trying its own vector and its four
+  neighbours' (so the edge of a moving thing can take the motion of the side it belongs
+  to) and one texel around each; the finest level searches at half texels. Standing
+  still is always tried. The match is the mean colour difference over a 3×3 window.
+- **The picture in between,** once for every refresh of the screen, at the video's own
+  size: for each pixel the motion found from the frame before, the motion found from the
+  frame after, standing still, and (up to 1080p) the four surrounding vectors of each
+  field one by one are tried; the one whose two fetches (from the frame before, and from
+  the frame after) agree best is used, and the two fetches are mixed by the phase.
+  Where even the best does not agree, the nearer real frame is shown as it is.
+- **A cut:** when the match over the whole picture is poor (measured: 0.005 between
+  frames that follow each other, 0.08 to 0.10 across a cut; the threshold is 0.035 to
+  0.06), the nearer real frame is shown everywhere.
+- **Timing** (`VideoWidget::paintGL`): the phase is how far the pipeline's clock has gone
+  from the newest frame's time towards the next, so a draw shows the picture between the
+  frame before and the newest frame. The picture therefore runs one frame behind, and
+  the sound is delayed by one frame's time (`Player::setPictureLatencyMs`). The widget
+  redraws on every buffer swap.
+- **Where the generated picture goes:** for one draw it takes the place of the picture
+  texture, so the looks, the glow and the upscaler work from it as from any frame.
+- **Not generated:** paused; across a jump or a gap of more than 130 ms; when the video
+  has as many frames a second as the screen shows (within 25%); in desk mode; while a
+  GIF is made; without a graphics card.
+
+### Results
+
+Both are for a graphics card. The test machine has none: the checks force them on with
+software OpenGL (`CRTPLAYER_ENHANCE_FORCE=1`), on the path a graphics card takes (the
+OpenGL widget, frames as decoded). **What is measured is the pictures. Speed is not.**
+
+| Check (`tests/automation/enhance.txt`, `scripts/check-enhance.py`) | Result |
+|---|---|
+| The script ran without a failed step | PASS: all ok |
+| A 960 × 540 video shown at 1920 × 1080 is upscaled to exactly that | PASS: 1920 × 1080 |
+| The plain picture has lost much of the original's fine detail; the enhanced one has most of it back | PASS: 62% of the original's fine detail plain, 97% enhanced |
+| And it is closer to the original, not just sharper | PASS: 29.73 dB against 29.20 dB plain (brightness, against the full-size original) |
+| Sharpness: at 0 the picture is only rebuilt, at 1 it is sharpened strongly | PASS: 76% at 0, 97% at 0.5, 122% at 1 |
+| An original-frame screenshot is the video's own frame, not the upscaled one | PASS: 960 × 540 |
+| A CRT look is left alone (the same picture with the setting on and off) | PASS: largest difference 0 |
+| A video that is not enlarged is not touched | PASS: 1080p in a 1280-wide window: 0 frames upscaled |
+| The two clips are on the frames meant (30 a second: 1.000 s and 1.033 s; 60 a second: 1.017 s) | PASS: 1033.3 ms and 1016.7 ms |
+| A frame generated halfway between two frames is close to the true in-between frame | PASS: 33.1 dB; a plain mix of the two frames 22.7 dB; the frame before 20.3 dB, after 20.6 dB |
+| Little of it is clearly wrong | PASS: 0.40% of pixels differ by more than 40 of 255 (a plain mix: 7.0%) |
+| At phase 0 it is the frame before, at phase 1 the frame after, exactly | PASS: largest differences 0 and 0 |
+| A quarter of the way it is nearer the frame before than the halfway frame is | PASS: against the frame before: 22.9 dB at a quarter, 20.5 dB at half |
+| Motion is searched on a small copy of the picture | PASS: 480 × 272 for a 960 × 540 video |
+| Across a cut nothing is generated: the nearer real frame is shown | PASS: at 0.3 the frame before (largest difference 0), at 0.7 the frame after (0); the two scenes differ by 53 on average |
+| While playing, frames are generated between the video's own | PASS: 4 pairs of frames, 9 frames generated (software OpenGL here: far from full rate) |
+| The picture runs one frame behind, and the sound is held back to match | PASS: 33 ms; sound output delayed 33 ms (a 30 a second video) |
+| Paused, the real frame is shown | PASS: phase 1 |
+| It works with a look too | PASS: 2 more frames generated with Clean Broadcast Monitor on |
+| A video with as many frames a second as the screen shows gets none generated | PASS: 60 a second on a 60 Hz screen: generating False, sound delay 0 ms |
+| Not in desk mode | PASS: generating: False, sound delay 0 ms |
+| Switched off, the sound is not held back | PASS: 0 ms |
+| Without a graphics card the enhancements stay off, whatever the settings say | PASS: available: False; the picture is the plain one (largest difference 0) |
+
+The test pictures (`scripts/make-enhance-pictures.py`): a detailed scene of gradients,
+hard-edged shapes at every angle and fine texture. The upscaling original is 1920×1080
+and its copy 960×540. The motion scene is 960×540: the background pans at 14 pixels a
+frame, a flat box moves by (8, 4), another by −6, a textured square by −6 the other way,
+and a title stands still; the true in-between frame is taken from the same scene made at
+60 frames a second.
+
+### A video that never ended (found in 2.12.1, fixed here)
+
+2.12.1 recorded it as "a subtitle track other than the first selected". The cause is
+narrower. **A subtitle track that is switched to after the file has already delivered
+that track's last line never reports its end.** playbin's track selector had passed on
+the end of the track that was selected at the time, and dropped the other track's lines
+and its end; after the switch, playbin waits for an end that will not come again. The
+picture and the sound finish, and the video stays "playing" on its last frame.
+
+It needs a file that has delivered all its subtitle lines by the time of the switch: a
+short clip (the test clips deliver their two lines in the first second), or the last
+minutes of a film. The switch can be the viewer's, or the preferred language applied
+when the video opens. A jump afterwards makes the file deliver the track again, which is
+why the Cable TV checks, which nearly always jump in, had passed.
+
+What was built:
+
+- **The end of a video is recognised without the message** (`Player`, `m_endWatch`): when
+  the picture's stream has ended (seen at the video sink) and the position has stood
+  still for a second and a half while playing, the video is over.
+- **A track picked by hand is read again from where the video is,** so its next lines
+  show (and its end comes). Not done for the preferred language at opening: it would be a
+  hitch at the start of every such video; the end watch covers that case.
+
+| Check (`tests/automation/everyday.txt`) | Result |
+|---|---|
+| A short clip with the preferred subtitle track switched to after its lines were delivered still ends | PASS: track 2 while playing; then paused at 6.0 s of 6.0 |
+| A track picked by hand shows its next line (the file is read again from there), and the clip ends | PASS: track 1: 1962 bright pixels of text at 3.8 s; then paused |
+
+Reproduced before the fix on 2.12.1 and 2.11.0 (see 2.12.1 below); the same steps now
+end the video.
+
+**Full suites for 2.13.0:**
+
+| Run | Result |
+|---|---|
+| Native X11 | 456 passed, none failed |
+| Native X11, the path a graphics card takes (`CRTPLAYER_VIDEO_SURFACE=gl CRTPLAYER_FAST_PATH=never`) | 455 passed, **1 failed** (a test's timing, below) |
+| Native Wayland | 18 passed, none failed |
+| AppImage, X11, the system's Qt removed | 455 passed, **1 failed** (a test's timing, below) |
+| AppImage, Wayland, the system's Qt removed | 18 passed, none failed |
+
+**The two failures, and a third in the reruns.** All three are checks that read the
+player's state at a moment that depends on how fast this machine happened to be; none is
+a fault in the player. Each check was corrected, and the two suites they belong to
+(everyday, Cable TV) were run again on all three X11 configurations with the delivered
+binary and AppImage:
+
+| Failure | What happened | The check now | Rerun |
+|---|---|---|---|
+| Graphics-card path, everyday: *the sound's language carries over* (720 Hz heard instead of 880) | The level meter's half second, read 1.8 s after tuning in, still held the moment of silence before the preferred sound track is switched in (the switch waits until the programme runs, and the path through software OpenGL is slow to start) | Reads the pitch 3 s after tuning in | Passed on all three |
+| AppImage, Cable TV: *turning the TV on … with static until the picture arrives* (no static) | The programme had opened and shown its first picture in the moment between the command and the report, so the static was already gone | Accepts static, or a picture that has already arrived | Passed on all three |
+| Rerun on the graphics-card path, Cable TV: *programmes follow one another* | The steps before ran 3.7 s faster than usual, and one look caught a programme that had started late playing its last 2 seconds after the schedule had moved on (as designed: the next programme makes the time up) | Accepts that as a hand-over | Passed (27 of 27) on a further rerun |
+
+Reruns: native X11 71 of 71 (everyday 44, Cable TV 27); AppImage 71 of 71; the
+graphics-card path everyday 44 of 44, and Cable TV 27 of 27 after the third correction.
+
+### Faults found on the way, and fixed
+
+- **An original-frame screenshot could still lose a subtitle line** (2.12): the player
+  keeps the last four frames as decoded, and a picture shown for a while after several
+  more frames had passed (a slow redraw before a pause) was no longer among them, so the
+  player fell back to seeking for it. The frame as decoded behind the picture on screen
+  is now held from the moment the picture is taken. Seen once in the 2.11 subtitle check
+  (*V turns them on*).
+- **Thin lines broke up in generated frames** in the first version: among the motions
+  tried for a pixel, standing still won ties, and for a thin line on a moving background
+  the blurred comparison is nearly a tie. Standing still now has to match clearly
+  better. The comparison also blurs less (measured best at one mip level). Together:
+  31.3 → 36.5 dB on the first test scene (a pan only).
+- **A cut was only half recognised** with the first threshold (set by guess at 0.09 to
+  0.14): generated frames across it were a mix. The threshold was set from the measured
+  values above; frames across the cut are now exactly the nearer real frame.
+- **The first motion test scene had no moving objects:** ffmpeg's `drawbox` does not move
+  with time. Remade with overlays, in whole pixels per frame (overlays are placed at whole
+  pixels, and a rounded position is not halfway between its neighbours).
+- **Test faults:** the no-GPU suite's speed measurement could start before the video was
+  under way (one frame as decoded, drawn through OpenGL, counted: *no OpenGL is used at
+  all* failed once); the everyday suite's Cable TV steps depended on the time of day (the
+  TV's clock is now pinned, as in the TV suite); and its two-track clip had 20 seconds of
+  picture under 30 seconds of subtitles (now 30).
+
+### Known limits and what was not tested
+
+- **No graphics card here: nothing about speed is known.** Whether frame generation
+  keeps up with a 60 Hz or 144 Hz screen, at 1080p or 4K, on which cards, was not
+  measured. With software OpenGL it reaches a few frames a second. The motion search
+  costs the same for every video (it works 480 wide); the in-between picture costs one
+  pass at the video's size per refresh, with about 60 texture fetches per pixel up to
+  1080p and 20 above.
+- **The shaders were compiled only by Mesa's compiler.** NVIDIA's, AMD's and Intel's
+  drivers have their own; the shaders use plain GLSL 3.30, but they were not run there.
+- **Pacing on a real screen was not observed:** the phase is computed from the pipeline's
+  clock at the time of drawing, not from the time the picture will reach the screen, and
+  the redraw is driven by buffer swaps. Judder or tearing from that could not be seen
+  here (Xvfb has no refresh). Variable-refresh screens were not considered.
+- **The sound's delay** is set through playbin's `av-offset`; that it is one frame was
+  read back, not measured against the picture.
+- **Quality was measured on one synthetic scene** with whole-pixel motion. Real film,
+  camera noise, motion blur, transparency, rotation and zoom were not tried. The halo
+  around the title standing over the panning background is the largest error in the
+  test scene.
+- **Motion faster than about a tenth of the picture's width per frame** is not searched
+  for; such areas show the nearer real frame (a visible step).
+- **Generated frames are softer than real ones** (they are fetched between pixels). At
+  30 frames a second on a 60 Hz screen real and generated frames alternate.
+- **Upscaling was measured on one picture.** Against PIL's Lanczos filter on the same
+  decoded frame it is 0.25 dB closer to the original; most of what is lost in the
+  half-size video (fine texture, and colour detail at a quarter of the size) no upscaler
+  of this kind brings back.
+- **Desk mode** has its own renderer and gets neither enhancement.
+- **Hardware decoding together with the enhancements** was not run (no hardware
+  decoder here).
+- **Windows:** not run.
+
 ## 2.12.1: hardware decoding with a graphics card (from real use)
 
 **The report:** on a Bazzite system with an NVIDIA card, 2.12.0 showed *Hardware decoder
@@ -364,7 +572,8 @@ normally with its first subtitle track; the cause inside GStreamer's track selec
 not established.
 
 It is **not fixed in 2.12.1**, which was held to the hardware-decoder fix. Until it is:
-a jump anywhere in the video (or *Next*) gets past it.
+a jump anywhere in the video (or *Next*) gets past it. (Fixed in 2.13, where the cause
+turned out to be narrower than described here: see above.)
 
 
 ## 2.12: playback without a graphics card
@@ -2727,6 +2936,7 @@ the native binary failed to start (missing `libQt6OpenGL`). With them gone:
 | Desk-mode scenes: desk (planks, wall, moods, the picture lighting the room, clear-coat reflection), fog, scene settings | **Tested** (measurements above); look judged by eye; GPU speed not measured |
 | AppImage Qt selection (system Qt preferred); composited-screen check; keep the screen awake | **Tested** here (Weston, stand-in D-Bus services). **Not verified** on Bazzite/KWin |
 | Other distributions (install hints, missing plugins, audio fallback, AppImage without libproxy) | **Tested** by simulation (os-release files, plugins removed, libproxy hidden). **Not tested** on real installations |
+| Enhance: sharper upscaling and frame generation (shaders, for a graphics card) | **Tested** for what they draw (measurements above), forced on with software OpenGL. **Not tested:** any real graphics card, speed, pacing on a real screen, real film |
 | Playback without a graphics card (frames converted and scaled on the CPU's cores, painted without OpenGL; looks at half size) | **Tested** on software OpenGL with 2 cores (measurements above), on both window surfaces, and the graphics-card path as a whole suite. **Not tested** in a real virtual machine or on more cores |
 | Persistence, colour depth + dither, PAL, set moments (power, static, VCR text) | **Tested** (measurements above); not compared with real hardware |
 | Jellyfin: sign-in, browse, search, stream, seek, resume, progress sync, sign-out, HTTPS | **Tested against a mock server** built from the public API (10.8 and 10.10 routes). **Not tested against a real Jellyfin server** |

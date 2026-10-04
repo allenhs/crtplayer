@@ -7,7 +7,9 @@ rendertime 2.0
 open @M@/fhd_plain_30.mp4
 waitstate playing 20000
 bypass on
-wait 1500
+# (the measurement starts once the video is really under way: its first frames, as decoded, are behind)
+waitpos 1200
+wait 800
 resetsync
 wait 4000
 report fast-play

@@ -135,6 +135,10 @@ public:
     // The video as decoded (before any such scaling): size, pixel shape, format name. False until known.
     bool nativeFormat(int* width, int* height, int* parN, int* parD, QString* format = nullptr) const;
     int sinkForeignMemoryEntries() const;
+    // The picture is shown this much later than the video's clock says (frame generation shows
+    // each frame when the next has come); the sound is held back by as much.
+    void setPictureLatencyMs(int ms);
+    int pictureLatencyMs() const { return m_pictureLatencyMs; }
     // The frame as decoded that `shown` (a converted or scaled frame) was made from, or null
     // when it is no longer at hand. The caller unrefs it.
     GstSample* nativeSample(GstSample* shown);
@@ -218,6 +222,13 @@ private:
     std::deque<NativeFrame> m_nativeFrames;
     GstCaps* m_natCaps = nullptr;
     std::atomic<bool> m_keepNative{false};
+    std::atomic<bool> m_videoDone{false};   // the picture's stream has ended (seen at the video sink)
+    QTimer m_endWatch;
+    bool m_endReported = false;
+    int m_endStill = 0;
+    qint64 m_endLastPos = -1;
+    int m_pictureLatencyMs = 0;
+    gint m_textTrackRead = -1;              // the subtitle track that was selected when the file was last read from (opened, or after a jump)
     GstElement* m_capsFilter = nullptr;    // in the video sink bin (owned by the pipeline)
     GstElement* m_videoDec = nullptr;      // the software video decoder (a reference); guarded by m_mutex
     QSize m_fastSize;

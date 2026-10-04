@@ -6,6 +6,11 @@
     <file>shaders/blur.frag</file>
     <file>shaders/crt.frag</file>
     <file>shaders/plain.frag</file>
+    <file>shaders/enh_upscale.frag</file>
+    <file>shaders/enh_sharpen.frag</file>
+    <file>shaders/fi_luma.frag</file>
+    <file>shaders/fi_flow.frag</file>
+    <file>shaders/fi_blend.frag</file>
     <file>shaders/desk.vert</file>
     <file>shaders/persist.frag</file>
     <file>shaders/copy.frag</file>

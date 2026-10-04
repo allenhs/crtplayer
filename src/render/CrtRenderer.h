@@ -42,6 +42,10 @@ public:
         float osdAlpha = 0;      // VCR on-screen display
         QRectF osdRect;          // OSD placement in picture uv
         bool history = true;     // phosphor persistence may use/advance the afterglow buffer
+        // Enhance (2.13)
+        bool enhanceUp = false;  // effects off and the picture larger than the video: upscale it sharply
+        float enhanceSharp = 0.5f;
+        float framePhase = 1.f;  // frame generation: 1 = this frame; 0..1 = that far from the frame before to this one
     };
 
     // Builds draw parameters for `area` (target pixels) exactly as the flat view does.
@@ -147,7 +151,49 @@ public:
     bool profiling() const { return m_profiling; }
     Profile profile() const { return m_profile; }
     void resetProfile() { m_profile = Profile(); }
+    // ---- Enhance (2.13): sharper upscaling with effects off, and frame generation ----
+    // Frame generation keeps the frame before and works out the motion between the two, so
+    // that a draw with framePhase < 1 shows the picture at a moment between them.
+    void setFrameGeneration(bool on);
+    bool frameGeneration() const { return m_fgOn; }
+    bool framePairValid() const { return m_fgOn && m_pairValid; }
+    qint64 framePairNs() const { return m_pairValid ? m_framePts - m_prevPts : 0; }   // video time between the two frames
+    struct EnhanceStats { quint64 upscaled = 0, pairs = 0, between = 0; QSize upSize, flowSize; };
+    EnhanceStats enhanceStats() const { return m_enh; }
+    // The picture at phase t between the frame before and this one, at the video's own size
+    // (mode 1: a plain mix of the two frames, for comparison). Null without a valid pair.
+    QImage renderBetweenImage(float t, int mode = 0);
 private:
+    bool initEnhance(QString* error);
+    void destroyEnhance();
+    void keepPreviousFrame();
+    void frameArrived();
+    GLuint upscaledPicture(const DrawParams& d);
+    void ensureTargetF(GLuint& tex, GLuint& fbo, QSize& cur, const QSize& size, bool mipmaps);
+    void computeFlow();
+    bool renderBetween(float t, int mode);
+    bool beginBetween(float t);
+    void endBetween();
+    QOpenGLShaderProgram m_enhUp, m_enhSharp, m_fiLuma, m_fiFlow, m_fiBlend;
+    GLuint m_upTex[2] = {0, 0}, m_upFbo[2] = {0, 0};
+    QSize m_upSize[2];
+    bool m_upDirty = true;
+    float m_upSharp = -1.f;
+    bool m_fgOn = false, m_prevHas = false, m_pairValid = false, m_flowReady = false;
+    GLuint m_prevTex = 0, m_prevFbo = 0;
+    QSize m_prevSize;
+    qint64 m_prevPts = -1;
+    GLuint m_lumTex[2] = {0, 0}, m_lumFbo[2] = {0, 0};   // brightness of this frame [0] and the one before [1]
+    QSize m_lumSize[2];
+    bool m_lumValid[2] = {false, false};
+    static const int kFlowLevels = 5;
+    GLuint m_flowTex[2][kFlowLevels] = {}, m_flowFbo[2][kFlowLevels] = {};
+    QSize m_flowSize[2][kFlowLevels];
+    GLuint m_fgTex = 0, m_fgFbo = 0;
+    QSize m_fgSize;
+    int m_fgSwap = 0;                 // what a draw has put in the picture's place: 0 nothing, 1 the frame before, 2 a frame between
+    bool m_fgSavedMips = false;
+    EnhanceStats m_enh;
     bool m_profiling = false;
     bool m_plainOnly = false, m_direct = false, m_mipsStale = false;
     QOpenGLShaderProgram m_plain, m_plainOsd;

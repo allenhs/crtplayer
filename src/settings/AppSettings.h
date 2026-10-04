@@ -65,6 +65,9 @@ struct AppSettings {
     int repeatMode = 0;                // 0 off, 1 the whole playlist, 2 this video
     bool autoNext = false;             // at the end of the playlist, carry on with the next video in the folder
     int lookDetail = 0;                // without a graphics card, the look is drawn: 0 automatic, 1 full size, 2 half size
+    bool enhanceUpscale = false;       // Enhance: sharper upscaling with effects off (graphics card)
+    double enhanceSharpness = 0.5;
+    bool smoothMotion = false;         // Enhance: frame generation (graphics card)
     int videoPath = 0;                 // without a graphics card: 0 the fast path when effects are off, 1 always, 2 never
     QString hiddenPluginNotice;   // the missing-plugin list the user chose not to see again
     QStringList recentFiles;   // local files, most recent first (max 15)   // 0 CRT television, 1 flat-face CRT, 2 flat panel

@@ -187,6 +187,12 @@ private:
 public:
     void setVideoPath(int mode);                // 0 automatic, 1 always the fast path, 2 never
     void setLookDetail(int mode);               // without a graphics card: 0 automatic, 1 full size, 2 half size
+    // 2.13: Enhance (EnhanceUi.cpp)
+    void setEnhanceUpscale(bool on);
+    void setEnhanceSharpness(double v);
+    void setSmoothMotion(bool on);
+    void applyEnhance();
+    QString enhanceDescription() const;
     void updateVideoPath();
     qint64 shownFrameTime() const;
     bool ensureNativeFrame();                   // a frame as decoded, for original-frame grabs; then releaseNativeFrame()

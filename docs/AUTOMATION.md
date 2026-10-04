@@ -15,6 +15,12 @@ buttons and shortcuts use.
   (`raster` or `gl widget`), `output` (`as decoded`, `rgb`, `rgb scaled`), `fastSize`,
   `frameSize`, `frameDirect` (drawn without a conversion pass), `lookScale`,
   `decoderThreads` and `cpuThreads`.
+- `report` has `enhance` (2.13): `available`, `upscale`, `sharpness`, `motion`,
+  `upscaledFrames`, `upscaledWidth` / `Height`, `framePairs`, `framesGenerated`,
+  `motionWidth` / `Height`, `draws`, `drawsBetween`, `lastPhase`, `running`, `useful`,
+  `screenHz`, `pictureLatencyMs`.
+- The Enhance checks need `CRTPLAYER_ENHANCE_FORCE=1` on a machine without a graphics
+  card (the enhancements are otherwise unavailable with software OpenGL).
 - The exit code is 0 when every `expect` and `waitstate` succeeded.
 
 | Command | Effect |
@@ -94,6 +100,8 @@ buttons and shortcuts use.
 | `videopath auto\|always\|never` | The CPU fast path setting (2.12): frames converted and scaled on the CPU's cores |
 | `lookdetail auto\|full\|half` | Without a graphics card: the size the look is drawn at |
 | `profile on\|off` | Time the drawing stages. `report` then has `profile` (per frame: `uploadMs`, `convertMs`, `mipmapMs`, `blurMs`, `drawMs`, `paintMs`, `composeMs`, `frameIntervalMs`, and `cpuCoresBusy`: the CPU time the whole player used per second since `resetsync`) |
+| `enhance upscale on\|off`, `enhance sharp 0..1`, `enhance motion on\|off` | Enhance (2.13): sharper upscaling, its sharpness, smooth motion (frame generation) |
+| `enhance grab T PATH [mix\|flow\|flowback]` | Save the picture at phase T (0..1) between the frame before and the frame shown, at the video's own size. `mix`: a plain mix of the two frames; `flow` / `flowback`: the motion found, as colours |
 | `fmvgrab PATH` | Save the Sega CD FMV look's console screen (the 256×224 picture before the TV) as an image |
 | `tvadd NUMBER order\|shuffle FOLDER` | Cable TV: a channel from a folder. Channels made by a script get a fixed place in their rounds, so runs repeat |
 | `tvbumpers NUMBER FOLDER` | Short clips to play between that channel's programmes |

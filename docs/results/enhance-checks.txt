@@ -1,0 +1,25 @@
+PASS  the script ran without a failed step: all ok
+PASS  a 960 × 540 video shown at 1920 × 1080 is upscaled to exactly that: 1920 × 1080
+PASS  the plain picture has lost much of the original's fine detail; the enhanced one has most of it back: 62% of the original's fine detail plain, 97% enhanced
+PASS  and it is closer to the original, not just sharper: 29.73 dB against 29.20 dB plain (brightness, against the full-size original)
+PASS  Sharpness: at 0 the picture is only rebuilt, at 1 it is sharpened strongly: 76% at 0, 97% at 0.5, 122% at 1
+PASS  an original-frame screenshot is the video's own frame, not the upscaled one: 960 × 540
+PASS  a CRT look is left alone (the same picture with the setting on and off): largest difference 0
+PASS  a video that is not enlarged is not touched: 1080p in a 1280-wide window: 0 frames upscaled
+PASS  the two clips are on the frames meant (30 a second: 1.000 s and 1.033 s; 60 a second: 1.017 s): 1033.3 ms and 1016.7 ms
+PASS  a frame generated halfway between two frames is close to the true in-between frame: 33.1 dB; a plain mix of the two frames 22.7 dB; the frame before 20.3 dB, after 20.6 dB
+PASS  little of it is clearly wrong: 0.40% of pixels differ by more than 40 of 255 (a plain mix: 7.0%)
+PASS  at phase 0 it is the frame before, at phase 1 the frame after, exactly: largest differences 0 and 0
+PASS  a quarter of the way it is nearer the frame before than the halfway frame is: against the frame before: 22.9 dB at a quarter, 20.5 dB at half
+PASS  motion is searched on a small copy of the picture: 480 × 272 for a 960 × 540 video
+PASS  across a cut nothing is generated: the nearer real frame is shown: at 0.3 the frame before (largest difference 0), at 0.7 the frame after (0); the two scenes differ by 53 on average
+PASS  while playing, frames are generated between the video's own: 4 pairs of frames, 9 frames generated (software OpenGL here: far from full rate)
+PASS  the picture runs one frame behind, and the sound is held back to match: 33 ms; sound output delayed 33 ms (a 30 a second video)
+PASS  paused, the real frame is shown: phase 1
+PASS  it works with a look too: 2 more frames generated with Clean Broadcast Monitor on
+PASS  a video with as many frames a second as the screen shows gets none generated: 60 a second on a 60 Hz screen: generating False, sound delay 0 ms
+PASS  not in desk mode: generating: False, sound delay 0 ms
+PASS  switched off, the sound is not held back: 0 ms
+PASS  without a graphics card the enhancements stay off, whatever the settings say: available: False; the picture is the plain one (largest difference 0)
+
+All Enhance checks passed

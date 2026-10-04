@@ -45,6 +45,17 @@ check('the sound heard is the track picked (its 880 Hz tone, not the other track
 check('changing the sound track while paused, then seeking, no longer freezes the player', rep['paused-switch']['state'] == 'playing' and rep['paused-switch']['positionMs'] > 7500
       and rep['paused-switch']['currentAudio'] == 1 and abs(ps['soundPitchHz'] - 880) < 30,
       f"{rep['paused-switch']['state']} at {rep['paused-switch']['positionMs'] / 1000:.1f} s, track {rep['paused-switch']['currentAudio'] + 1}, {ps['soundPitchHz']:.0f} Hz")
+# 2.13: a clip whose subtitle lines are all delivered at once
+a, b = rep['short-subs'], rep['short-subs-end']
+check('a short clip with the preferred subtitle track switched to after its lines were delivered still ends',
+      a['currentSubtitle'] == 1 and a['state'] == 'playing' and b['state'] == 'paused' and b['positionMs'] >= 5500,
+      f"track {a['currentSubtitle'] + 1} while playing; then {b['state']} at {b['positionMs'] / 1000:.1f} s of 6.0")
+pk = img('ev-short-picked.png')
+bright = int((pk[int(pk.shape[0] * 0.6):] > 180).sum())
+check('a track picked by hand shows its next line (the file is read again from there), and the clip ends',
+      rep['short-picked']['currentSubtitle'] == 0 and bright > 300 and rep['short-picked-end']['state'] == 'paused',
+      f"track {rep['short-picked']['currentSubtitle'] + 1}: {bright} bright pixels of text at 3.8 s; then {rep['short-picked-end']['state']}")
+
 o = rep['other-order']
 check('the next video: the same languages, wherever they are in the file', ev['other-order']['currentSubtitleLang'] == 'en' and o['currentSubtitle'] == 1
       and ev['other-order']['currentAudioLang'] == 'ja' and o['currentAudio'] == 0 and ev['other-order']['subtitleLangs'] == ['fr', 'en']

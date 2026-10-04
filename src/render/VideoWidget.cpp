@@ -13,6 +13,7 @@
 #include "playback/Player.h"
 
 #include <QLabel>
+#include <QScreen>
 #include <QMouseEvent>
 #include <QPainter>
 #include <QPainterPath>
@@ -36,6 +37,8 @@ VideoWidget::VideoWidget(Player* player, QWidget* parent, GlSurfaceWidget::Mode 
     m_syncTimer.start();
     m_softwareGl = isSoftwareRenderer(probedRenderer());
     connect(m_player, &Player::frameReady, this, [this] { update(); });
+    // Frame generation: a new moment for every refresh of the screen.
+    connect(this, &GlSurfaceWidget::frameSwapped, this, [this] { if (smoothMotionRunning()) update(); });
     m_animTimer.setInterval(16);
     m_animTimer.setTimerType(Qt::PreciseTimer);
     connect(&m_animTimer, &QTimer::timeout, this, [this] {
@@ -56,6 +59,7 @@ VideoWidget::VideoWidget(Player* player, QWidget* parent, GlSurfaceWidget::Mode 
 
 VideoWidget::~VideoWidget()
 {
+    if (m_curNative) gst_sample_unref(m_curNative);
     if (m_curSample) gst_sample_unref(m_curSample);
     makeCurrent();
     m_renderer.destroy();
@@ -90,6 +94,7 @@ bool VideoWidget::needsAnimation() const
 {
     const CrtParams& p = m_params;
     if (momentsAnimating()) return true;
+    if (smoothMotionRunning()) return true;   // (frame generation draws at the screen's rate, not the video's)
     // Effects off: nothing of the look is drawn, so nothing of it needs redrawing between frames.
     if (m_bypass && !m_compare) return false;
     // Without a graphics card every redraw is expensive: the look moves with the video's frames.
@@ -124,6 +129,7 @@ void VideoWidget::setOrientationTag(const QString& tag)
 void VideoWidget::clearFrame()
 {
     if (m_curSample) { gst_sample_unref(m_curSample); m_curSample = nullptr; }
+    if (m_curNative) { gst_sample_unref(m_curNative); m_curNative = nullptr; }
     m_uploaded = false;
     m_hasFrame = false;
     m_source = SourceFormat{};
@@ -168,7 +174,64 @@ double VideoWidget::effectClock() const
 
 CrtRenderer::DrawParams VideoWidget::makeDrawParams(const QSize& viewport, const QRectF& area) const
 {
-    return CrtRenderer::makeDrawParams(viewSettings(), m_source, viewport, area, float(effectClock()), m_frameCounter);
+    CrtRenderer::DrawParams d = CrtRenderer::makeDrawParams(viewSettings(), m_source, viewport, area, float(effectClock()), m_frameCounter);
+    d.enhanceUp = m_enhUp && enhanceAvailable();
+    d.enhanceSharp = float(m_enhSharp);
+    return d;
+}
+
+// ---- Enhance ----------------------------------------------------------------------------
+
+void VideoWidget::setEnhance(bool upscale, double sharpness, bool smoothMotion)
+{
+    m_enhUp = upscale;
+    m_enhSharp = std::clamp(sharpness, 0.0, 1.0);
+    m_enhMotion = smoothMotion;
+    update();
+}
+
+bool VideoWidget::enhanceAvailable() const
+{
+    static const bool forced = qEnvironmentVariableIsSet("CRTPLAYER_ENHANCE_FORCE");
+    return m_renderer.isInitialized() && (!m_softwareGl || forced);
+}
+
+bool VideoWidget::smoothMotionUseful() const
+{
+    if (!m_enhMotion || !enhanceAvailable()) return false;
+    // A video with as many frames a second as the screen shows has nothing in between to generate.
+    const double fps = m_player->frameRate() * std::max(0.05, m_player->rate());
+    const QScreen* sc = screen();
+    const double hz = sc && sc->refreshRate() > 1.0 ? sc->refreshRate() : 60.0;
+    return fps <= 0 || fps * 1.25 < hz;
+}
+
+bool VideoWidget::smoothMotionRunning() const
+{
+    return smoothMotionUseful() && m_hasFrame && m_player->isPlaying() && !m_player->isSeeking();
+}
+
+QJsonObject VideoWidget::enhanceReport() const
+{
+    const CrtRenderer::EnhanceStats st = m_renderer.enhanceStats();
+    return QJsonObject{{"available", enhanceAvailable()}, {"upscale", m_enhUp}, {"sharpness", m_enhSharp}, {"motion", m_enhMotion},
+                       {"upscaledFrames", double(st.upscaled)}, {"upscaledWidth", st.upSize.width()}, {"upscaledHeight", st.upSize.height()},
+                       {"framePairs", double(st.pairs)}, {"framesGenerated", double(st.between)},
+                       {"motionWidth", st.flowSize.width()}, {"motionHeight", st.flowSize.height()},
+                       {"draws", double(m_phaseDraws)}, {"drawsBetween", double(m_betweenDraws)}, {"lastPhase", m_lastPhase},
+                       {"running", smoothMotionRunning()}, {"useful", smoothMotionUseful()},
+                       {"screenHz", screen() ? screen()->refreshRate() : 0.0}};
+}
+
+QImage VideoWidget::grabBetween(double t, int mode)
+{
+    if (!m_hasFrame) return {};
+    makeCurrent();
+    m_renderer.setFrameGeneration(true);
+    uploadCurrent();
+    QImage img = m_renderer.renderBetweenImage(float(t), mode);
+    doneCurrent();
+    return img;
 }
 
 QString VideoWidget::momentName() const
@@ -326,6 +389,10 @@ void VideoWidget::takeNewFrame(bool forGl)
     const bool measure = m_player->isPlaying() && !m_player->isSeeking() && m_player->frameLateness(s, &lateNs);
     if (m_curSample) gst_sample_unref(m_curSample);
     m_curSample = s;   // (keeps the reference)
+    // The frame as decoded behind it is taken hold of now, while the player still has it (it keeps
+    // only the last few): an original-frame screenshot may ask for it much later.
+    if (m_curNative) gst_sample_unref(m_curNative);
+    m_curNative = m_player->nativeSample(s);
     m_uploaded = false;
     // What was delivered: its size, and whether it is 32-bit RGB.
     GstVideoInfo vi;
@@ -386,7 +453,8 @@ void VideoWidget::takeNewFrame(bool forGl)
 bool VideoWidget::showNativeFrame()
 {
     if (!m_curSample || !m_curConverted) return m_curSample != nullptr;
-    GstSample* n = m_player->nativeSample(m_curSample);
+    GstSample* n = m_curNative ? m_curNative : m_player->nativeSample(m_curSample);
+    m_curNative = nullptr;
     if (!n) return false;
     GstVideoInfo vi;
     GstCaps* caps = gst_sample_get_caps(n);
@@ -405,6 +473,7 @@ bool VideoWidget::showNativeFrame()
 // is painted straight into the window. No OpenGL is involved at all.
 bool VideoWidget::plainPaintable() const
 {
+    if ((m_enhUp && enhanceAvailable()) || smoothMotionUseful()) return false;   // (the enhancements are OpenGL passes)
     return m_bypass && !m_compare && m_orient == Orientation();
 }
 
@@ -471,6 +540,7 @@ void VideoWidget::paintGL()
         m_renderer.setOrientation(m_orient);
         m_orientDirty = false;
     }
+    m_renderer.setFrameGeneration(smoothMotionUseful());   // (before a new frame is taken: it keeps the one before)
     takeNewFrame();
     ++m_frameCounter;
     // (Without a graphics card the look may be drawn smaller than the widget and enlarged.)
@@ -481,6 +551,19 @@ void VideoWidget::paintGL()
     decorate(d);
     if (m_osdUploaded != m_osdVersion && !osdImage().isNull()) { m_renderer.setOsdImage(osdImage()); m_osdUploaded = m_osdVersion; }
     if (!m_hasFrame) d.image = QRectF();
+    // Frame generation: how far the moment being drawn is from the frame before to the newest
+    // frame, by the video's own clock. (The newest frame is shown when its successor arrives:
+    // the picture runs one frame behind, and the sound is held back to match.)
+    double phase = 1.0;
+    if (smoothMotionRunning() && m_curSample && m_renderer.framePairValid()) {
+        qint64 late = 0;
+        const double interval = m_renderer.framePairNs() / std::max(0.05, m_player->rate());
+        if (interval > 0 && m_player->frameLateness(m_curSample, &late)) phase = std::clamp(double(late) / interval, 0.0, 1.0);
+    }
+    d.framePhase = float(phase);
+    m_lastPhase = phase;
+    ++m_phaseDraws;
+    if (phase > 0.01 && phase < 0.995) ++m_betweenDraws;
     m_renderer.draw(defaultFramebufferObject(), d);
     if (needsAnimation() && !m_animTimer.isActive()) m_animTimer.start();
     const double pms = paintTimer.nsecsElapsed() / 1e6;

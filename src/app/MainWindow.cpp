@@ -369,6 +369,9 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent)
     connect(m_playbackPanel, &PlaybackPanel::deinterlaceChanged, this, &MainWindow::setDeinterlace);
     connect(m_playbackPanel, &PlaybackPanel::videoPathChanged, this, &MainWindow::setVideoPath);
     connect(m_playbackPanel, &PlaybackPanel::lookDetailChanged, this, &MainWindow::setLookDetail);
+    connect(m_playbackPanel, &PlaybackPanel::enhanceUpscaleChanged, this, &MainWindow::setEnhanceUpscale);
+    connect(m_playbackPanel, &PlaybackPanel::enhanceSharpnessChanged, this, &MainWindow::setEnhanceSharpness);
+    connect(m_playbackPanel, &PlaybackPanel::smoothMotionChanged, this, &MainWindow::setSmoothMotion);
     connect(m_playbackPanel, &PlaybackPanel::autoNextChanged, this, &MainWindow::setAutoNext);
     connect(m_playbackPanel, &PlaybackPanel::sleepTimerChanged, this, &MainWindow::setSleepTimer);
     connect(m_playbackPanel, &PlaybackPanel::keepAwakeChanged, this, [this, updateSleep](bool on) { m_settings.keepAwake = on; updateSleep(); });
@@ -2317,6 +2320,7 @@ void MainWindow::updateInfoOverlay()
                                                   m_player->videoDecoderIsHardware() ? "HW" : "SW");
     lines << tr("Audio       %1 via %2").arg(m_player->audioCodec(), m_player->audioDecoder());
     lines << tr("Drawing     %1").arg(videoPathDescription());
+    if (const QString enh = enhanceDescription(); !enh.isEmpty()) lines << tr("Enhance     %1").arg(enh);
     if (m_player->deinterlacing()) lines << tr("Interlaced  deinterlaced for display");
     if (m_player->audioDelay() != 0) lines << tr("Sound delay %1 ms").arg(m_player->audioDelay());
     if (f.isValid()) {
@@ -2455,6 +2459,11 @@ QJsonObject MainWindow::stateReport() const
     o["everyday"] = everydayReport();
     o["profile"] = m_video->profileReport();
     o["videoPath"] = videoPathReport();
+    {
+        QJsonObject e = m_video->enhanceReport();
+        e["pictureLatencyMs"] = m_player->pictureLatencyMs();
+        o["enhance"] = e;
+    }
     o["missingPlugins"] = QJsonArray::fromStringList(m_player->missingPlugins());
     o["lastError"] = m_lastError;
     o["lastWarning"] = m_lastWarning;

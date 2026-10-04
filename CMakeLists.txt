@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(CRTPlayer VERSION 2.12.1 LANGUAGES CXX)
+project(CRTPlayer VERSION 2.13.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -41,10 +41,12 @@ add_executable(crtplayer
   src/app/MainWindow.cpp      src/app/MainWindow.h
   src/app/Everyday.cpp
   src/app/FastPath.cpp
+  src/app/EnhanceUi.cpp
   src/app/Automation.cpp      src/app/Automation.h
   src/app/DeskWindow.cpp      src/app/DeskWindow.h
   src/playback/Player.cpp     src/playback/Player.h
-  src/render/CrtRenderer.cpp  src/render/CrtRenderer.h
+  src/render/CrtRenderer.cpp
+    src/render/Enhance.cpp  src/render/CrtRenderer.h
   src/render/GlSurfaceWidget.cpp src/render/GlSurfaceWidget.h
   src/render/VideoWidget.cpp  src/render/VideoWidget.h
   src/render/ViewSettings.h

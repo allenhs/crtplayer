@@ -79,6 +79,10 @@ configurable, GPU-rendered CRT presentation that respects every aspect ratio:
   leave desk mode.
 - **Hardware decoding when available**, with automatic fallback to software if a
   hardware decoder fails.
+- **Enhance** (for a graphics card, optional): **sharper upscaling** for DVDs and 720p video
+  on a big screen, and **smooth motion**, which generates the pictures in between a film's
+  24 or 30 frames a second so that motion is as smooth as the screen allows.
+  See [Enhance](#enhance-sharper-upscaling-and-smooth-motion).
 - **Plays without a graphics card.** In a virtual machine without 3D acceleration (or
   anywhere OpenGL runs in software), the player moves colour conversion and scaling onto
   all your CPU cores and, with effects off, paints the picture without OpenGL at all.
@@ -99,6 +103,7 @@ configurable, GPU-rendered CRT presentation that respects every aspect ratio:
 7. [Screenshots, frame stepping, playlist](#screenshots-frame-stepping-playlist)
    - [Cutting without re-encoding, and GIF clips](#cutting-without-re-encoding-and-gif-clips)
    - [Without a graphics card](#without-a-graphics-card)
+   - [Enhance: sharper upscaling and smooth motion](#enhance-sharper-upscaling-and-smooth-motion)
 8. [Desk mode: a 3D TV on your desktop](#desk-mode-a-3d-tv-on-your-desktop)
 9. [Cable TV](#cable-tv)
 10. [Jellyfin](#jellyfin)
@@ -1034,6 +1039,101 @@ yet enough for 4K HEVC 10-bit; more cores should help, which was not measured.
   `CRTPLAYER_FAST_PATH=auto|always|never` and `CRTPLAYER_LOOK_DETAIL=auto|full|half` set
   the two settings' defaults.
 
+## Enhance: sharper upscaling and smooth motion
+
+Two optional enhancements for a system with a graphics card, both off until you turn
+them on in *Settings → Playback → Enhance*.
+
+They are **not** NVIDIA's DLSS, which works only inside games (it needs motion and depth
+information from the game), and they are not AI models. They are ordinary shaders, in
+the manner of the upscalers and motion interpolation that games and TVs use, and they
+run on any graphics card that runs the player. (NVIDIA's AI video upscaler, RTX Video
+Super Resolution, was not available on Linux when this was written.)
+
+### Sharper upscaling
+
+When a video is shown larger than it is (a DVD or a 720p video on a big screen), the
+player normally stretches it smoothly, which looks soft. With **Sharper upscaling** on:
+
+1. The picture is rebuilt at the size it is shown at with a sharper filter (a 16-tap
+   Lanczos reconstruction whose overshoot is held back, so edges get no halos).
+2. It is then sharpened where the picture has room for it (contrast-adaptive
+   sharpening: flat areas and noise are left alone, strong edges are not overdone).
+
+**Sharpness** sets how strong step 2 is. At 0 the picture is only rebuilt.
+
+- **When it applies:** with effects off (**B**), and only when the picture is shown at
+  least 15% larger than the video. A CRT look decides the picture's sharpness itself and
+  is left alone.
+- **What it does not do:** invent detail. It keeps the detail the video has crisp where
+  plain stretching smears it.
+- *Original frame* screenshots are the video's own frame, untouched.
+
+Measured on a detailed test picture, a 960×540 video shown at 1920×1080 against the
+1920×1080 original:
+
+| | Plain | Sharper upscaling |
+|---|---|---|
+| Fine detail, as a share of the original's | 62% | 97% |
+| Closeness to the original (brightness, PSNR) | 29.2 dB | 29.7 dB |
+
+### Smooth motion (frame generation)
+
+Films have 24 pictures a second and most video 25 or 30; the screen shows 60 or more.
+With **Smooth motion** on, the player generates the pictures in between:
+
+1. For every two frames that follow each other it works out how each part of the picture
+   moves from one to the next (coarse to fine, on small copies of the two frames, in both
+   directions).
+2. For every refresh of the screen it draws the picture at that exact moment: each pixel
+   is fetched from the frame before and the frame after along its motion, and the two
+   are mixed.
+3. Where the motion cannot be followed (something uncovered by a moving object, motion
+   too fast or too fine) nothing is invented: the nearer real frame is shown there. The
+   same for the whole picture across a cut.
+
+- **It works with every look:** the generated picture goes through the CRT look like any
+  frame.
+- **The picture runs one frame behind** (a frame can only be shown once the next has
+  arrived); the sound is held back by the same amount, so the two stay together.
+- **Paused, you see the real frame.** Screenshots and GIFs are made from real frames.
+- **Nothing is generated** when the video already has as many frames a second as the
+  screen shows, or in desk mode.
+
+Measured on a test scene (a panning background, three objects moving their own ways, a
+title standing still): the frame generated halfway between two frames of the 30 frames a
+second version, against the true frame from the 60 frames a second version:
+
+| | Closeness to the true in-between frame (PSNR) | Pixels clearly wrong |
+|---|---|---|
+| Generated frame | 33.1 dB | 0.4% |
+| A plain mix of the two frames (ghosting) | 22.7 dB | 7.0% |
+| The frame before, repeated | 20.3 dB | |
+
+**What to expect, honestly:**
+
+- This is the "smooth motion" of a TV, not a film projector: some people love it, some
+  call it the soap-opera effect. It is a matter of taste, which is why it is off by
+  default.
+- Faint halos can appear around something that moves against a moving background, and
+  fine repeating patterns (railings, brickwork) can shimmer. Very fast motion (more than
+  about a tenth of the picture's width per frame) is not followed and shows the real
+  frames.
+- Generated frames are a little softer than real ones.
+- **Speed on a real graphics card was not measured:** it was built and checked on a
+  machine without one. The motion search has a fixed cost (it always works 480 pixels
+  wide); drawing the in-between picture costs one pass at the video's size for every
+  refresh of the screen. If playback stutters with it on, it is too much for the card:
+  turn it off.
+
+### Good to know
+
+- Press **I**: the *Enhance* line says what is on and what it is doing.
+- **Without a graphics card** (software OpenGL) both are unavailable and greyed out;
+  the CPU fast path is used instead (see [Without a graphics card](#without-a-graphics-card)).
+- With either on, frames are taken as decoded: the *CPU fast path: Always* setting has
+  no effect then.
+
 ## Controllers, media keys and Steam Game Mode
 
 **Game controllers.** Any controller SDL2 knows works: Xbox, PlayStation, Switch Pro,
@@ -1540,11 +1640,10 @@ Settings are saved whenever the player exits: window close, Ctrl+Q, or logout.
 
 **A video stays on its last picture and the playlist does not go on** (2.11 to 2.12.1)
 
-- A known fault, not yet fixed: a video played from its start to its end without a
-  jump, with a subtitle track other than the first selected, does not end.
-- Any jump in the video (the arrow keys, the seek bar) gets past it, as does *Next*.
-  Videos resumed partway through, and Cable TV programmes joined partway through, are
-  not affected.
+- Fixed in 2.13. It happened when a subtitle track was switched to (by hand, or by your
+  preferred language) after the file had already delivered its last subtitle line: in a
+  short clip, or near the end of a film. The video then never reported its end.
+- In those versions, any jump in the video gets past it.
 
 **"Hardware decoder … failed; switched to software decoding" on every video** (2.12.0)
 
@@ -1688,6 +1787,8 @@ src/
   playback/Player.*        GStreamer playbin + appsink, seeking, tracks, decoder policy, errors
   render/Geometry.*        pure aspect/scaling/orientation math (unit-tested)
   render/CrtRenderer.*     GL resources: frame upload, conversion, blur, CRT pass, offscreen capture
+  render/Enhance.cpp       Enhance: the upscaling passes, the motion search and the generated in-between
+                           frames (part of CrtRenderer)
   render/GlSurfaceWidget.* the video's window surface: an OpenGL widget with a graphics card; without one, a
                            plain widget that paints frames itself and draws looks off screen
   render/VideoWidget.*     the video view: layout, compare divider, screenshots, sync statistics
@@ -1699,6 +1800,7 @@ src/
   app/MainWindow.*         wiring, shortcuts, fullscreen and auto-hide, overlays
   app/Everyday.cpp         subtitles and languages that carry over, delays, night mode, shuffle / repeat,
                            playlist files, the next video in a folder, the sleep timer (part of MainWindow)
+  app/EnhanceUi.cpp        Enhance: the settings and the sound's delay (part of MainWindow)
   app/FastPath.cpp         playback without a graphics card: which frames the pipeline delivers (as decoded,
                            converted, converted and scaled) and at what size the look is drawn (part of MainWindow)
   app/Automation.*         scripted driver used for verification
@@ -1717,6 +1819,8 @@ src/
   ui/CutDialog.*, ui/GifDialog.*  the two dialogs
 shaders/                   quad.vert, convert.frag, downsample.frag, blur.frag, crt.frag,
                            plain.frag (effects off: a small program of its own),
+                           enh_upscale.frag, enh_sharpen.frag (Enhance: upscaling),
+                           fi_luma.frag, fi_flow.frag, fi_blend.frag (Enhance: frame generation),
                            fmv_codec.frag, fmv_palette.frag (Sega CD FMV look),
                            desk.vert, desk.frag (3D cabinet, glass, shadow)
 tests/                     unit tests + automation scripts

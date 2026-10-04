@@ -130,6 +130,11 @@ private:
     bool uploadCurrent();
     bool plainPaintable() const;
     GstSample* m_curSample = nullptr;   // the frame on screen (a reference)
+    bool m_enhUp = false, m_enhMotion = false;
+    double m_enhSharp = 0.5;
+    double m_lastPhase = 1.0;
+    quint64 m_phaseDraws = 0, m_betweenDraws = 0;
+    GstSample* m_curNative = nullptr;   // the same frame as decoded, when the one on screen was converted or scaled
     bool m_uploaded = false;            // ... and whether the renderer has it
     QSize m_curSize;                    // its size as delivered
     bool m_curConverted = false;        // it was converted or scaled for the screen by the video pipeline (not as decoded)
@@ -207,6 +212,14 @@ public:
     bool showNativeFrame();                           // replace the frame on screen by the same frame as decoded, if at hand
     void pullFrame();                                 // take the newest frame now (without waiting for a repaint)
     QJsonObject profileReport() const;
+    // Enhance (2.13): sharper upscaling with effects off, and frame generation. For a graphics
+    // card; with software OpenGL only when forced (CRTPLAYER_ENHANCE_FORCE, for the checks).
+    void setEnhance(bool upscale, double sharpness, bool smoothMotion);
+    bool enhanceAvailable() const;
+    bool smoothMotionUseful() const;       // wanted, available, and the screen refreshes clearly faster than the video's frames come
+    bool smoothMotionRunning() const;      // frames are being generated between the video's own
+    QJsonObject enhanceReport() const;
+    QImage grabBetween(double t, int mode);   // the picture at phase t between the frame before and this one (mode 1: a plain mix)
 private:
     bool m_softwareGl = false;
     int m_paintN = 0;

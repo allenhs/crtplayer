@@ -80,6 +80,8 @@ void MainWindow::applyEverydaySettings()
     m_playbackPanel->setDeinterlace(m_settings.deinterlace);
     m_playbackPanel->setVideoPath(m_settings.videoPath);
     m_playbackPanel->setLookDetail(m_settings.lookDetail);
+    m_playbackPanel->setEnhance(m_settings.enhanceUpscale, m_settings.enhanceSharpness, m_settings.smoothMotion);
+    applyEnhance();
     m_playbackPanel->setAutoNext(m_settings.autoNext);
     m_playbackPanel->setSleepTimer(0, QString());
     m_playlist->setShuffle(m_settings.shuffle);

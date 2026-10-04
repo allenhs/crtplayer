@@ -48,6 +48,28 @@ open @M@/multitrack_b.mkv
 waitstate playing 15000
 wait 1500
 report other-order
+# a short clip whose subtitle lines are all read in its first moments: the preferred track (the
+# second) is switched to after its lines, and its end, were delivered. The clip must still end (2.13).
+open @M@/two_subs_short.mkv
+waitstate playing 15000
+wait 1200
+report short-subs
+wait 10000
+report short-subs-end
+# ... and a track picked by hand shows its next line: the file is read again from there
+open @M@/two_subs_short.mkv
+waitstate playing 15000
+wait 600
+subtrack 0
+waitpos 3800
+pause
+wait 600
+screenshot original @O@/ev-short-picked.png
+report short-picked
+play
+wait 5500
+report short-picked-end
+subtrack 1
 # a video without subtitles in between changes nothing
 open @M@/sd_4x3_h264.mp4
 waitstate playing 15000
@@ -264,9 +286,14 @@ report sleep-end
 tvadd 2 order @O@/everyday-media/tv-a
 tvadd 3 order @O@/everyday-media/tv-b
 tvwait 30000
+# (the TV's clock is pinned so that every tune-in below falls well inside a programme:
+# what is on would otherwise depend on the time of day the test runs)
+tvclock 1790000004667
 tv on
 waitstate playing 20000
-wait 1800
+# (this channel's Japanese sound is its second track: it is switched in once the programme runs,
+# and the pitch is read from a full half second of sound after that)
+wait 3000
 report tv-2
 tv up
 waitstate playing 20000

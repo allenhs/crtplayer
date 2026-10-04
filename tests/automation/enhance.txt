@@ -1,0 +1,123 @@
+# 2.13: Enhance. Sharper upscaling with effects off, and frame generation. Run on the OpenGL
+# widget with frames as decoded (the path a graphics card takes), with the enhancements forced
+# on although OpenGL is software here.
+bypass on
+# ---- upscaling: the original at full size, then its half-size copy shown at full size
+open @M@/enh_detail_hd.mp4
+waitstate playing 20000
+pause
+seek 2
+wait 1500
+screenshot original @O@/enh-truth.png
+enhance upscale on
+wait 800
+report hd-window
+open @M@/enh_detail_half.mp4
+waitstate playing 20000
+pause
+seek 2
+wait 1500
+enhance upscale off
+fullscreen on
+wait 2500
+screenshot filtered @O@/enh-up-off.png
+enhance upscale on
+wait 800
+screenshot filtered @O@/enh-up-on.png
+report up-on
+screenshot original @O@/enh-up-orig.png
+enhance sharp 0
+wait 500
+screenshot filtered @O@/enh-up-s0.png
+enhance sharp 1
+wait 500
+screenshot filtered @O@/enh-up-s1.png
+enhance sharp 0.5
+# a CRT look is left alone
+bypass off
+preset Clean Broadcast Monitor
+wait 800
+screenshot filtered @O@/enh-look-on.png
+enhance upscale off
+wait 500
+screenshot filtered @O@/enh-look-off.png
+bypass on
+fullscreen off
+wait 1500
+# ---- frame generation: the true in-between frame (frame 61 of the 60 a second clip) ...
+enhance motion on
+wait 500
+open @M@/enh_motion_60.mp4
+waitstate playing 20000
+pause
+seek 1.0
+wait 1500
+step fwd
+wait 1000
+report truth
+screenshot original @O@/enh-fg-truth.png
+# ... against the frame generated halfway between frames 30 and 31 of the 30 a second clip
+open @M@/enh_motion_30.mp4
+waitstate playing 20000
+pause
+seek 1.0
+wait 1500
+screenshot original @O@/enh-fg-a.png
+step fwd
+wait 1500
+report pair
+screenshot original @O@/enh-fg-b.png
+enhance grab 0.5 @O@/enh-fg-mid.png
+enhance grab 0.5 @O@/enh-fg-mix.png mix
+enhance grab 0.0 @O@/enh-fg-t0.png
+enhance grab 1.0 @O@/enh-fg-t1.png
+enhance grab 0.25 @O@/enh-fg-t25.png
+# ---- a cut: nothing is generated across it
+open @M@/enh_motion_cut.mp4
+waitstate playing 20000
+pause
+seek 1.9
+wait 1500
+step fwd
+wait 800
+step fwd
+wait 800
+screenshot original @O@/enh-cut-a.png
+step fwd
+wait 800
+report cut
+screenshot original @O@/enh-cut-b.png
+enhance grab 0.3 @O@/enh-cut-t3.png
+enhance grab 0.7 @O@/enh-cut-t7.png
+# ---- playing: frames are generated, the sound is held back by a frame; paused: the real frame
+open @M@/enh_motion_30.mp4
+waitstate playing 20000
+wait 3000
+report playing
+pause
+wait 800
+report paused
+play
+# with a look
+bypass off
+wait 2500
+report playing-look
+bypass on
+# a video with as many frames a second as the screen shows: nothing to generate
+open @M@/enh_motion_60.mp4
+waitstate playing 20000
+wait 2000
+report sixty
+open @M@/enh_motion_30.mp4
+waitstate playing 20000
+wait 1000
+# desk mode: not there
+desk on
+wait 3000
+report desk
+desk off
+wait 2000
+enhance motion off
+wait 800
+report motion-off
+quit

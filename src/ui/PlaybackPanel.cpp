@@ -94,6 +94,42 @@ PlaybackPanel::PlaybackPanel(QWidget* parent) : QWidget(parent)
     df->addWidget(m_status);
     v->addWidget(decBox);
 
+    // ---- Enhance (2.13): for a graphics card
+    auto* enhBox = new QGroupBox(tr("Enhance"), this);
+    auto* ef = new QVBoxLayout(enhBox);
+    ef->setContentsMargins(0, 6, 0, 0);
+    m_enhUp = new QCheckBox(tr("Sharper upscaling (with effects off)"));
+    m_enhUp->setToolTip(tr("When the picture is shown larger than the video (a DVD or a 720p video on a big screen), it is rebuilt\n"
+                           "with a sharper filter and then sharpened where the picture has room for it, instead of being stretched softly.\n"
+                           "It applies with effects off (B): a CRT look decides the picture's sharpness itself.\n"
+                           "Not an AI upscaler: nothing is invented, edges and texture are kept crisp."));
+    connect(m_enhUp, &QCheckBox::toggled, this, &PlaybackPanel::enhanceUpscaleChanged);
+    ef->addWidget(m_enhUp);
+    {
+        auto* row = new QFormLayout;
+        m_enhSharp = new QSlider(Qt::Horizontal);
+        m_enhSharp->setRange(0, 100);
+        m_enhSharp->setValue(50);
+        m_enhSharp->setFocusPolicy(Qt::StrongFocus);
+        m_enhSharp->installEventFilter(new WheelGuard(m_enhSharp));
+        m_enhSharp->setToolTip(tr("How strongly the upscaled picture is sharpened. At 0 it is only rebuilt, not sharpened."));
+        connect(m_enhSharp, &QSlider::valueChanged, this, [this](int x) { emit enhanceSharpnessChanged(x / 100.0); });
+        row->addRow(tr("Sharpness"), m_enhSharp);
+        ef->addLayout(row);
+    }
+    m_enhMotion = new QCheckBox(tr("Smooth motion (frame generation)"));
+    m_enhMotion->setToolTip(tr("Films and most video have 24 to 30 pictures a second; the screen shows 60 or more. On: the pictures in between\n"
+                               "are generated, by following how things move from one frame to the next, so that motion is as smooth as the\n"
+                               "screen allows. Where the motion cannot be followed (something uncovered, a cut) the nearer real frame is shown.\n"
+                               "The picture runs one frame behind; the sound is held back to match. Works with every look. Not in desk mode."));
+    connect(m_enhMotion, &QCheckBox::toggled, this, &PlaybackPanel::smoothMotionChanged);
+    ef->addWidget(m_enhMotion);
+    m_enhStatus = new QLabel;
+    m_enhStatus->setWordWrap(true);
+    m_enhStatus->setObjectName("paramValue");
+    ef->addWidget(m_enhStatus);
+    v->addWidget(enhBox);
+
     auto* shotBox = new QGroupBox(tr("Screenshots"), this);
     auto* sf = new QFormLayout(shotBox);
     sf->setContentsMargins(0, 6, 0, 0);
@@ -264,6 +300,20 @@ void PlaybackPanel::setNightMode(bool on) { QSignalBlocker b(m_night); m_night->
 void PlaybackPanel::setDeinterlace(bool on) { QSignalBlocker b(m_deint); m_deint->setChecked(on); }
 void PlaybackPanel::setVideoPath(int mode) { QSignalBlocker b(m_videoPath); m_videoPath->setCurrentIndex(mode); }
 void PlaybackPanel::setLookDetail(int mode) { QSignalBlocker b(m_lookDetail); m_lookDetail->setCurrentIndex(mode); }
+void PlaybackPanel::setEnhance(bool upscale, double sharpness, bool smoothMotion)
+{
+    const QSignalBlocker b1(m_enhUp), b2(m_enhSharp), b3(m_enhMotion);
+    m_enhUp->setChecked(upscale);
+    m_enhSharp->setValue(int(std::lround(sharpness * 100)));
+    m_enhMotion->setChecked(smoothMotion);
+}
+void PlaybackPanel::setEnhanceStatus(bool available, const QString& status)
+{
+    m_enhUp->setEnabled(available);
+    m_enhSharp->setEnabled(available);
+    m_enhMotion->setEnabled(available);
+    m_enhStatus->setText(status);
+}
 void PlaybackPanel::setAutoNext(bool on) { QSignalBlocker b(m_autoNext); m_autoNext->setChecked(on); }
 void PlaybackPanel::setSleepTimer(int minutes, const QString& status)
 {

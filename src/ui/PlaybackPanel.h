@@ -31,6 +31,10 @@ signals:
     void deinterlaceChanged(bool on);
     void videoPathChanged(int mode);
     void lookDetailChanged(int mode);       // 0 automatic, 1 full size, 2 half size        // 0 automatic, 1 always the fast path, 2 never
+    // 2.13: Enhance
+    void enhanceUpscaleChanged(bool on);
+    void enhanceSharpnessChanged(double v);   // 0 .. 1
+    void smoothMotionChanged(bool on);
     void autoNextChanged(bool on);
     void sleepTimerChanged(int minutes);    // 0 off, -1 at the end of this video
 public:
@@ -42,6 +46,8 @@ public:
     void setDeinterlace(bool on);
     void setVideoPath(int mode);
     void setLookDetail(int mode);
+    void setEnhance(bool upscale, double sharpness, bool smoothMotion);
+    void setEnhanceStatus(bool available, const QString& status);
     void setAutoNext(bool on);
     void setSleepTimer(int minutes, const QString& status);   // the choice, and what is left ("" when off)
     void setKeepAwake(bool on);
@@ -65,6 +71,10 @@ private:
     class QSpinBox* m_audioDelay = nullptr;
     QCheckBox* m_night = nullptr;
     QCheckBox* m_deint = nullptr;
+    QCheckBox* m_enhUp = nullptr;
+    QCheckBox* m_enhMotion = nullptr;
+    class QSlider* m_enhSharp = nullptr;
+    class QLabel* m_enhStatus = nullptr;
     QComboBox* m_videoPath = nullptr;
     QComboBox* m_lookDetail = nullptr;
     QCheckBox* m_autoNext = nullptr;

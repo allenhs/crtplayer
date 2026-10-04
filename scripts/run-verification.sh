@@ -118,6 +118,17 @@ nogpu_suite() {
   echo "== playback without a graphics card"
   checker "$O/nogpu-checks.txt" python3 "$HERE/scripts/check-nogpu.py" "$O" "$M"
 }
+# 2.13: Enhance (sharper upscaling, frame generation). They are for a graphics card; here they
+# are forced on with software OpenGL, on the path a graphics card takes (the OpenGL widget,
+# frames as decoded). A second, short run checks that they stay off when not forced.
+enhance_suite() {
+  rm -rf "$XDG_CONFIG_HOME" "$XDG_DATA_HOME"
+  run enhance enhance.txt CRTPLAYER_VIDEO_SURFACE=gl CRTPLAYER_FAST_PATH=never CRTPLAYER_ENHANCE_FORCE=1
+  rm -rf "$XDG_CONFIG_HOME" "$XDG_DATA_HOME"
+  run enhance-unforced enhance-unforced.txt CRTPLAYER_VIDEO_SURFACE=gl CRTPLAYER_FAST_PATH=never
+  echo "== Enhance checks"
+  checker "$O/enhance-checks.txt" python3 "$HERE/scripts/check-enhance.py" "$O"
+}
 desk_suite() {
   rm -rf "$XDG_CONFIG_HOME"
   run desk desk.txt
@@ -181,6 +192,7 @@ else
   if python3 -c "import PIL" 2>/dev/null; then tv_suite; fi
   if python3 -c "import PIL" 2>/dev/null; then everyday_suite; fi
   if python3 -c "import PIL" 2>/dev/null; then nogpu_suite; fi
+  if python3 -c "import PIL" 2>/dev/null; then enhance_suite; fi
   rm -rf "$XDG_CONFIG_HOME"
   run sound sound.txt
   echo "== sound checks"

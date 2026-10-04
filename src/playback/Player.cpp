@@ -81,6 +81,23 @@ QString trackLang(const GstTagList* tags)
 
 Player::Player(QObject* parent) : QObject(parent)
 {
+    // The end of a video is the pipeline's end-of-stream message. It does not come when one of
+    // the streams never reports its end: a subtitle track switched to after the file's last
+    // subtitle line had already been read, for one (playbin then waits for an end that was
+    // delivered before the switch). The picture has ended, the position stands still: after a
+    // second and a half of that, the video is over.
+    m_endWatch.setInterval(500);
+    connect(&m_endWatch, &QTimer::timeout, this, [this] {
+        if (!m_pipe || !m_loaded || m_state != State::Playing || m_seekInFlight || !m_videoDone || m_endReported) { m_endStill = 0; return; }
+        const qint64 pos = position();
+        m_endStill = pos == m_endLastPos ? m_endStill + 1 : 0;
+        m_endLastPos = pos;
+        if (m_endStill >= 3) {
+            m_endReported = true;
+            emit endOfStream();
+        }
+    });
+    m_endWatch.start();
     m_seekWatchdog.setSingleShot(true);
     m_seekWatchdog.setInterval(1500);
     connect(&m_seekWatchdog, &QTimer::timeout, this, [this] {
@@ -499,6 +516,9 @@ void Player::teardown()
     m_framePending = false;
     m_lastFrameStreamTime = -1;
     m_fpsN = 0; m_fpsD = 1;
+    m_videoDone = false;
+    m_endReported = false;
+    m_endStill = 0;
 }
 
 void Player::close()
@@ -572,6 +592,9 @@ void Player::doSeek(qint64 posNs, SeekMode mode)
     else flags |= GST_SEEK_FLAG_KEY_UNIT | GST_SEEK_FLAG_SNAP_NEAREST;
     m_seekTarget = posNs;
     m_seekInFlight = true;
+    g_object_get(m_pipe, "current-text", &m_textTrackRead, nullptr);   // (the file is read again with this track selected)
+    m_endReported = false;
+    m_videoDone = false;
     m_seekWatchdog.start();
     if (!gst_element_seek(m_pipe, m_rate, GST_FORMAT_TIME, GstSeekFlags(flags), GST_SEEK_TYPE_SET, posNs,
                           GST_SEEK_TYPE_NONE, GST_CLOCK_TIME_NONE)) {
@@ -589,6 +612,8 @@ void Player::seekKeyframe(bool forward)
     const int flags = GST_SEEK_FLAG_FLUSH | GST_SEEK_FLAG_KEY_UNIT | (forward ? GST_SEEK_FLAG_SNAP_AFTER : GST_SEEK_FLAG_SNAP_BEFORE);
     m_seekTarget = target;
     m_seekInFlight = true;
+    m_endReported = false;
+    m_videoDone = false;
     m_seekWatchdog.start();
     if (!gst_element_seek(m_pipe, m_rate, GST_FORMAT_TIME, GstSeekFlags(flags), GST_SEEK_TYPE_SET, target,
                           GST_SEEK_TYPE_NONE, GST_CLOCK_TIME_NONE)) {
@@ -687,8 +712,16 @@ void Player::applyOffsets()
 {
     if (!m_pipe) return;
     // playbin's av-offset holds the picture back when positive, so the sound's delay is its negative.
-    g_object_set(m_pipe, "av-offset", -gint64(m_audioDelayMs) * GST_MSECOND, nullptr);
+    g_object_set(m_pipe, "av-offset", -gint64(m_audioDelayMs + m_pictureLatencyMs) * GST_MSECOND, nullptr);
     applySubtitleShown();   // (the subtitle delay lives on the overlay)
+}
+
+void Player::setPictureLatencyMs(int ms)
+{
+    ms = std::clamp(ms, 0, 200);
+    if (ms == m_pictureLatencyMs) return;
+    m_pictureLatencyMs = ms;
+    applyOffsets();
 }
 
 void Player::setSubtitleStyle(const SubtitleStyle& st)
@@ -742,8 +775,13 @@ GstPadProbeReturn Player::onSinkEvent(GstPad*, GstPadProbeInfo* info, gpointer s
         }
     } else if (GST_EVENT_TYPE(ev) == GST_EVENT_FLUSH_STOP) {
         auto* p = static_cast<Player*>(self);
+        p->m_videoDone = false;
         QMutexLocker lock(&p->m_mutex);
         p->clearNativeFrames();   // (a jump: what was kept is no longer what is shown)
+    } else if (GST_EVENT_TYPE(ev) == GST_EVENT_EOS || GST_EVENT_TYPE(ev) == GST_EVENT_STREAM_GROUP_DONE) {
+        static_cast<Player*>(self)->m_videoDone = true;    // the picture has ended (see m_endWatch)
+    } else if (GST_EVENT_TYPE(ev) == GST_EVENT_STREAM_START) {
+        static_cast<Player*>(self)->m_videoDone = false;
     }
     return GST_PAD_PROBE_OK;
 }
@@ -1072,6 +1110,13 @@ void Player::setSubtitleTrack(int idx)
         gint cur = -1;
         g_object_get(m_pipe, "current-text", &cur, nullptr);
         if (cur != idx) g_object_set(m_pipe, "current-text", idx, nullptr);
+        // The new track's lines that the file has already delivered went to the track that was
+        // selected when they were read (a short clip may have delivered them all). The file is
+        // read again from here.
+        if (idx != m_textTrackRead && m_loaded && !m_seekInFlight && (m_state == State::Playing || m_state == State::Paused)) {
+            const qint64 shown = m_lastFrameStreamTime;
+            seek(shown >= 0 ? shown + 1000000 : position(), SeekMode::Accurate);
+        }
     }
     applySubtitleShown();
 }
@@ -1347,6 +1392,8 @@ void Player::handleMessage(GstMessage* m, quint64 generation)
         }
         break;
     case GST_MESSAGE_EOS:
+        if (m_endReported) break;   // (the end watch was first)
+        m_endReported = true;
         emit endOfStream();
         break;
     case GST_MESSAGE_STATE_CHANGED: {
@@ -1364,6 +1411,7 @@ void Player::handleMessage(GstMessage* m, quint64 generation)
             gint64 dur = -1;
             if (gst_element_query_duration(m_pipe, GST_FORMAT_TIME, &dur)) m_duration = dur;
             emit durationChanged(m_duration);
+            g_object_get(m_pipe, "current-text", &m_textTrackRead, nullptr);   // (the track the file began to be read with)
             refreshTracks();
             emit mediaLoaded();
             if (m_startPos <= 0 && std::abs(m_rate - 1.0) > 1e-6) doSeek(position(), SeekMode::Accurate);   // keep the speed

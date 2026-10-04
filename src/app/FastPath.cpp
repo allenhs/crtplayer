@@ -21,6 +21,8 @@
 bool MainWindow::fastPathWanted() const
 {
     if (m_fastHeld || m_settings.videoPath == 2) return false;
+    // (Enhance works on the frames as decoded: upscaling wants the video's own pixels.)
+    if ((m_settings.enhanceUpscale || m_settings.smoothMotion) && m_video->enhanceAvailable()) return false;
     if (m_settings.videoPath == 0 && !m_video->softwareRenderer()) return false;
     // (A GIF is made from frames as decoded, stepped one by one.)
     return !m_gifRecording && m_video->uprightSource();
@@ -81,6 +83,7 @@ void MainWindow::updateVideoPath()
         if (stale && !m_video->showNativeFrame()) m_player->seek(shownFrameTime(), Player::SeekMode::Accurate);
     }
     if (was != now) updateInfoOverlay();
+    applyEnhance();   // (what is available, and the sound's delay, follow the video)
 }
 
 // The frame as decoded is needed (an original-frame screenshot): the fast path is held off

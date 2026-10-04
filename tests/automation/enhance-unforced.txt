@@ -1,0 +1,16 @@
+# 2.13: without a graphics card the enhancements stay off, whatever the settings say.
+bypass on
+enhance upscale on
+enhance motion on
+open @M@/enh_detail_half.mp4
+waitstate playing 20000
+pause
+seek 2
+wait 1500
+fullscreen on
+wait 2500
+screenshot filtered @O@/enh-unforced.png
+report unforced
+fullscreen off
+wait 1000
+quit

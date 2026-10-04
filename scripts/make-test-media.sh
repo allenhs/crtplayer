@@ -51,9 +51,17 @@ printf '1\n00:00:00,000 --> 00:01:00,000\nSIDECAR SUBTITLE TEST\n' > subs_clip.s
 printf '1\n00:00:00,000 --> 00:01:00,000\nSECOND SUBTITLE FILE\n' > subs_clip.en.srt
 # 2.11: the same languages as hd_16x9_multitrack.mkv in the other order (Japanese sound first, French subtitles first),
 # to see that tracks are picked by language and not by their place.
-ffmpeg $F -f lavfi -i "testsrc2=size=640x360:rate=25:duration=20" -f lavfi -i "sine=f=880:duration=20" -f lavfi -i "sine=f=440:duration=20" \
+ffmpeg $F -f lavfi -i "testsrc2=size=640x360:rate=25:duration=30" -f lavfi -i "sine=f=880:duration=30" -f lavfi -i "sine=f=440:duration=30" \
   -i fr.srt -i en.srt -map 0:v -map 1:a -map 2:a -map 3 -map 4 -c:v libx264 -pix_fmt yuv420p -g 25 -c:a aac -c:s srt \
   -metadata:s:a:0 language=jpn -metadata:s:a:1 language=eng -metadata:s:s:0 language=fre -metadata:s:s:1 language=eng multitrack_b.mkv
+# 2.13: a short clip with two subtitle tracks, two lines each. The file delivers all four lines
+# in its first moments, so a track switched to afterwards has already had its lines (and its end).
+printf '1\n00:00:00,300 --> 00:00:02,500\nPREMIERE LIGNE\n\n2\n00:00:03,000 --> 00:00:05,500\nDEUXIEME LIGNE\n' > short_fr.srt
+printf '1\n00:00:00,300 --> 00:00:02,500\nFIRST LINE\n\n2\n00:00:03,000 --> 00:00:05,500\nSECOND LINE\n' > short_en.srt
+ffmpeg $F -f lavfi -i "color=c=0x203040:size=640x360:rate=25:duration=6" -f lavfi -i "sine=f=440:duration=6" -i short_fr.srt -i short_en.srt \
+  -map 0:v -map 1:a -map 2 -map 3 -c:v libx264 -pix_fmt yuv420p -g 12 -c:a aac -c:s srt \
+  -metadata:s:s:0 language=fre -metadata:s:s:1 language=eng two_subs_short.mkv
+rm -f short_fr.srt short_en.srt
 # A subtitle that is on screen from 4 to 6 seconds only, on a plain picture (subtitle delay, subtitle style).
 printf '1\n00:00:04,000 --> 00:00:06,000\nTIMED LINE\n' > timed.srt
 ffmpeg $F -f lavfi -i "color=c=0x305070:size=640x480:rate=25:duration=12" -f lavfi -i "sine=f=440:duration=12" -i timed.srt \
@@ -81,6 +89,23 @@ ffmpeg $F -f lavfi -i "testsrc2=size=1920x1080:rate=30:duration=20" -f lavfi -i 
   -vf "noise=alls=6:allf=t" -c:v libx264 -preset veryfast -crf 22 -pix_fmt yuv420p -g 30 -c:a aac -shortest fhd_plain_30.mp4
 ffmpeg $F -f lavfi -i "testsrc2=size=3840x2160:rate=30:duration=10" -f lavfi -i "sine=f=540:duration=10" \
   -vf "noise=alls=6:allf=t" -c:v libx264 -preset veryfast -crf 24 -pix_fmt yuv420p -g 30 -c:a aac -shortest uhd_h264.mp4
+# 2.13: Enhance. A detailed picture at full size (the original) and at half size (what is
+# upscaled); a scene with a panning background, three objects moving their own ways and a
+# title that stands still, at 60 frames a second (the truth) and at 30 (what frames are
+# generated between); and a cut between two scenes. All motion is in whole pixels per frame.
+python3 "$HERE/scripts/make-enhance-pictures.py" .
+ffmpeg $F -loop 1 -framerate 25 -i enh_detail.png -f lavfi -i "sine=f=300:duration=4" -t 4 -c:v libx264 -crf 8 -pix_fmt yuv420p -g 25 -c:a aac -shortest enh_detail_hd.mp4
+ffmpeg $F -loop 1 -framerate 25 -i enh_detail.png -f lavfi -i "sine=f=300:duration=4" -t 4 -vf "scale=960:540:flags=area" -c:v libx264 -crf 8 -pix_fmt yuv420p -g 25 -c:a aac -shortest enh_detail_half.mp4
+for r in 60 30; do
+  ffmpeg $F -loop 1 -framerate $r -i enh_pan.png -f lavfi -i "color=c=0xe04020:s=90x70:r=$r" -f lavfi -i "color=c=0x20c0e0:s=60x110:r=$r" \
+    -loop 1 -framerate $r -i enh_other.png -f lavfi -i "sine=f=440:duration=4" \
+    -filter_complex "[0:v]crop=960:540:x='60+420*t':y=0[bg];[3:v]crop=140:140:400:200[tex];[bg][1:v]overlay=x='100+240*t':y='60+120*t'[o1];[o1][2:v]overlay=x='820-180*t':y=380[o2];[o2][tex]overlay=x='500':y='380-180*t',drawtext=text='CH 7':x=40:y=40:fontsize=44:fontcolor=white:box=1:boxcolor=black@0.6[v]" \
+    -map "[v]" -map 4:a -t 4 -r $r -c:v libx264 -crf 10 -pix_fmt yuv420p -g $r -c:a aac -shortest enh_motion_$r.mp4
+done
+ffmpeg $F -loop 1 -framerate 30 -i enh_pan.png -loop 1 -framerate 30 -i enh_other.png -f lavfi -i "sine=f=440:duration=4" \
+  -filter_complex "[0:v]crop=960:540:x='60+420*t':y=0,trim=duration=2,setpts=PTS-STARTPTS[a];[1:v]trim=duration=2,setpts=PTS-STARTPTS[b];[a][b]concat=n=2:v=1[v]" \
+  -map "[v]" -map 2:a -t 4 -r 30 -c:v libx264 -crf 10 -pix_fmt yuv420p -g 30 -c:a aac -shortest enh_motion_cut.mp4
+rm -f enh_detail.png enh_pan.png enh_other.png
 # Base plugins only (Ogg, Theora, Vorbis): must play even without gst-plugins-good.
 ffmpeg $F -f lavfi -i "smptebars=size=640x480:rate=25" -f lavfi -i "sine=f=440:duration=8" \
   -t 8 -c:v libtheora -q:v 6 -c:a libvorbis -shortest base_only.ogv

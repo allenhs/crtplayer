@@ -69,6 +69,7 @@ bool CrtRenderer::initialize(QString* error)
     if (!loadProgram(m_crt, ":/shaders/crt.frag", error)) return false;
     if (!loadProgram(m_plain, ":/shaders/plain.frag", error)) return false;
     if (!loadProgram(m_plainOsd, ":/shaders/plain.frag", error, "#define OSD\n")) return false;
+    if (!initEnhance(error)) return false;
     if (!loadProgram(m_persist, ":/shaders/persist.frag", error)) return false;
     if (!loadProgram(m_copy, ":/shaders/copy.frag", error)) return false;
     if (!loadProgram(m_fmvCodec, ":/shaders/fmv_codec.frag", error)) return false;
@@ -105,6 +106,7 @@ void CrtRenderer::destroy()
     if (m_lowTex) glDeleteTextures(1, &m_lowTex);
     if (m_lowFbo) glDeleteFramebuffers(1, &m_lowFbo);
     m_lowTex = m_lowFbo = 0;
+    destroyEnhance();
     glDeleteTextures(2, m_fmvDecTex);
     glDeleteFramebuffers(2, m_fmvDecFbo);
     if (m_fmvTex) glDeleteTextures(1, &m_fmvTex);
@@ -183,6 +185,7 @@ bool CrtRenderer::uploadSample(GstSample* sample)
     if (!caps || !buf) return false;
     GstVideoInfo info;
     if (!gst_video_info_from_caps(&info, caps)) return false;
+    keepPreviousFrame();   // (frame generation: the picture so far becomes "the frame before")
     m_info = info;
     m_infoValid = true;
     switch (GST_VIDEO_INFO_FORMAT(&m_info)) {
@@ -230,6 +233,7 @@ bool CrtRenderer::uploadSample(GstSample* sample)
         if (!m_plainOnly) { ensureMipmaps(); m_profile.mipmap += stageMs(pt); }
         m_blurDirty = true;
         m_lowDirty = true;
+        frameArrived();
         return true;
     }
     for (int p = 0; p < planes && p < 3; ++p) {
@@ -263,6 +267,7 @@ bool CrtRenderer::uploadSample(GstSample* sample)
     m_profile.upload += stageMs(pt);
     ++m_profile.frames;
     convert();
+    frameArrived();
     return true;
 }
 
@@ -359,6 +364,7 @@ void CrtRenderer::convert()
     m_profile.mipmap += stageMs(pt);
     m_blurDirty = true;
     m_lowDirty = true;
+    m_upDirty = true;
 }
 
 void CrtRenderer::updateLowRes(const QSize& size)
@@ -586,6 +592,13 @@ void CrtRenderer::draw(GLuint targetFbo, const DrawParams& d)
 
 void CrtRenderer::drawCrt(GLuint targetFbo, const DrawParams& d)
 {
+    // Frame generation: for this draw, the picture is the one between the frame before and this one.
+    struct Between {
+        CrtRenderer* r; bool on;
+        ~Between() { if (on) r->endBetween(); }
+    } between{this, beginBetween(d.framePhase)};
+    // Enhance: the picture upscaled to the size it is shown at (effects off only).
+    const GLuint upTex = (d.bypass && d.split < 0.f && d.enhanceUp) ? upscaledPicture(d) : 0;
     if (!(d.bypass && d.split < 0.f)) ensureMipmaps();   // (the looks sample the picture's smaller copies)
     const bool wantBlur = !d.bypass && (d.params.bloom > 0.f || d.params.glow > 0.f) && m_hasFrame;
     const bool lowRes = !d.bypass && m_hasFrame && !d.pixelSize.isEmpty();
@@ -623,7 +636,7 @@ void CrtRenderer::drawCrt(GLuint targetFbo, const DrawParams& d)
     if (d.bypass && d.split < 0.f) {
         // Effects off: the small program. (Shrinking the picture a lot still wants its smaller copies.)
         const bool shrinking = d.image.width() / std::max(1e-6, d.src.width()) < m_imgSize.width() * 0.75;
-        if (m_mipsStale && (!m_plainOnly || shrinking)) ensureMipmaps();
+        if (!upTex && m_mipsStale && (!m_plainOnly || shrinking)) ensureMipmaps();
         const bool osd = m_osdTex && d.osdAlpha > 0.f;
         QOpenGLShaderProgram& prog = osd ? m_plainOsd : m_plain;
         prog.bind();
@@ -639,7 +652,7 @@ void CrtRenderer::drawCrt(GLuint targetFbo, const DrawParams& d)
             glBindTexture(GL_TEXTURE_2D, m_osdTex);
         }
         glActiveTexture(GL_TEXTURE0);
-        glBindTexture(GL_TEXTURE_2D, m_imgTex);
+        glBindTexture(GL_TEXTURE_2D, upTex ? upTex : m_imgTex);
         drawQuad();
         prog.release();
         glDisable(GL_BLEND);
