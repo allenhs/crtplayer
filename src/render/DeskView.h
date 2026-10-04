@@ -66,9 +66,11 @@ public:
         bool cgObjects = true, cgBanding = false, cgReveal = true, cgOrbit = true;
         int cgObjectSet = 0;      // 0 chrome & marble (default), 1 toybox, 2 organic, 3 mannequins, 4 mixed
         bool cgBackground = true; // the background crowd
-        QString modelsFolder;     // your 3D models (OBJ / STL)
+        QString modelsFolder;     // your 3D models (OBJ, STL, PLY, GLB / glTF, FBX)
+        int modelsUp = 0;         // which way is up in them: 0 automatic, 1 Y, 2 Z, 3 X, 4 -Y, 5 -Z, 6 -X
         bool models = true;
         int modelFinish = 0;      // 0 marble, 1 bronze, 2 chrome, 3 plastic, 4 own colours
+        int modelsFace = 0;       // 0 turning slowly, 1 as in the file, 2-4 turned by 90, 180, 270 degrees
     };
     void setScene(const Scene& s);
     // In a scene the camera never goes below the floor (or behind the wall).
@@ -99,6 +101,7 @@ public:
     void noteSeek() { m_idleFor.restart(); ++m_seeksNoted; }
     qint64 idleMs() const { return m_idleFor.isValid() ? m_idleFor.elapsed() : -1; }
     int seeksNoted() const { return m_seeksNoted; }
+    qint64 paints() const { return m_paints; }   // frames drawn so far (tests: how fast the scene draws)
     ModelLibrary* modelLibrary() { return &m_library; }
     int modelsShown() const { return m_desk.modelCount(); }
     // Movie theater: the curtains open while a video plays (and stay open when it is paused);
@@ -210,6 +213,7 @@ private:
     void syncMarquee();
     int m_modelsUploaded = -1;
     QElapsedTimer m_cgClock;
+    qint64 m_paints = 0;
     double m_curtain = 0.0, m_beam = 0.0;
     QVector4D m_mask = QVector4D(-0.66f, 0.66f, 0.f, 1.f);
     bool m_maskInit = false;

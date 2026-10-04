@@ -2,13 +2,13 @@ PASS  the sweeping fly-in lands on the exact fullscreen frame: max diff 0
 PASS  palettes: teal workstation, orange sunset, dark space: workstation [ 34. 116. 134.], sunset [221. 122.  86.], space [13. 15. 29.]
 PASS  the neon grid floor differs from the checkerboard: mean difference 61.0
 PASS  the objects can be turned off: 6.9% of the view changes
-PASS  the plinth differs from the pedestal: mean difference 38.2
-PASS  hard shadows (quality medium vs low): floor difference 7.68
+PASS  the plinth differs from the pedestal: mean difference 38.1
+PASS  hard shadows (quality medium vs low): floor difference 7.75
 PASS  the camera stays above the floor: 0.15 above it (asked for pitch -40)
 PASS  an open world: the camera goes all the way round: yaw 170.0
-PASS  demo-reel orbit: not while briefly paused, seeking, or playing: paused (5.5 s idle) +0.0 deg; scrubbing while paused (30 seeks, then 0.8 s idle) +0.0 deg; playing +0.0 deg
-PASS  demo-reel orbit once stopped and untouched for 10 s: +4.0 deg over the next 10.5 s
-PASS  the picture is reflected in the scene: 43517 pixels outside the screen turn red
+PASS  demo-reel orbit: not while briefly paused, seeking, or playing: paused (5.7 s idle) +0.0 deg; scrubbing while paused (29 seeks, then 0.7 s idle) +0.0 deg; playing +0.0 deg
+PASS  demo-reel orbit once stopped and untouched for 10 s: +6.0 deg over the next 10.5 s
+PASS  the picture is reflected in the scene: 37290 pixels outside the screen turn red
 PASS  tile reveal: starts when playback starts, and completes: 0.20 just after starting, then 1
 PASS  no tile reveal for skipping forward or back, scrubbing, or a short pause: seek-fwd 1.00, seek-back 1.00, scrubbed 1.00, short-pause 1.00
 PASS  the tile reveal again after a long pause (10 s or more): 0.20 just after resuming
@@ -37,7 +37,7 @@ PASS  an OBJ with a picture (a TGA named by its material file) is divided so tha
 PASS  a Draco-compressed GLB is skipped, with the reason; the data file beside a glTF is not taken for a model: d_draco.glb: Draco-compressed (not supported; export it without compression)
 PASS  a model of 1.2 million triangles is simplified, not skipped: a_dense.stl: 110,064 triangles (simplified from 1,202,025), Z up (stands on its flat base) (the limit here: 120,000, without a graphics card)
 PASS  a cloud of a million points is thinned: b_cloud.ply: 60,000 points of 1,000,000, Y up (stands on its flat base)
-PASS  both load in the background within seconds: 0.7 s
+PASS  both load in the background within seconds: 1.0 s
 PASS  and are drawn: 5.9% of the view changes
 PASS  the chosen axis and facing are kept: up Z, facing 3; a_zup.obj: 1,280 triangles, Z up (chosen)
 

@@ -100,5 +100,73 @@ check('the bronze finish differs from marble', warm(br) > warm(wm) + 500, f'warm
 alpha = np.asarray(Image.open(out / 'cg_models.png').convert('RGBA'))[..., 3]
 check('the scene stays opaque (the floor mask is reset)', (alpha == 255).mean() > 0.999, f'{(alpha == 255).mean() * 100:.2f}% opaque')
 check('your models folder is remembered', rep['models-again']['modelsShown'] == 3, f"{rep['models-again']['modelsShown']} shown after leaving and re-entering desk mode")
+# 2.14: which way is up; PLY, GLB / glTF, FBX; point clouds; very large models
+log = json.load(open(out / 'cg.json'))
+info = lambda label: {x['name']: x for x in rep[label]['modelsInfo']}
+ua, uy = info('up-auto')['a_zup.obj'], info('up-y')['a_zup.obj']
+check('a Z-up OBJ is stood on its flat base', ua['up'] == 'Z' and ua['upWhy'] == 0 and abs(ua['height'] - 1.5) < 0.01, ua['text'])
+none = img('cg_up_none.png')
+def statue(name):   # the rows and columns the statue changes, above the floor's horizon line
+    ch = np.abs(img(name) - none).max(axis=2) > 40
+    ys, xs = np.nonzero(ch[:int(h * 0.62)])
+    return (ys.min(), xs.max() - xs.min() + 1) if len(ys) else (h, 0)
+ta, wa = statue('cg_up_auto.png'); ty, wy = statue('cg_up_y.png')
+check('in the room it stands taller than it does lying on its back (the axis chosen wrongly by hand)',
+      uy['up'] == 'Y' and uy['upWhy'] == 2 and uy['height'] < 1.2 and ta < ty - 25,
+      f"top of the statue at row {ta} standing, {ty} lying; lying: {uy['text']}, {uy['height']:.2f} high")
+diff = lambda a, b: int((np.abs(img(a) - img(b)).max(axis=2) > 40).sum())
+still, turned = diff('cg_up_auto.png', 'cg_still_later.png'), diff('cg_turn.png', 'cg_turn_later.png')
+check('statues turn slowly unless set to stand still', turned > still * 3 + 300, f'{turned} pixels change in 10 s turning, {still} standing still')
+up = info('models-upright'); sk = rep['models-upright']['modelsSkipped']
+check('PLY models load: text, binary little-endian, binary big-endian (triangle strips)',
+      all(n in up for n in ('b_text.ply', 'c_little.ply', 'd_big.ply')) and up['b_text.ply']['triangles'] == 600 and up['c_little.ply']['triangles'] == 1280 and up['d_big.ply']['triangles'] == 1920,
+      '; '.join(up[n]['text'] for n in ('b_text.ply', 'c_little.ply', 'd_big.ply') if n in up))
+check('each is stood the right way up (Z-up files on their flat base; a table on its legs)',
+      rep['models-upright']['modelsShown'] == 6 and up['a_zup.obj']['up'] == 'Z' and up['b_text.ply']['up'] == 'Y' and up['c_little.ply']['up'] == 'Z'
+      and up['d_big.ply']['up'] == 'Y' and up['e_points.ply']['up'] == 'Z' and up['f_table.obj']['up'] == 'Z' and up['f_table.obj']['upWhy'] == 3
+      and all(abs(x['height'] - 1.5) < 0.01 for n, x in up.items() if n != 'f_table.obj'),
+      ', '.join(f"{n} {x['up']}" for n, x in up.items()))
+pc = up['e_points.ply']
+light = rep['models-upright']['modelsLight']   # without a graphics card: lighter limits
+max_tris, max_points = (120000, 60000) if light else (400000, 200000)
+check('a PLY of points alone is shown as a point cloud (thinned, strays dropped)',
+      pc['points'] and pc['sourcePoints'] == 300040 and 2 * min(150000, max_points) - 200 <= pc['triangles'] <= 2 * min(150000, max_points) and abs(pc['width'] - pc['depth']) < 0.05,
+      f"{pc['text']}; {pc['width']:.2f} wide, {pc['depth']:.2f} deep")
+check('a PLY cut short is skipped, with the reason', any('a0_cut.ply' in x and 'cut short' in x for x in sk), '; '.join(sk))
+wide = img('cg_wide_none.png')
+def coloured(name):   # pixels the models change that are strongly coloured (their own colours, not marble)
+    a = img(name); ch = np.abs(a - wide).max(axis=2) > 40
+    return int((ch & ((a.max(axis=2) - a.min(axis=2)) > 90)).sum())
+check('with "Their own colours" the PLY models show their colours', up['b_text.ply']['colours'] and up['c_little.ply']['colours'] and pc['colours'] and coloured('cg_upright.png') > 1500,
+      f"{coloured('cg_upright.png')} strongly coloured pixels")
+scn = info('models-scenes'); sk = rep['models-scenes']['modelsSkipped']
+check('GLB and glTF models load (nodes, a picture inside the file, data in a file beside it)',
+      all(n in scn for n in ('a_nodes.glb', 'b_textured.glb', 'c_external.gltf')) and scn['a_nodes.glb']['triangles'] == 1280 and scn['c_external.gltf']['triangles'] == 14
+      and all(abs(scn[n]['height'] - 1.5) < 0.01 for n in ('a_nodes.glb', 'b_textured.glb', 'c_external.gltf')),
+      '; '.join(scn[n]['text'] for n in ('a_nodes.glb', 'b_textured.glb', 'c_external.gltf') if n in scn))
+check('FBX models load (text and binary), upright whichever axis the file says is up',
+      all(n in scn for n in ('e_text.fbx', 'f_binary.fbx')) and scn['e_text.fbx']['triangles'] == 1280 and scn['f_binary.fbx']['triangles'] == 600
+      and all(abs(scn[n]['height'] - 1.5) < 0.01 and scn[n]['up'] == 'Y' for n in ('e_text.fbx', 'f_binary.fbx')),
+      '; '.join(scn[n]['text'] for n in ('e_text.fbx', 'f_binary.fbx') if n in scn))
+check('they show their colours (vertex colours, pictures, materials)', all(x['colours'] for x in scn.values()) and coloured('cg_scenes.png') > 1500,
+      f"{coloured('cg_scenes.png')} strongly coloured pixels")
+crate = scn.get('g_crate.obj', {})
+check('an OBJ with a picture (a TGA named by its material file) is divided so that the picture shows', crate.get('colours') and crate.get('sourceTriangles') == 12 and crate.get('triangles', 0) > 5000,
+      f"{crate.get('text', 'not loaded')}; drawn with {crate.get('triangles', 0):,} triangles")
+check('a Draco-compressed GLB is skipped, with the reason; the data file beside a glTF is not taken for a model',
+      rep['models-scenes']['modelsShown'] == 6 and len(sk) == 1 and 'd_draco.glb' in sk[0] and 'Draco' in sk[0], '; '.join(sk))
+lg = info('models-large')
+wait = [e for e in log if e['cmd'].startswith('modelswait 120000')][0]
+dn, cl = lg.get('a_dense.stl', {}), lg.get('b_cloud.ply', {})
+check('a model of 1.2 million triangles is simplified, not skipped',
+      dn.get('sourceTriangles') == 1202025 and max_tris * 0.4 <= dn.get('triangles', 0) <= max_tris and dn.get('up') == 'Z',
+      f"{dn.get('text', 'not loaded')} (the limit here: {max_tris:,}{', without a graphics card' if light else ''})")
+check('a cloud of a million points is thinned', cl.get('points') and cl.get('sourcePoints') == 1000000 and 2 * max_points - 200 <= cl.get('triangles', 0) <= 2 * max_points, cl.get('text', 'not loaded'))
+check('both load in the background within seconds', wait['ok'] and wait['ms'] < 20000, f"{wait['ms'] / 1000:.1f} s")
+appear = (np.abs(img('cg_large.png') - wide).max(axis=2) > 40).mean()
+check('and are drawn', appear > 0.005, f'{appear * 100:.1f}% of the view changes')
+kept = rep['models-kept']
+check('the chosen axis and facing are kept', kept['modelsUp'] == 'Z' and kept['modelsFace'] == 3 and kept['modelsInfo'][0]['upWhy'] == 2,
+      f"up {kept['modelsUp']}, facing {kept['modelsFace']}; {kept['modelsInfo'][0]['text']}")
 print(f"\n{fails} CG room check(s) failed" if fails else "\nAll CG room checks passed")
 sys.exit(1 if fails else 0)

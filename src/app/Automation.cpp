@@ -244,7 +244,10 @@ void Automation::next()
         if (!ok) ++m_failures;
         log(line, {{"ok", ok}, {"width", img.width()}, {"height", img.height()}});
     } else if (cmd == "grabwindow") {
-        const bool ok = m_w->grab().save(a.value(1));
+        // grabwindow PATH [dialog] : the main window, or the dialog that is open
+        QWidget* w = m_w;
+        if (a.value(2) == "dialog") for (QWidget* t : QApplication::topLevelWidgets()) if (t->isVisible() && qobject_cast<QDialog*>(t)) w = t;
+        const bool ok = w->grab().save(a.value(1));
         log(line, {{"ok", ok}});
     } else if (cmd == "mousemove") {
         VideoWidget* v = m_w->video();
@@ -449,6 +452,8 @@ void Automation::next()
             else if (k == "background") s.cgBackground = on;
             else if (k == "models") { s.modelsFolder = v == "off" ? QString() : rest.section(' ', 1); s.models = true; }   // cg models PATH
             else if (k == "finish") s.modelFinish = v.toInt();
+            else if (k == "face") s.modelsFace = std::clamp(v.toInt(), 0, 4);   // cg face 0 turning | 1 as in the file | 2..4 turned by 90, 180, 270
+            else if (k == "up") s.modelsUp = int(ModelLibrary::upFromName(v));   // cg up auto|y|z|x|-y|-z|-x
             if (k == "revealsnap") d->view()->finishReveal();
             else m_w->setDeskScene(s);
         }

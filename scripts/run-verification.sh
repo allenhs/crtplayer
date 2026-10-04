@@ -135,6 +135,13 @@ desk_suite() {
   echo "== desk image checks"
   checker "$O/desk-checks.txt" python3 "$HERE/scripts/check-desk.py" "$O"
 }
+# 2.3: the 90s CG room; 2.14: your 3D models in every format.
+cg_suite() {
+  rm -rf "$XDG_CONFIG_HOME"
+  run cg cg.txt
+  echo "== 90s CG room checks"
+  checker "$O/cg-checks.txt" python3 "$HERE/scripts/check-cg.py" "$O"
+}
 if [[ -n "${RUN_ONLY:-}" ]]; then   # development: just these suites, e.g. RUN_ONLY="tv console edit"
   for s in $RUN_ONLY; do "${s}_suite"; done
   exit 0
@@ -197,10 +204,7 @@ else
   run sound sound.txt
   echo "== sound checks"
   checker "$O/sound-checks.txt" python3 "$HERE/scripts/check-sound.py" "$O"
-  rm -rf "$XDG_CONFIG_HOME"
-  run cg cg.txt
-  echo "== 90s CG room checks"
-  checker "$O/cg-checks.txt" python3 "$HERE/scripts/check-cg.py" "$O"
+  cg_suite
   # 1.9: gamepad (SDL virtual controller), room backdrop, Game Mode, MPRIS
   rm -rf "$XDG_CONFIG_HOME" "$XDG_DATA_HOME"
   run gamepad gamepad.txt

@@ -44,7 +44,7 @@ buttons and shortcuts use.
 | `audio N` / `sub N` | Select a track (`sub -1` turns subtitles off) |
 | `hw on\|off` | Hardware decoding for the next `open` |
 | `screenshot original\|filtered PATH` | Save a screenshot |
-| `grabwindow PATH` | Capture the whole window, including the UI |
+| `grabwindow PATH [dialog]` | Capture the whole window, including the UI; with `dialog`, the dialog that is open |
 | `moment poweron\|poweroff\|static\|none` | Start a set moment now, or end all moments |
 | `osd TEXT` | Show VCR on-screen text (when the preset enables it); `osd` alone hides it |
 | `gamepad attach\|tap B\|press B\|release B\|axis NAME VALUE` | SDL virtual controller (buttons: a b x y back start lb rb l3 r3 up down left right; axes: lx ly rx ry lt rt) |
@@ -55,7 +55,7 @@ buttons and shortcuts use.
 | `scenepreviews DIR` | Save the settings window's scene previews |
 | `sceneplace TVHEIGHT PICHEIGHT SPACING SIZE` | Wall scene placement |
 | `scene theater`, `theaterlook 0..3`, `theatersnap` | Movie theater; its picture look; finish the curtain / masking / beam moves at once |
-| `scene cg`; `cg palette 0..2`, `cg floor checker\|grid`, `cg stand pedestal\|plinth\|floating`, `cg objects\|banding\|reveal\|orbit on\|off`, `cg revealsnap`, `cg set 0..4`, `cg background on\|off`, `cg models PATH\|off`, `cg finish 0..4`; `modelswait MS` | The 90s CG room and its options; your 3D models folder |
+| `scene cg`; `cg palette 0..2`, `cg floor checker\|grid`, `cg stand pedestal\|plinth\|floating`, `cg objects\|banding\|reveal\|orbit on\|off`, `cg revealsnap`, `cg set 0..4`, `cg background on\|off`, `cg models PATH\|off`, `cg finish 0..4`, `cg up auto\|y\|z\|x\|-y\|-z\|-x`, `cg face 0..4`; `modelswait MS` | The 90s CG room and its options; your 3D models folder, which way is up in them, and how they face (0 turning, 1 as in the file, 2 to 4 turned by 90°, 180°, 270°). `report` then lists `modelsInfo` (per model: triangles drawn and in the file, points, colours, the axis used and why, its size as placed), `modelsSkipped`, `modelsLight` (the limits without a graphics card) and `deskPaints` (frames drawn so far) |
 | `deskcabinet arcade`, `arcadeart 0..3` | The arcade cabinet and its art (space, sunset, neon, 70s woodgrain) |
 | `marqueetitle NAME`, `marqueeimage PATH` | How a file name is tidied for the marquee; save the marquee's lettering |
 | `looksound on\|off`, `looksound volume 0..2`, `looksound strength 0..1` | The look's sound; its noise volume and effect strength |

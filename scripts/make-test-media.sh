@@ -133,6 +133,7 @@ e = Image.new('RGB', (900, 540), (170, 30, 140)); d = ImageDraw.Draw(e)
 for x in range(0, 900, 60): d.rectangle([x, 0, x + 28, 540], fill=(210, 70, 180))
 e.save('pictures/stripes.png')
 PY
-# 3D models for the 90s CG room (OBJ and STL, binary and text, one broken file).
+# 3D models for the 90s CG room: OBJ, STL, PLY, GLB / glTF and FBX; Z-up files, point
+# clouds, very large models, damaged files (models, models-upright, -scenes, -large, -single).
 python3 "$HERE/scripts/make-test-models.py" models
 echo "Test media written to $OUT"

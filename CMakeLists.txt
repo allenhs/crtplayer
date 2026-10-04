@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(CRTPlayer VERSION 2.13.0 LANGUAGES CXX)
+project(CRTPlayer VERSION 2.14.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -36,6 +36,17 @@ add_library(crtcore STATIC
 target_include_directories(crtcore PUBLIC src)
 target_link_libraries(crtcore PUBLIC Qt6::Core Qt6::Gui)
 
+# Your 3D models for the 90s CG room: the readers (OBJ, STL, PLY, glTF; FBX through ufbx).
+add_library(crtmodels STATIC
+  src/render/ModelLibrary.cpp src/render/ModelLibrary.h
+  src/render/ModelFormats.cpp src/render/ModelRaw.h
+  third_party/ufbx/ufbx.c     third_party/ufbx/ufbx.h)
+target_include_directories(crtmodels PUBLIC src PRIVATE third_party/ufbx)
+target_link_libraries(crtmodels PUBLIC Qt6::Core Qt6::Gui)
+if(NOT WIN32)
+  target_link_libraries(crtmodels PRIVATE m)
+endif()
+
 add_executable(crtplayer
   src/main.cpp
   src/app/MainWindow.cpp      src/app/MainWindow.h
@@ -56,7 +67,6 @@ add_executable(crtplayer
   src/ui/JellyfinPanel.cpp    src/ui/JellyfinPanel.h
   src/playback/Thumbnailer.cpp src/playback/Thumbnailer.h
   src/app/SleepInhibitor.cpp  src/app/SleepInhibitor.h
-  src/render/ModelLibrary.cpp src/render/ModelLibrary.h
   src/playback/TapeAudio.cpp  src/playback/TapeAudio.h
   src/playback/Distro.cpp     src/playback/Distro.h
   src/app/Gamepad.cpp         src/app/Gamepad.h
@@ -79,7 +89,7 @@ add_executable(crtplayer
   src/ui/GifDialog.cpp        src/ui/GifDialog.h
   resources.qrc)
 target_include_directories(crtplayer PRIVATE src)
-target_link_libraries(crtplayer PRIVATE crtcore
+target_link_libraries(crtplayer PRIVATE crtcore crtmodels
   Qt6::Core Qt6::Gui Qt6::Widgets Qt6::OpenGL Qt6::OpenGLWidgets Qt6::Network PkgConfig::GST)
 if(WIN32)
   # A windowed app (no console window); the icon and version details come from the resource file.
@@ -113,6 +123,11 @@ if(CRTPLAYER_BUILD_TESTS)
   add_executable(test_fmv tests/test_fmv.cpp)
   target_link_libraries(test_fmv PRIVATE crtcore)
   add_test(NAME fmv COMMAND test_fmv)
+  add_executable(test_models tests/test_models.cpp)
+  target_link_libraries(test_models PRIVATE crtmodels)
+  add_test(NAME models COMMAND test_models)
+  add_executable(fuzz_models tests/fuzz_models.cpp)   # damaged files; run by hand (see VERIFICATION.md)
+  target_link_libraries(fuzz_models PRIVATE crtmodels)
   add_executable(test_gif tests/test_gif.cpp src/edit/GifEncoder.cpp src/edit/GifEncoder.h)
   target_include_directories(test_gif PRIVATE src)
   target_link_libraries(test_gif PRIVATE Qt6::Core Qt6::Gui)

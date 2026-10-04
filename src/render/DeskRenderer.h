@@ -66,6 +66,8 @@ public:
         bool cgBackground = true; // a crowd in the distance: floating shapes and walking figures
         bool models = false;      // your 3D models (statues)
         int modelFinish = 0;      // 0 marble, 1 bronze, 2 chrome, 3 plastic, 4 own colours
+        float modelTurn = 0.f;    // degrees the statues are turned about their upright axis
+        float modelSpread = 0.f;  // further degrees from each statue to the next (so they are not in step)
         float reveal = 1.f;       // tile reveal of the picture (1 = done)
     };
 
@@ -145,7 +147,7 @@ private:
     QOpenGLShaderProgram m_backdrop;
     QOpenGLShaderProgram m_haze;
     QOpenGLShaderProgram m_theater, m_theaterFront, m_cg, m_flare, m_model;
-    struct GpuModel { QOpenGLVertexArrayObject* vao = nullptr; QOpenGLBuffer* vbo = nullptr; int count = 0; float halfW = 0.3f, halfD = 0.3f; };
+    struct GpuModel { QOpenGLVertexArrayObject* vao = nullptr; QOpenGLBuffer* vbo = nullptr; int count = 0; float halfW = 0.3f, halfD = 0.3f; bool points = false; };
     QVector<GpuModel> m_models;
     GpuModel m_plinth;
     GpuModel upload(const QVector<float>& vertices);

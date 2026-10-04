@@ -4,8 +4,8 @@ PASS  the film look is used in the theater: Film Print (35mm)
 PASS  sconce light fades smoothly (no hard cut-off below the lamps): largest step 5.0
 PASS  closed curtains cover the screen (red velvet): centre [53.  4.  4.]
 PASS  the curtains open while it plays, house lights down: curtain 1, house 0
-PASS  open: the picture shows: colourfulness at the centre 97
-PASS  haze: the projector's light shows in the air above the screen: 2.3 -> 33.5
+PASS  open: the picture shows: colourfulness at the centre 96
+PASS  haze: the projector's light shows in the air above the screen: 2.3 -> 33.0
 PASS  back: the camera sits in the rows, eye at seated height: row 17.2, eye 1.05 (seated 1.05)
 PASS  middle: the camera sits in the rows, eye at seated height: row 11.6, eye 0.66 (seated 0.66)
 PASS  front: the camera sits in the rows, eye at seated height: row 3.0, eye 0.06 (seated 0.06)
@@ -17,7 +17,7 @@ PASS  masking fits a 4:3 film: opening 1.333 x 1.000
 PASS  flying into the screen lands on the exact fullscreen frame: max diff 0
 PASS  the curtains close at the end of the film: curtain 0
 PASS  leaving desk mode brings your own look back: Consumer Television
-PASS  film grain changes from one film frame to the next: mean difference 3.65
+PASS  film grain changes from one film frame to the next: mean difference 3.76
 PASS  … and is the same when replayed at the same moment: max difference 0
 
 All theater checks passed

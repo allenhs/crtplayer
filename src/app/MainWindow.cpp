@@ -1635,7 +1635,7 @@ void MainWindow::openSceneDialog()
     cf->addRow(cgBanding);
     cf->addRow(cgReveal);
     cf->addRow(cgOrbit);
-    // Your own 3D models (statues), from a folder of OBJ / STL files
+    // Your own 3D models (statues), from a folder of OBJ / STL / PLY / GLB / FBX files
     auto* modelsRow = new QHBoxLayout;
     auto* modelsInfo = new QLabel(dlg);
     modelsInfo->setWordWrap(true);
@@ -1650,32 +1650,46 @@ void MainWindow::openSceneDialog()
     auto* modelFinish = combo({tr("Marble"), tr("Bronze"), tr("Chrome"), tr("Candy plastic"), tr("Their own colours")}, cur.modelFinish);
     auto* showModels = check(tr("Show my models"), cur.models, tr("Statues from your folder, on plinths around the set"));
     cf->addRow(tr("Your 3D models"), modelsRow);
+    auto* modelsUp = combo({tr("Automatic (on the flat base)"), tr("Y is up"), tr("Z is up"), tr("X is up"), tr("Y is down"), tr("Z is down"), tr("X is down")}, cur.modelsUp);
+    modelsUp->setToolTip(tr("Which way is up in your model files. Automatic stands a model on its flat base; choose an axis when a model lies on its side or stands on its head."));
+    cf->addRow(tr("Models stand"), modelsUp);
+    auto* modelsFace = combo({tr("Turning slowly"), tr("As in the file"), tr("Turned by 90°"), tr("Turned by 180°"), tr("Turned by 270°")}, cur.modelsFace);
+    modelsFace->setToolTip(tr("A model file does not say which side is its front. The statues turn slowly, or stand still, turned as you choose."));
+    cf->addRow(tr("Models face"), modelsFace);
     cf->addRow(tr("Model finish"), modelFinish);
     cf->addRow(showModels);
     auto refreshModels = [this, modelsInfo] {
         if (!m_desk) return;
         ModelLibrary* lib = m_desk->view()->modelLibrary();
         const QString folder = m_desk->view()->scene().modelsFolder;
-        if (folder.isEmpty()) { modelsInfo->setText(tr("None (OBJ or STL files, up to 6)")); return; }
+        if (folder.isEmpty()) { modelsInfo->setText(tr("None (OBJ, STL, PLY, GLB or FBX files, up to 6)")); return; }
         if (lib->loading()) { modelsInfo->setText(tr("%1: loading…").arg(QFileInfo(folder).fileName())); return; }
         QString t = tr("%1: %n model(s)", "", lib->meshes().size()).arg(QFileInfo(folder).fileName());
         const QStringList sk = lib->skipped();
-        if (!sk.isEmpty()) t += tr(" · skipped %1").arg(sk.join(", "));
+        // each model: its size and which way it was stood; then what was skipped, and why
+        for (const QString& line : lib->described()) t += QLatin1Char('\n') + line;
+        for (const QString& line : sk) t += QLatin1Char('\n') + tr("skipped %1").arg(line);
         modelsInfo->setText(t);
     };
     refreshModels();
     connect(m_desk->view()->modelLibrary(), &ModelLibrary::loaded, dlg, refreshModels);
     connect(chooseModels, &QPushButton::clicked, dlg, [this, dlg, refreshModels] {
-        const QString d = QFileDialog::getExistingDirectory(dlg, tr("Folder with 3D models (OBJ, STL)"), m_desk->view()->scene().modelsFolder);
+        const QString d = QFileDialog::getExistingDirectory(dlg, tr("Folder with 3D models (OBJ, STL, PLY, GLB, FBX)"), m_desk->view()->scene().modelsFolder);
         if (d.isEmpty()) return;
         DeskView::Scene s = m_desk->view()->scene(); s.modelsFolder = d; s.models = true; setDeskScene(s);
-        m_desk->view()->modelLibrary()->setFolder(d);
+        m_desk->view()->modelLibrary()->setFolder(d, ModelLibrary::Up(std::clamp(s.modelsUp, 0, 6)));
         refreshModels();
     });
     connect(clearModels, &QToolButton::clicked, dlg, [this, refreshModels] {
         DeskView::Scene s = m_desk->view()->scene(); s.modelsFolder.clear(); setDeskScene(s); refreshModels();
     });
     connect(modelFinish, &QComboBox::currentIndexChanged, dlg, [this](int i) { DeskView::Scene s = m_desk->view()->scene(); s.modelFinish = i; setDeskScene(s); });
+    connect(modelsFace, &QComboBox::currentIndexChanged, dlg, [this](int i) { DeskView::Scene s = m_desk->view()->scene(); s.modelsFace = i; setDeskScene(s); });
+    connect(modelsUp, &QComboBox::currentIndexChanged, dlg, [this, refreshModels](int i) {
+        DeskView::Scene s = m_desk->view()->scene(); s.modelsUp = i; setDeskScene(s);
+        m_desk->view()->modelLibrary()->setFolder(s.models ? s.modelsFolder : QString(), ModelLibrary::Up(i));
+        refreshModels();
+    });
     connect(showModels, &QCheckBox::toggled, dlg, [this](bool on) { DeskView::Scene s = m_desk->view()->scene(); s.models = on; setDeskScene(s); });
     v->addWidget(cgBox);
     cgBox->setVisible(cur.scene == 4);
@@ -2505,6 +2519,16 @@ QJsonObject MainWindow::stateReport() const
         o["modelsShown"] = v->modelsShown();
         o["modelsLoading"] = v->modelLibrary()->loading();
         o["modelsSkipped"] = QJsonArray::fromStringList(v->modelLibrary()->skipped());
+        QJsonArray modelsInfo;
+        for (const ModelLibrary::Mesh& m : v->modelLibrary()->meshes())
+            modelsInfo.append(QJsonObject{{"name", m.name}, {"triangles", m.triangles}, {"sourceTriangles", m.sourceTriangles}, {"points", m.points},
+                                          {"sourcePoints", m.sourcePoints}, {"colours", m.hasColours}, {"up", ModelLibrary::upName(m.up)}, {"upWhy", m.upWhy},
+                                          {"flatBase", m.flatBase}, {"width", m.size.x()}, {"height", m.size.y()}, {"depth", m.size.z()}, {"text", m.describe()}});
+        o["modelsInfo"] = modelsInfo;
+        o["modelsUp"] = ModelLibrary::upName(v->modelLibrary()->up());
+        o["modelsFace"] = v->scene().modelsFace;
+        o["deskPaints"] = double(v->paints());
+        o["modelsLight"] = v->modelLibrary()->light();
         o["floorDrop"] = v->floorDrop();
         o["maskRect"] = QJsonArray{v->maskRect().left(), v->maskRect().right(), v->maskRect().top(), v->maskRect().bottom()};
         o["deskTvRect"] = rectJson(v->silhouetteLogical().boundingRect());
@@ -2549,7 +2573,7 @@ void MainWindow::createDesk()
         sc.cgPalette = m_settings.cgPalette; sc.cgFloor = m_settings.cgFloor; sc.cgStand = m_settings.cgStand;
         sc.cgObjects = m_settings.cgObjects; sc.cgBanding = m_settings.cgBanding;
         sc.cgReveal = m_settings.cgReveal; sc.cgOrbit = m_settings.cgOrbit; sc.cgObjectSet = m_settings.cgObjectSet; sc.cgBackground = m_settings.cgBackground;
-        sc.modelsFolder = m_settings.cgModelsFolder; sc.models = m_settings.cgModels; sc.modelFinish = m_settings.cgModelFinish;
+        sc.modelsFolder = m_settings.cgModelsFolder; sc.modelsUp = m_settings.cgModelsUp; sc.modelsFace = m_settings.cgModelsFace; sc.models = m_settings.cgModels; sc.modelFinish = m_settings.cgModelFinish;
         if (inGamescope() && sc.scene == 0) sc.scene = 1;
         v->setScene(sc);
         if (sc.scene == 3) theaterLook(true);
@@ -2635,7 +2659,7 @@ void MainWindow::storeDeskPose()
         m_settings.cgPalette = sc.cgPalette; m_settings.cgFloor = sc.cgFloor; m_settings.cgStand = sc.cgStand;
         m_settings.cgObjects = sc.cgObjects; m_settings.cgBanding = sc.cgBanding;
         m_settings.cgReveal = sc.cgReveal; m_settings.cgOrbit = sc.cgOrbit; m_settings.cgObjectSet = sc.cgObjectSet; m_settings.cgBackground = sc.cgBackground;
-        m_settings.cgModelsFolder = sc.modelsFolder; m_settings.cgModels = sc.models; m_settings.cgModelFinish = sc.modelFinish;
+        m_settings.cgModelsFolder = sc.modelsFolder; m_settings.cgModelsUp = sc.modelsUp; m_settings.cgModelsFace = sc.modelsFace; m_settings.cgModels = sc.models; m_settings.cgModelFinish = sc.modelFinish;
     }
     m_settings.deskOnTop = m_desk->keepOnTop();
 }

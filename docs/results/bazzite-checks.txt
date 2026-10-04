@@ -1,11 +1,11 @@
 PASS  controller detected through SDL: SDL 2.30.0, 1 controller(s): CRT Player test controller
 PASS  A pauses and resumes: paused -> playing
-PASS  D-pad right seeks +10 s: 16680 ms (from ~5 s)
-PASS  holding the D-pad repeats: +62 s in a 1.5 s hold
+PASS  D-pad right seeks +10 s: 16802 ms (from ~5 s)
+PASS  holding the D-pad repeats: +43 s in a 1.5 s hold
 PASS  RB: next preset: Consumer Television -> Arcade Display
 PASS  D-pad up: volume +5 %: 0.80 -> 0.85
 PASS  View: desk mode on and off: on, then off
-PASS  left stick turns the set (time-based): yaw +71 degrees in 1 s at full tilt
+PASS  left stick turns the set (time-based): yaw +104 degrees in 1 s at full tilt
 PASS  Y flies in, B flies back out: full, then desk
 PASS  system report lists the controller: Controllers: SDL 2.30.0, 1 controller(s): CRT Player test controller
 PASS  room backdrop: nothing shows through: 100.0% opaque

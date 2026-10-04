@@ -1,7 +1,7 @@
 PASS  the player is on the bus as "crtplayer": crtplayer
 PASS  status and metadata: Playing, 'sd_4x3_h264', 20000000 us
 PASS  pause / play: Paused, Playing
-PASS  set position: 11.2 s after setting 10 s
+PASS  set position: 11.4 s after setting 10 s
 PASS  volume: 0.300000
 PASS  next / previous: hd_16x9_multitrack, sd_4x3_h264
 PASS  changes are announced (PropertiesChanged): 14 signals

@@ -1,0 +1,57 @@
+PASS  a Y-up OBJ with a flat base stands on it: cone_y.obj: 48 triangles, Y up (stands on its flat base)
+PASS  it is scaled to statue height: 48 triangles, 0.75 x 1.5 x 0.75
+PASS  a Z-up OBJ is stood on its flat base (not laid on its side): cone_z.obj: 48 triangles, Z up (stands on its flat base)
+PASS  and is then the same statue as the Y-up file: 0
+PASS  a Z-up STL stands on its base: cone_z.stl: 48 triangles, Z up (stands on its flat base)
+PASS  a Y-up STL is stood on its flat base: cone_y.stl: 48 triangles, Y up (stands on its flat base)
+PASS  without a flat side an OBJ is taken as Y-up: ball.obj: 720 triangles, Y up (as such files usually are)
+PASS  and an STL as Z-up: ball.stl: 720 triangles, Z up (as such files usually are)
+PASS  flat on every side: the file type decides (a cube stays as it is): cube.obj: 12 triangles, Y up (stands on its flat base)
+PASS  a Z-up table (flat on top, legs below) stands on its legs, not on its top: table_z.obj: 60 triangles, Z up (by its flat top)
+PASS  an axis chosen by hand is used as it is: cone_z.obj: 48 triangles, Y up (chosen)
+PASS  "Z is down" stands it on its tip: cone_z.obj: 48 triangles, -Z up (chosen)
+PASS  all six choices turn the model; none mirrors it: Y 0.47x0.93x1.40  Z 0.50x1.50x1.00  X 0.93x0.47x1.40  -Y 0.47x0.93x1.40  -Z 0.50x1.50x1.00  -X 0.93x0.47x1.40  
+PASS  axis names are read (auto, y, z, x, -y, -z, -x)
+PASS  OBJ: polygons, v/vt/vn in every form and negative numbers: forms.obj: 6 triangles, Y up (stands on its flat base)
+PASS  OBJ: colours from its material file (a colour, and a picture): painted.obj: 6 triangles, Y up (stands on its flat base)
+PASS  TGA pictures: true colour and grey, plain and packed in runs, rows from the bottom or the top
+PASS  a TGA cut short, or bytes that are no picture, give no picture
+PASS  OBJ: a TGA picture named by the material file is wrapped the right way up: bottom left 1.00 0.00 0.00, top right 1.00 1.00 1.00
+PASS  OBJ: a face that refers to a missing vertex is refused, with the reason: face refers to a missing vertex
+PASS  numbers are read the same whatever the system's language (a decimal comma): de_DE.UTF-8
+PASS  PLY: text, binary little-endian and binary big-endian all give the model the OBJ gives: 48 triangles; differences 2.77162e-06, 2.77162e-06, 2.77162e-06; 
+PASS  PLY: a Z-up model is stood on its base: cone_z.ply: 48 triangles, Z up (stands on its flat base)
+PASS  PLY: colours: 1 0.501961 0
+PASS  PLY: faces of four corners: cube.ply: 12 triangles, Y up (stands on its flat base)
+PASS  PLY: triangle strips, with a restart: strip.ply: 4 triangles, Z up (stands on its flat base)
+PASS  PLY (text): more on a line than the header says does not upset the lines after it: extras.ply: 4 triangles, Y up (stands on its flat base)
+PASS  a flat cut-out is stood on its edge, whichever way it lies in its file: flat_xy.ply: 2 triangles, Y up (as such files usually are) | flat_xz.obj: 2 triangles, Z up (as such files usually are)
+PASS  PLY: a file cut short is refused, with the reason: the file is damaged or cut short
+PASS  PLY: a file without a complete header is refused: not a PLY model
+PASS  PLY: a face that refers to a missing vertex is refused: face refers to a missing vertex
+PASS  PLY: a file with points only is a point cloud: a small square for each point: points.ply: 5,490 points, Y up (stands on its flat base); 10980 triangles
+PASS  the squares lie in the surface (normals from the neighbouring points): mean alignment 0.990
+PASS  a large point cloud is thinned to what can be drawn: many.ply: 150,000 points of 300,020, Y up (stands on its flat base)
+PASS  stray points far from the model do not shrink it to a speck: 1.39999 x 1.39999 x 1.4
+PASS  GLB: the scene's turn, scale and move are applied (a Z-up mesh set upright by its node): nodes.glb: 48 triangles, Y up (stands on its flat base)
+PASS  GLB: colours per vertex
+PASS  GLB: a material's colour (stored linear, shown as on a screen): green 0.72974
+PASS  GLB: a picture wrapped around the model colours it (red tip, blue foot): pictured.glb: 48 triangles, Y up (stands on its flat base)
+PASS  a model of few triangles is divided, so the picture shows between its corners too: 145200 triangles drawn for 48; 146808 samples away from the change are pure blue or red, 0 are not
+PASS  the divided triangles meet exactly (no cracks along the original edges): 0 points that only one of two neighbours uses
+PASS  GLB: a first chunk that is not padded to four bytes is read all the same: unpadded.glb: 48 triangles, Y up (stands on its flat base)
+PASS  GLB: a Draco-compressed file is refused, with the reason: Draco-compressed (not supported; export it without compression)
+PASS  GLB: and a meshopt-compressed one: meshopt-compressed (not supported; export it without compression)
+PASS  GLB: a damaged file is refused: not a glTF model
+PASS  FBX (text): a file that says Z is up comes out upright: cone_z.fbx: 48 triangles, Y up (stands on its flat base)
+PASS  FBX: its material's colour: 0.8 0.1 0.1
+PASS  FBX: and one that says Y is up: cone_y.fbx: 48 triangles, Y up (stands on its flat base)
+PASS  FBX: a damaged file is refused, with the reason: not an FBX model the player can read (Unrecognized file format)
+PASS  a box keeps its edges: every corner's normal is its own face's
+PASS  a round shape is smooth: every normal points away from the middle: least alignment 0.995
+PASS  a model with more triangles than can be drawn is simplified, not skipped: dense.stl: 294,804 triangles (simplified from 500,996), Z up (as such files usually are)
+PASS  and keeps its shape: farthest from the true surface: 0.0000 of a 0.7 radius
+PASS  without a graphics card the limits are lower (fewer triangles, points and divisions): 117930 triangles; 59997 points; the pictured cone 30000 triangles
+PASS  each model is described in a line: cone_y.obj: 48 triangles, Y up (stands on its flat base)
+
+All model checks passed

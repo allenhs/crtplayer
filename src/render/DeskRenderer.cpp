@@ -723,6 +723,7 @@ void DeskRenderer::setModels(const QVector<ModelLibrary::Mesh>& meshes)
     for (const auto& m : meshes) {
         GpuModel g = upload(m.vertices);
         g.halfW = 0.f; g.halfD = 0.f;
+        g.points = m.points;
         for (int i = 0; i + 8 < m.vertices.size(); i += 9) { g.halfW = std::max(g.halfW, std::abs(m.vertices[i])); g.halfD = std::max(g.halfD, std::abs(m.vertices[i + 2])); }
         m_models.append(g);
     }
@@ -760,12 +761,13 @@ void DeskRenderer::drawModels(int mode, const Frame& f, const QMatrix4x4& vp, co
         const float face = qRadiansToDegrees(std::atan2(c.x() - at.x(), 4.0f)) * 0.5f;
         QMatrix4x4 place;
         place.translate(at);
-        place.rotate(face, 0, 1, 0);
+        place.rotate(face + f.modelTurn + f.modelSpread * i, 0, 1, 0);
         QMatrix4x4 statue = place;
         statue.translate(0.f, plinthH, 0.f);
         m_model.setUniformValue("uPlace", statue);
         m_model.setUniformValue("uFinish", f.modelFinish);
         m_model.setUniformValue("uTint", tints[i]);
+        m_model.setUniformValue("uMirror", g.points ? 0.05f : 0.16f);   // a cloud's dots overlap about three deep
         g.vao->bind();
         glDrawArrays(GL_TRIANGLES, 0, g.count);
         g.vao->release();
@@ -774,6 +776,7 @@ void DeskRenderer::drawModels(int mode, const Frame& f, const QMatrix4x4& vp, co
         plinth.translate(0.f, 0.5f, 0.f);
         m_model.setUniformValue("uPlace", plinth);
         m_model.setUniformValue("uFinish", 5);
+        m_model.setUniformValue("uMirror", 0.16f);
         m_plinth.vao->bind();
         glDrawArrays(GL_TRIANGLES, 0, m_plinth.count);
         m_plinth.vao->release();

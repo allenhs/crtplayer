@@ -75,6 +75,8 @@ void AppSettings::load()
     cgBackground = s.value("cg/background", true).toBool();
     cgModelsFolder = s.value("cg/modelsFolder").toString();
     cgModels = s.value("cg/models", true).toBool();
+    cgModelsUp = std::clamp(s.value("cg/modelsUp", 0).toInt(), 0, 6);
+    cgModelsFace = std::clamp(s.value("cg/modelsFace", 0).toInt(), 0, 4);
     cgModelFinish = std::clamp(s.value("cg/modelFinish", 0).toInt(), 0, 4);
     sceneMood = std::clamp(s.value("scene/mood", 0).toInt(), 0, 2);
     sceneWood = std::clamp(s.value("scene/wood", 0).toInt(), 0, 2);
@@ -176,7 +178,7 @@ void AppSettings::save() const
     s.setValue("cg/reveal", cgReveal); s.setValue("cg/orbit", cgOrbit);
     s.setValue("cg/objectSet", cgObjectSet);
     s.setValue("cg/background", cgBackground);
-    s.setValue("cg/modelsFolder", cgModelsFolder); s.setValue("cg/models", cgModels); s.setValue("cg/modelFinish", cgModelFinish);
+    s.setValue("cg/modelsFolder", cgModelsFolder); s.setValue("cg/models", cgModels); s.setValue("cg/modelsUp", cgModelsUp); s.setValue("cg/modelsFace", cgModelsFace); s.setValue("cg/modelFinish", cgModelFinish);
     s.setValue("playback/keepAwake", keepAwake);
     s.setValue("playback/lookSound", lookSound);
     s.setValue("jellyfin/maxBitrateMbps", jfMaxBitrateMbps);

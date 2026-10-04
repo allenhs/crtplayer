@@ -1,62 +1,62 @@
-PASS  rainbow crosstalk adds false colour to grey stripes: 16.6 -> 25.9
-PASS  dot crawl / rainbow animate on a paused frame: pixels changed between moments: 8.1%, 10.7%, 9.7%, 9.7%, 12.1%, 8.1%
-PASS  head switching disturbs only the bottom of the picture: bottom diff 4.8 vs mid 0.8
+PASS  rainbow crosstalk adds false colour to grey stripes: 16.7 -> 26.0
+PASS  dot crawl / rainbow animate on a paused frame: pixels changed between moments: 8.1%, 10.6%, 9.6%, 9.6%, 12.1%, 8.1%
+PASS  head switching disturbs only the bottom of the picture: bottom diff 4.5 vs mid 0.7
 PASS  laser rot adds sparse speckles: 0.07% pixels
-PASS  scanline styles differ: scan_0_soft vs scan_1_sharp: mean row diff 26.3
-PASS  scanline styles differ: scan_0_soft vs scan_2_dynamic: mean row diff 6.0
-PASS  scanline styles differ: scan_0_soft vs scan_4_vga: mean row diff 17.1
-PASS  scanline styles differ: scan_0_soft vs scan_5_pixel: mean row diff 8.5
-PASS  scanline styles differ: scan_0_soft vs scan_6_geom: mean row diff 10.8
-PASS  scanline styles differ: scan_0_soft vs scan_7_lottes: mean row diff 4.1
-PASS  scanline styles differ: scan_0_soft vs scan_8_easymode: mean row diff 8.3
-PASS  scanline styles differ: scan_0_soft vs scan_9_hyllian: mean row diff 11.8
-PASS  scanline styles differ: scan_0_soft vs scan_10_mame: mean row diff 7.7
-PASS  scanline styles differ: scan_1_sharp vs scan_2_dynamic: mean row diff 22.0
-PASS  scanline styles differ: scan_1_sharp vs scan_3_interlaced_a: mean row diff 65.9
-PASS  scanline styles differ: scan_1_sharp vs scan_4_vga: mean row diff 15.8
-PASS  scanline styles differ: scan_1_sharp vs scan_5_pixel: mean row diff 31.0
-PASS  scanline styles differ: scan_1_sharp vs scan_6_geom: mean row diff 33.4
-PASS  scanline styles differ: scan_1_sharp vs scan_7_lottes: mean row diff 30.3
-PASS  scanline styles differ: scan_1_sharp vs scan_8_easymode: mean row diff 28.2
-PASS  scanline styles differ: scan_1_sharp vs scan_9_hyllian: mean row diff 30.1
-PASS  scanline styles differ: scan_1_sharp vs scan_10_mame: mean row diff 19.5
-PASS  scanline styles differ: scan_2_dynamic vs scan_3_interlaced_a: mean row diff 50.4
-PASS  scanline styles differ: scan_2_dynamic vs scan_4_vga: mean row diff 15.7
-PASS  scanline styles differ: scan_2_dynamic vs scan_5_pixel: mean row diff 9.4
-PASS  scanline styles differ: scan_2_dynamic vs scan_6_geom: mean row diff 16.6
-PASS  scanline styles differ: scan_2_dynamic vs scan_7_lottes: mean row diff 10.0
-PASS  scanline styles differ: scan_2_dynamic vs scan_8_easymode: mean row diff 13.1
-PASS  scanline styles differ: scan_2_dynamic vs scan_9_hyllian: mean row diff 17.1
-PASS  scanline styles differ: scan_2_dynamic vs scan_10_mame: mean row diff 4.6
-PASS  scanline styles differ: scan_3_interlaced_a vs scan_4_vga: mean row diff 60.1
-PASS  scanline styles differ: scan_3_interlaced_a vs scan_5_pixel: mean row diff 43.0
-PASS  scanline styles differ: scan_3_interlaced_a vs scan_6_geom: mean row diff 34.5
-PASS  scanline styles differ: scan_3_interlaced_a vs scan_7_lottes: mean row diff 40.4
-PASS  scanline styles differ: scan_3_interlaced_a vs scan_8_easymode: mean row diff 39.4
-PASS  scanline styles differ: scan_3_interlaced_a vs scan_9_hyllian: mean row diff 36.6
-PASS  scanline styles differ: scan_3_interlaced_a vs scan_10_mame: mean row diff 51.0
-PASS  scanline styles differ: scan_4_vga vs scan_5_pixel: mean row diff 19.0
-PASS  scanline styles differ: scan_4_vga vs scan_6_geom: mean row diff 25.6
-PASS  scanline styles differ: scan_4_vga vs scan_7_lottes: mean row diff 20.0
-PASS  scanline styles differ: scan_4_vga vs scan_8_easymode: mean row diff 21.4
-PASS  scanline styles differ: scan_4_vga vs scan_9_hyllian: mean row diff 24.4
-PASS  scanline styles differ: scan_4_vga vs scan_10_mame: mean row diff 16.6
-PASS  scanline styles differ: scan_5_pixel vs scan_6_geom: mean row diff 15.3
-PASS  scanline styles differ: scan_5_pixel vs scan_7_lottes: mean row diff 8.5
-PASS  scanline styles differ: scan_5_pixel vs scan_8_easymode: mean row diff 16.3
-PASS  scanline styles differ: scan_5_pixel vs scan_9_hyllian: mean row diff 16.0
-PASS  scanline styles differ: scan_5_pixel vs scan_10_mame: mean row diff 13.6
-PASS  scanline styles differ: scan_6_geom vs scan_7_lottes: mean row diff 7.6
-PASS  scanline styles differ: scan_6_geom vs scan_8_easymode: mean row diff 5.3
-PASS  scanline styles differ: scan_6_geom vs scan_9_hyllian: mean row diff 5.1
-PASS  scanline styles differ: scan_6_geom vs scan_10_mame: mean row diff 16.4
-PASS  scanline styles differ: scan_7_lottes vs scan_8_easymode: mean row diff 7.8
-PASS  scanline styles differ: scan_7_lottes vs scan_9_hyllian: mean row diff 9.0
-PASS  scanline styles differ: scan_7_lottes vs scan_10_mame: mean row diff 11.7
-PASS  scanline styles differ: scan_8_easymode vs scan_9_hyllian: mean row diff 4.6
-PASS  scanline styles differ: scan_8_easymode vs scan_10_mame: mean row diff 11.8
-PASS  scanline styles differ: scan_9_hyllian vs scan_10_mame: mean row diff 15.8
-PASS  interlaced style alternates field position: row-profile differences between moments: 44.5, 0.0, 44.5, 44.5, 0.0, 44.5
+PASS  scanline styles differ: scan_0_soft vs scan_1_sharp: mean row diff 25.2
+PASS  scanline styles differ: scan_0_soft vs scan_2_dynamic: mean row diff 6.4
+PASS  scanline styles differ: scan_0_soft vs scan_4_vga: mean row diff 16.8
+PASS  scanline styles differ: scan_0_soft vs scan_5_pixel: mean row diff 8.4
+PASS  scanline styles differ: scan_0_soft vs scan_6_geom: mean row diff 10.3
+PASS  scanline styles differ: scan_0_soft vs scan_7_lottes: mean row diff 4.2
+PASS  scanline styles differ: scan_0_soft vs scan_8_easymode: mean row diff 7.7
+PASS  scanline styles differ: scan_0_soft vs scan_9_hyllian: mean row diff 11.3
+PASS  scanline styles differ: scan_0_soft vs scan_10_mame: mean row diff 7.4
+PASS  scanline styles differ: scan_1_sharp vs scan_2_dynamic: mean row diff 21.0
+PASS  scanline styles differ: scan_1_sharp vs scan_3_interlaced_a: mean row diff 64.1
+PASS  scanline styles differ: scan_1_sharp vs scan_4_vga: mean row diff 15.0
+PASS  scanline styles differ: scan_1_sharp vs scan_5_pixel: mean row diff 29.8
+PASS  scanline styles differ: scan_1_sharp vs scan_6_geom: mean row diff 32.4
+PASS  scanline styles differ: scan_1_sharp vs scan_7_lottes: mean row diff 29.3
+PASS  scanline styles differ: scan_1_sharp vs scan_8_easymode: mean row diff 26.9
+PASS  scanline styles differ: scan_1_sharp vs scan_9_hyllian: mean row diff 29.0
+PASS  scanline styles differ: scan_1_sharp vs scan_10_mame: mean row diff 19.1
+PASS  scanline styles differ: scan_2_dynamic vs scan_3_interlaced_a: mean row diff 50.0
+PASS  scanline styles differ: scan_2_dynamic vs scan_4_vga: mean row diff 15.5
+PASS  scanline styles differ: scan_2_dynamic vs scan_5_pixel: mean row diff 9.5
+PASS  scanline styles differ: scan_2_dynamic vs scan_6_geom: mean row diff 16.7
+PASS  scanline styles differ: scan_2_dynamic vs scan_7_lottes: mean row diff 10.4
+PASS  scanline styles differ: scan_2_dynamic vs scan_8_easymode: mean row diff 13.0
+PASS  scanline styles differ: scan_2_dynamic vs scan_9_hyllian: mean row diff 17.2
+PASS  scanline styles differ: scan_2_dynamic vs scan_10_mame: mean row diff 4.5
+PASS  scanline styles differ: scan_3_interlaced_a vs scan_4_vga: mean row diff 58.9
+PASS  scanline styles differ: scan_3_interlaced_a vs scan_5_pixel: mean row diff 42.4
+PASS  scanline styles differ: scan_3_interlaced_a vs scan_6_geom: mean row diff 33.9
+PASS  scanline styles differ: scan_3_interlaced_a vs scan_7_lottes: mean row diff 39.6
+PASS  scanline styles differ: scan_3_interlaced_a vs scan_8_easymode: mean row diff 39.0
+PASS  scanline styles differ: scan_3_interlaced_a vs scan_9_hyllian: mean row diff 35.8
+PASS  scanline styles differ: scan_3_interlaced_a vs scan_10_mame: mean row diff 49.9
+PASS  scanline styles differ: scan_4_vga vs scan_5_pixel: mean row diff 18.4
+PASS  scanline styles differ: scan_4_vga vs scan_6_geom: mean row diff 25.0
+PASS  scanline styles differ: scan_4_vga vs scan_7_lottes: mean row diff 19.7
+PASS  scanline styles differ: scan_4_vga vs scan_8_easymode: mean row diff 20.7
+PASS  scanline styles differ: scan_4_vga vs scan_9_hyllian: mean row diff 23.9
+PASS  scanline styles differ: scan_4_vga vs scan_10_mame: mean row diff 16.5
+PASS  scanline styles differ: scan_5_pixel vs scan_6_geom: mean row diff 14.5
+PASS  scanline styles differ: scan_5_pixel vs scan_7_lottes: mean row diff 8.3
+PASS  scanline styles differ: scan_5_pixel vs scan_8_easymode: mean row diff 15.4
+PASS  scanline styles differ: scan_5_pixel vs scan_9_hyllian: mean row diff 15.2
+PASS  scanline styles differ: scan_5_pixel vs scan_10_mame: mean row diff 13.3
+PASS  scanline styles differ: scan_6_geom vs scan_7_lottes: mean row diff 7.1
+PASS  scanline styles differ: scan_6_geom vs scan_8_easymode: mean row diff 5.4
+PASS  scanline styles differ: scan_6_geom vs scan_9_hyllian: mean row diff 5.2
+PASS  scanline styles differ: scan_6_geom vs scan_10_mame: mean row diff 16.0
+PASS  scanline styles differ: scan_7_lottes vs scan_8_easymode: mean row diff 7.1
+PASS  scanline styles differ: scan_7_lottes vs scan_9_hyllian: mean row diff 8.6
+PASS  scanline styles differ: scan_7_lottes vs scan_10_mame: mean row diff 11.5
+PASS  scanline styles differ: scan_8_easymode vs scan_9_hyllian: mean row diff 4.8
+PASS  scanline styles differ: scan_8_easymode vs scan_10_mame: mean row diff 11.1
+PASS  scanline styles differ: scan_9_hyllian vs scan_10_mame: mean row diff 15.4
+PASS  interlaced style alternates field position: row-profile differences between moments: 43.6, 0.0, 43.6, 43.6, 0.0, 43.6
 PASS  pixel beam adds a horizontal pixel structure: peak/median 43
 PASS  VGA double-scan gaps are regular: gap spacing 2-3 px
 PASS  geom-style beams swell with brightness: gap depth 15%..100%: 0.65 0.53 0.46 0.39 0.18
@@ -69,7 +69,7 @@ PASS  style 7: lines stay visible in saturated colours: R,G,B,Y,C: 0.47 0.48 0.4
 PASS  style 8: lines stay visible in saturated colours: R,G,B,Y,C: 0.25 0.26 0.25 0.26 0.25
 PASS  style 9: lines stay visible in saturated colours: R,G,B,Y,C: 0.27 0.29 0.27 0.28 0.27
 PASS  style 10: lines stay visible in saturated colours: R,G,B,Y,C: 0.65 0.66 0.65 0.65 0.65
-PASS  hard pixels: every block is uniform: mean in-block std 0.00 (native 5.44)
+PASS  hard pixels: every block is uniform: mean in-block std 0.00 (native 5.89)
 PASS  sharp pixels: blocks uniform away from their edges: mean in-block std 0.00
 PASS  soft pixels: smooth, not blocky: mean in-block std 2.50
 PASS  original-frame screenshot keeps full resolution: (1920, 1080)

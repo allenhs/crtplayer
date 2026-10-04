@@ -1,6 +1,6 @@
 # Verification report
 
-This report covers the build delivered alongside it (CRT Player 2.13.0).
+This report covers the build delivered alongside it (CRT Player 2.14.0).
 
 The final X11 and Wayland suites were run against the exact stripped `crtplayer` binary
 that is delivered, and **again against the AppImage with the system's Qt libraries
@@ -286,6 +286,239 @@ was **not measured**, because there is no GPU in this environment.
 - GPU performance;
 - the interlaced style's look at real refresh rates (only its field alternation was
   measured).
+
+## 2.14: 3D models: standing upright; PLY, GLB / glTF and FBX; pictures; large models
+
+Asked for, from real use: an OBJ statue lay on its side in the 90s CG room instead of
+standing on its flat base; a PLY model did not load at all; then GLB and FBX as well.
+
+**The cause of the first:** the OBJ format does not say which way is up, and the player
+took every OBJ as Y-up. The statue (`Terpsichore_Lyran.obj`, 114,472 triangles, written
+by Blender) is Z-up: 1.77 high along Z, with a flat base at the bottom covering 80% of its
+footprint. **The second:** only OBJ and STL were read; other files in the folder were not
+even listed as skipped.
+
+### What was built
+
+**Which way is up** (`ModelLibrary::load`, `flatShares` in `src/render/ModelLibrary.cpp`):
+
+- For each of the six sides of the model's bounding box, the area of the triangles lying
+  flat against it (all three corners within 0.5% of the model's extent of that side) is
+  measured as a share of the side. A statue's base gives a large share on one side.
+- OBJ and PLY are Y-up by convention, STL Z-up. The other of the two axes is taken
+  instead when the model is flat along it (a share of 6% or more, at the bottom or the
+  top) and not along the usual one (less than a third of that). A flat side on both, or
+  on neither, leaves the convention. A table (flat on top, legs below) is stood on its
+  legs: the axis is found from the flat top, and up stays up.
+- FBX and glTF say which way is up, and are not second-guessed.
+- A flat cut-out with no height along the usual axis is stood along the other.
+- *Models stand* in the settings chooses the axis by hand (Y, Z, X, up or down) for the
+  folder. All six are rotations; none mirrors the model.
+
+**Which way they face:** nothing in a file says which side is the front (this statue's
+front faces +Y; Blender's convention would be −Y). The statues now **turn slowly** by
+default (9° a second, each 60° ahead of the one before); *Models face* stands them still,
+turned by 0°, 90°, 180° or 270°.
+
+**The readers** (`src/render/ModelFormats.cpp`; a model as read is a `RawModel`,
+`ModelRaw.h`):
+
+- **OBJ:** read from the file's bytes (it used to go through text lines and string
+  splitting); the `.mtl` file's colours and pictures (`Kd`, `map_Kd`, names with spaces,
+  options before the name).
+- **PLY:** text, binary little-endian and big-endian; any property types; lists; faces of
+  any number of corners; triangle strips; normals; colours (also the base colour of a
+  Gaussian-splat file). A text file is read a line per element.
+- **glTF 2.0 / GLB:** the scene's node tree with its transforms; accessors of every
+  component type, interleaved or not; triangles, strips, fans, points; `COLOR_0`; the
+  material's base colour and its picture (inside the file, as a data URI, or beside it);
+  the older specular-glossiness materials. Draco- and meshopt-compressed files are
+  refused with that reason.
+- **FBX:** through **ufbx** 0.23.1 (`third_party/ufbx`, unmodified, MIT or public domain),
+  which turns the scene Y-up from the axes the file states. Node transforms, normals,
+  vertex colours, each material's colour and picture (embedded or beside the file).
+- **TGA pictures** are read by the player itself (true colour, grey, colour table; plain
+  or packed in runs). Qt's TGA plugin reads only the newer form of the format.
+- **Numbers** are read with `std::from_chars`: the same whatever the system's language
+  (a decimal comma does not matter).
+
+**Pictures on the models** (`Picture`, `Painter` in `ModelLibrary.cpp`): the statues are
+drawn with a colour per triangle corner (the renderer was not changed). A pictured model
+of fewer than 150,000 triangles is divided, every triangle alike, into up to 64 steps a
+side, and the picture is sampled at each new corner, from a copy reduced to about one
+pixel per sample. Points on a shared side are computed identically from both triangles.
+
+**Point clouds:** a PLY with points and no faces. Thinned to 200,000 points while it is
+read; points beyond the middle 98% by half its width again are dropped; each point
+becomes a square in the surface, sized from the distance to its fourth-nearest neighbour;
+normals from the file, or from the ten nearest neighbours (the direction they vary least
+in).
+
+**Large models:** a model of more than 400,000 triangles is simplified by merging the
+corners that share a cell of a grid (the grid is made as fine as fits), instead of being
+skipped. Up to 8 million triangles are read. Without a graphics card the limits are
+120,000 triangles, 60,000 points and 30,000 triangles after dividing.
+
+**Normals** when the file has none (or has empty ones): the faces around a corner are
+averaged by area, leaving out those across an edge sharper than 60°. Before, everything
+was smoothed, boxes included.
+
+**The settings window** lists each model with its size and the axis used and why, and
+each skipped file with the reason.
+
+### Results
+
+**Unit test** (`tests/test_models.cpp`, `ctest`): 55 checks, all passed. It writes its
+own models. Among them:
+
+| Check | Result |
+|---|---|
+| A Z-up OBJ is stood on its flat base, and is then the same statue as the Y-up file | PASS: largest difference 0 |
+| A Y-up STL (against its convention) is stood on its flat base | PASS |
+| No flat side: an OBJ is Y-up, an STL Z-up; a cube stays as it is | PASS |
+| A Z-up table stands on its legs, not on its top | PASS: *Z up (by its flat top)* |
+| All six axis choices turn the model; none mirrors it | PASS: the volume keeps its sign |
+| A flat cut-out is stood on its edge, whichever way it lies in its file | PASS |
+| Numbers are read the same with a decimal-comma language | PASS: `de_DE.UTF-8` |
+| PLY: text, little-endian and big-endian give the model the OBJ gives | PASS: differences under 0.000003 |
+| PLY: quads; triangle strips with a restart; colours; more on a line than the header says | PASS |
+| PLY cut short; without a complete header; a face naming a missing vertex | PASS: each refused with its reason |
+| A point cloud: a square per point, lying in the surface | PASS: mean alignment with the true normal 0.990 |
+| 300,020 points are thinned; 20 strays far away do not shrink the model | PASS: 150,000 points, 1.4 × 1.4 × 1.4 |
+| GLB: a Z-up mesh set upright by its node's turn, scale and move | PASS |
+| GLB: colours per vertex; a material's colour; a picture | PASS |
+| A cone of 48 triangles with a picture half blue, half red: divided, the change is where the picture has it | PASS: drawn with 145,200 triangles; 146,808 samples away from the change are pure blue or red, none blended |
+| The divided triangles meet exactly | PASS: no point that only one of two neighbours uses (hundreds, with the side points computed the plain way: tried) |
+| GLB: a first chunk not padded to four bytes | PASS |
+| GLB: Draco- and meshopt-compressed files; a damaged file | PASS: each refused with its reason |
+| FBX (text): a file that says Z is up, and one that says Y | PASS: both upright |
+| FBX: its material's colour | PASS: 0.8 0.1 0.1 |
+| TGA: true colour and grey, plain and packed, rows from the bottom or the top | PASS |
+| An OBJ's TGA picture is wrapped the right way up | PASS |
+| A box keeps its edges; a ball is smooth | PASS: least alignment 0.995 |
+| 500,996 triangles are simplified, and keep their shape | PASS: 294,804 triangles, within 0.0001 of the true surface |
+| Without a graphics card the limits are lower | PASS: 117,930 triangles; 59,997 points; the pictured cone 30,000 triangles |
+
+**In the player** (`tests/automation/cg.txt`, `scripts/check-cg.py`; test models from
+`scripts/make-test-models.py`):
+
+| Check | Result |
+|---|---|
+| A Z-up OBJ is stood on its flat base | PASS: a_zup.obj: 1,280 triangles, Z up (stands on its flat base) |
+| In the room it stands taller than it does lying on its back (the axis chosen wrongly by hand) | PASS: top of the statue at row 484 standing, 585 lying; lying: a_zup.obj: 1,280 triangles, Y up (chosen), 0.98 high |
+| Statues turn slowly unless set to stand still | PASS: 7455 pixels change in 10 s turning, 0 standing still |
+| PLY models load: text, binary little-endian, binary big-endian (triangle strips) | PASS: b_text.ply: 600 triangles, Y up (stands on its flat base); c_little.ply: 1,280 triangles, Z up (stands on its flat base); d_big.ply: 1,920 triangles, Y up (as such files usually are) |
+| Each is stood the right way up (Z-up files on their flat base; a table on its legs) | PASS: a_zup.obj Z, b_text.ply Y, c_little.ply Z, d_big.ply Y, e_points.ply Z, f_table.obj Z |
+| A PLY of points alone is shown as a point cloud (thinned, strays dropped) | PASS: e_points.ply: 59,993 points of 300,040, Z up (stands on its flat base); 1.05 wide, 1.05 deep |
+| A PLY cut short is skipped, with the reason | PASS: a0_cut.ply: the file is damaged or cut short |
+| With "Their own colours" the PLY models show their colours | PASS: 25575 strongly coloured pixels |
+| GLB and glTF models load (nodes, a picture inside the file, data in a file beside it) | PASS: a_nodes.glb: 1,280 triangles, Y up (stands on its flat base); b_textured.glb: 600 triangles, Y up (stands on its flat base); c_external.gltf: 14 triangles, Y up (stands on its flat base) |
+| FBX models load (text and binary), upright whichever axis the file says is up | PASS: e_text.fbx: 1,280 triangles, Y up (stands on its flat base); f_binary.fbx: 600 triangles, Y up (stands on its flat base) |
+| They show their colours (vertex colours, pictures, materials) | PASS: 81342 strongly coloured pixels |
+| An OBJ with a picture (a TGA named by its material file) is divided so that the picture shows | PASS: g_crate.obj: 12 triangles, Y up (stands on its flat base); drawn with 30,000 triangles |
+| A Draco-compressed GLB is skipped, with the reason; the data file beside a glTF is not taken for a model | PASS: d_draco.glb: Draco-compressed (not supported; export it without compression) |
+| A model of 1.2 million triangles is simplified, not skipped | PASS: a_dense.stl: 110,064 triangles (simplified from 1,202,025), Z up (stands on its flat base) (the limit here: 120,000, without a graphics card) |
+| A cloud of a million points is thinned | PASS: b_cloud.ply: 60,000 points of 1,000,000, Y up (stands on its flat base) |
+| Both load in the background within seconds | PASS: 0.7 s |
+| And are drawn | PASS: 5.9% of the view changes |
+| The chosen axis and facing are kept | PASS: up Z, facing 3; a_zup.obj: 1,280 triangles, Z up (chosen) |
+
+**The model that was reported:** loads in 0.07 s as *114,472 triangles, Z up (stands on
+its flat base)*, 0.68 × 1.50 × 0.53. In the room it stands; with *Y is up* chosen by hand
+(what 2.13 did) it lies on its back. Looked at in screenshots.
+
+**Files from elsewhere** (not in the repository; loaded with the same code, outside the
+player):
+
+| Files | Result |
+|---|---|
+| ufbx's own test files: 690 FBX, text and binary, versions 3000 to 7700, from Blender, Maya, 3ds Max, MotionBuilder, Revit and others | 570 load; 76 hold no faces (cameras, curves, animation only), 27 are flat, 12 are deliberately broken or of a version ufbx does not read, 5 hold numbers that are not positions; 2.1 s for all |
+| trimesh's test models: 32 OBJ, 26 STL, 25 PLY, 15 GLB, 4 glTF | 97 load; the 5 refused hold no faces or nothing at all |
+| Khronos glTF sample assets: 19 (Duck, DamagedHelmet, Fox, Avocado, Corset, WaterBottle, Lantern, ABeautifulGame of 1.5 million triangles, …) | 17 load; the Draco and meshopt variants are refused with that reason |
+
+Two faults were found with these files and fixed (below). Six of the Khronos models and
+six others were looked at in the room with *Their own colours*: upright, pictures the
+right way round.
+
+**Damaged files** (`tests/fuzz_models.cpp`, built with AddressSanitizer and
+UndefinedBehaviorSanitizer): 21,300 files, made from 23 of the test models and pictures (OBJ, STL, PLY, GLB, glTF, FBX,
+TGA) by changing bytes, cutting them short, and removing or repeating runs. 7,671 still
+loaded, 13,629 were refused, none crashed, and the sanitizers reported nothing in the
+player's code. (8 reports inside ufbx; see the limits.)
+
+**Full suites for 2.14.0:**
+
+| Run | Result |
+|---|---|
+| Unit tests (`ctest`) | 7 of 7 passed |
+| Native X11 | 470 passed, **4 failed** (speed, below) |
+| Native X11, the path a graphics card takes (`CRTPLAYER_VIDEO_SURFACE=gl CRTPLAYER_FAST_PATH=never`) | 470 passed, **4 failed** (the same four) |
+| Native Wayland | 18 passed, none failed |
+| AppImage, X11, the system's Qt removed | 470 passed, **4 failed** (the same four) |
+| AppImage, Wayland, the system's Qt removed | 18 passed, none failed |
+
+**The four failures are the test machine's speed that day, not this release.** They are
+the speed checks of the no-graphics-card suite run through the OpenGL widget (software
+OpenGL): *1080p plays at full rate* 21.6 frames a second, *4K* 15.8, *fullscreen 1080p*
+11.3, *twelve changes of size and look* 21.5; the 2.13 release measured 29.2, 24.8, 17.0
+and 29.9 on the same checks. **The 2.13.0 binary, run again within the hour of the 2.14
+runs, gave 22.0, 13.8, 11.4 and 18.0** and failed the same four checks; the comparison
+measurements the suite makes of the unchanged older path fell by the same quarter
+(13.3 to 10.0 frames a second). The same checks on the default path without a graphics
+card (no OpenGL) passed at 29.4 to 30.3 frames a second in every run. Nothing in 2.14
+touches video playback.
+
+### Faults found on the way, and fixed
+
+- **A text PLY whose lines hold more than its header says** (`fuze_ascii.ply` from
+  trimesh's models: 10 values after each face where the header declares 4) was read as
+  one stream of numbers, so every face after the first was garbage. Each element is now
+  read from its own line.
+- **A GLB whose first chunk is not padded to four bytes** (`cube.glb`, `pins.glb`): the
+  reader stepped to the padded position and missed the binary chunk. The chunk's length
+  is now taken as it is.
+- **A flat cut-out lying in the plane of the "up" axis** was refused as *flat model*; and
+  the first version of the flat-base rule laid a square in the XY plane down for the same
+  reason. Now stood along the other axis.
+- **FBX and glTF were second-guessed** in the first version: 23 of ufbx's test scenes
+  (sheared boxes, a wall) were turned on their side. Their stated axis is now kept.
+- **The mirror image of a point cloud was three times too bright:** mirror images are
+  added onto the floor, and a cloud's squares overlap about three deep. Scaled down.
+- **meshopt compression under its newer name** (`KHR_meshopt_compression`) was reported
+  as *no faces*.
+
+### Known limits and what was not tested
+
+- **No graphics card here.** The room draws at 4 frames a second at 1080p on this
+  machine without models, and at 2 with a million triangles of them (measured before the
+  lighter limits were added). How it runs on a real card was not measured. The limits for a graphics card (400,000 triangles, 200,000 points,
+  150,000 after dividing) were exercised by the unit test only; in the player here the
+  lighter limits apply.
+- **The flat-base rule can be wrong.** A Y-up model with a flat back and no flat base (a
+  mask, a wall plaque) is laid on its back. A Z-up model without any flat side (a figure
+  standing on its feet) is taken as Y-up and lies down. *Models stand* corrects both, for
+  the whole folder at once: models that need different choices need different folders.
+- **Pictures are sampled, not drawn.** A model of a dozen triangles shows its picture at
+  64 samples a side; lettering on it is not readable. Only the base colour picture is
+  used: no normal maps, roughness, transparency or emission. Colours and pictures are
+  multiplied as glTF says; FBX and OBJ pictures are used as they are.
+- **Not read:** Draco- and meshopt-compressed glTF; KTX2 pictures; sparse accessors;
+  morph targets, skins and animation (a character stands in its rest pose); a second set
+  of texture coordinates; PLY pictures (`comment TextureFile`); OBJ free-form surfaces.
+- **Gaussian-splat PLY files** are read as plain coloured points. Their scenes are not
+  statue-shaped, and their "up" is anyone's guess.
+- **Point clouds without normals** get them from their neighbours; in thin parts (two
+  surfaces closer together than the point spacing) the squares can lie askew.
+- **Simplifying** merges corners by a grid: fine detail smaller than a cell is lost, thin
+  walls can collapse, and the result has between 60% and 100% of the limit. The pictures
+  of a model that is simplified become corner colours first.
+- **Undefined shifts inside ufbx:** with damaged FBX files the sanitizer reports shifts
+  by too many bits in ufbx's decompressor (8 among 2,400 damaged FBX files). No bad read
+  or write followed. ufbx was left unmodified.
+- **Real FBX and GLB files from modelling programs' current versions** were not tried
+  beyond the collections above. **The reported PLY file itself was not available;** PLY
+  was tested with generated files and the 25 from trimesh.
+- **Windows:** the unit test runs in the Windows build; the room was not looked at there.
 
 ## 2.13: Enhance (sharper upscaling, frame generation); a video that never ended
 

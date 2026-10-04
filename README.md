@@ -365,6 +365,10 @@ player runs, and is optional: without it, controllers are simply off.
 **GPU:** an OpenGL 3.3 core profile, which Mesa and NVIDIA both provide on Wayland and
 X11.
 
+**Built in** (source in `third_party/`, nothing to install): [ufbx](https://github.com/ufbx/ufbx)
+0.23.1 by Samuli Raivio, which reads FBX models for the 90s CG room. MIT licence or
+public domain, as you prefer; its text is in `third_party/ufbx/LICENSE`.
+
 **Building the AppImage** additionally needs `qt6-wayland` development files, `patchelf`
 and `curl`.
 
@@ -1347,16 +1351,54 @@ The camera stays inside the room: not through a side wall, not above the ceiling
   Switch it off in *Scene settings → 90s CG room → Background crowd* for the minimal
   look.
 - **Your own 3D models:** *Scene settings → 90s CG room → Your 3D models → Choose
-  folder…*.
-  - **What's read:** OBJ and STL (binary or text) files, up to 6 models of up to 400,000
-    triangles each. They load in the background.
-  - **How they stand:** each becomes a statue on a marble plinth around the set, lit by
-    the scene, casting a shadow and showing in the mirror floor.
-  - **Finishes:** marble, bronze, chrome, candy plastic, or their own colours (OBJ vertex
-    colours).
-  - **Sizing:** STL files are treated as Z-up (the 3D-printing convention). Models are
-    centred, stood on their base and scaled to statue size.
-  - **Files that can't be read are skipped,** and the settings window says why.
+  folder…*. Up to 6 models from the folder become statues on marble plinths around the
+  set, lit by the scene, casting shadows and showing in the mirror floor. They load in
+  the background.
+  - **What's read:**
+
+    | Format | What is read |
+    |---|---|
+    | **OBJ** | Faces of any number of corners; normals; vertex colours; and, from the `.mtl` file beside it, each material's colour and picture (`Kd`, `map_Kd`). |
+    | **STL** | Binary and text. |
+    | **PLY** | Text, binary little-endian and binary big-endian; faces and triangle strips; normals; colours. A file with points and no faces is shown as a **point cloud** (see below). |
+    | **GLB, glTF** | glTF 2.0: the scene's nodes (moved, turned, scaled), normals, colours per vertex, each material's colour and picture. A `.gltf` reads the `.bin` and picture files beside it. |
+    | **FBX** | Binary and text, the versions in use since the 2000s, read by [ufbx](https://github.com/ufbx/ufbx): node transforms, normals, vertex colours, each material's colour and picture (inside the file, or beside it). |
+
+  - **Which way is up:** FBX and glTF files say it themselves. OBJ, STL and PLY files do
+    not, and programs disagree (Y in some, Z in others). The player looks for the model's
+    **flat base**: a model that is flat underneath along Z and not along Y (or the other
+    way round) is stood on that side. Without a flat side, an OBJ or PLY is taken as
+    Y-up and an STL as Z-up. If a model still lies on its side, choose the axis in
+    *Models stand* (Y, Z or X is up, or down); it applies to every model in the folder.
+    The settings window lists each model with the axis used and why.
+  - **Which way they face:** a file does not say which side is its front, so by default
+    the statues **turn slowly** (one turn in 40 seconds). *Models face* can stand them
+    still instead: as in the file, or turned by 90°, 180° or 270°.
+  - **Finishes:** marble, bronze, chrome, candy plastic, or **their own colours**: the
+    file's colours and pictures (textures). The statues are drawn with a colour at each
+    triangle corner, so a picture is sampled there; a model of few triangles is divided
+    into smaller ones first (up to about 150,000), so that its picture still shows. A
+    picture comes out softer than in a 3D program, most of all on a model of a few dozen
+    triangles.
+  - **Point clouds** (a PLY of points, from a scanner or photogrammetry): each point
+    becomes a small square lying in the surface. Normals are taken from the file, or
+    worked out from each point's neighbours. Points far away from the rest are dropped.
+  - **Large models:** a model of more than 400,000 triangles is **simplified** to fit
+    (nearby corners are merged), up to 8 million triangles in the file; a point cloud of
+    more than 200,000 points is thinned. Without a graphics card the limits are 120,000
+    triangles and 60,000 points.
+  - **Sizing:** models are centred, stood on their base and scaled to statue size. Files
+    that have no normals get them: smooth over round shapes, with edges sharper than 60°
+    kept.
+  - **Files that can't be read are skipped,** and the settings window says why
+    (*damaged or cut short*, *Draco-compressed*, …).
+  - **Pictures:** PNG, JPEG, BMP and TGA always; TIFF and WebP with the AppImage, and in
+    a build from source when Qt's image-format plugins are installed (Fedora:
+    `qt6-qtimageformats`).
+  - **Not read:** Draco- and meshopt-compressed glTF (export without compression); KTX2
+    pictures (the material's plain colour is used); animation and skinning (a
+    character stands in its rest pose); Gaussian-splat PLY files are shown as plain
+    points, not splats.
   - **One limit:** they are not seen in the chrome spheres' reflections.
 - **The TV** stands on a **chrome pedestal** or a **marble plinth**, or **floats**. Its
   picture glows on what is around it.
@@ -1730,6 +1772,21 @@ Settings are saved whenever the player exits: window close, Ctrl+Q, or logout.
   also limits what can be drawn. On Wayland only the set's outline and the strip are
   clickable.
 
+**90s CG room: one of my 3D models lies on its side, or is missing**
+
+- **Lies on its side or stands on its head:** the file does not say which way is up, and
+  the model has no flat base to go by (or has a flat side that is not its base). Choose
+  the axis in *Scene settings → 90s CG room → Models stand*. It applies to every model in
+  the folder, so keep models that need different choices in different folders.
+- **Shows its back:** set *Models face* to *Turned by 180°* (or leave the statues
+  turning).
+- **Missing:** the settings window lists what was skipped, with the reason. *Draco-* or
+  *meshopt-compressed*: export the GLB again without compression. *More than 6 models*:
+  the first six by name are shown.
+- **Grey with "Their own colours":** the file has no colours, or its picture files are
+  not beside it (an OBJ needs its `.mtl` and the pictures that names; a `.gltf` its
+  `.bin` and pictures).
+
 **The AppImage opens, but the video area stays empty or see-through**
 
 - 1.9.2 and later use your system's Qt when it's suitable, which fixes this on Bazzite.
@@ -1809,6 +1866,8 @@ src/
   ui/JellyfinPanel.*       sign-in form and poster browser
   render/DeskRenderer.*    procedural 3D cabinet, projection, silhouette, shading
   render/DeskView.*        desk mode view: poses, flight, crossfade to flat, mouse interaction
+  render/ModelLibrary.*    your 3D models: which way is up, normals, pictures, point clouds, simplifying (unit-tested)
+  render/ModelFormats.cpp  the readers: OBJ (+MTL), STL, PLY, glTF / GLB, and FBX through third_party/ufbx
   edit/LosslessCutter.*    cutting without re-encoding (parsebin → muxer, keyframe start, decode-order end)
   edit/GifEncoder.*        animated GIF writer (median-cut palettes, dithering, LZW, parallel)
   edit/GifRecorder.*       steps through a section and has each frame drawn at the GIF's size
@@ -1824,6 +1883,7 @@ shaders/                   quad.vert, convert.frag, downsample.frag, blur.frag, 
                            fmv_codec.frag, fmv_palette.frag (Sega CD FMV look),
                            desk.vert, desk.frag (3D cabinet, glass, shadow)
 tests/                     unit tests + automation scripts
+third_party/ufbx/          the FBX reader (ufbx, unmodified; MIT or public domain)
 scripts/                   build-bazzite.sh, install-local.sh, make-test-media.sh, run-verification.sh,
                            check-effects.py, check-desk.py (measure the captures),
                            run-jellyfin-tests.sh + check-jellyfin.py (with tests/jellyfin_mock.py),

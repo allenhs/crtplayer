@@ -192,6 +192,80 @@ wait 1500
 modelswait 30000
 wait 800
 report models-again
+# 2.14: which way is up (a Z-up OBJ on its own: found, and chosen wrongly by hand); statues turning
+cg objects off
+cg face 1
+cg models off
+deskpose 14 8 0.30 0.68 0.5
+rendertime 3
+wait 800
+deskgrab @O@/cg_up_none.png
+cg models @M@/models-single
+modelswait 30000
+wait 800
+report up-auto
+deskgrab @O@/cg_up_auto.png
+rendertime 13
+wait 600
+deskgrab @O@/cg_still_later.png
+cg face 0
+wait 600
+deskgrab @O@/cg_turn_later.png
+rendertime 3
+wait 600
+deskgrab @O@/cg_turn.png
+cg face 1
+cg up y
+modelswait 30000
+wait 800
+report up-y
+deskgrab @O@/cg_up_y.png
+cg up auto
+# PLY in every flavour, a point cloud, and models whose up axis has to be found; then GLB / glTF and FBX
+cg finish 4
+cg models off
+deskpose -12 10 0.20 0.5 0.55
+wait 800
+deskgrab @O@/cg_wide_none.png
+cg models @M@/models-upright
+modelswait 60000
+wait 1000
+report models-upright
+deskgrab @O@/cg_upright.png
+cg models @M@/models-scenes
+modelswait 60000
+wait 1000
+report models-scenes
+deskgrab @O@/cg_scenes.png
+# too large to draw as they are: 1.2 million triangles, a million points
+cg finish 0
+cg models @M@/models-large
+modelswait 120000
+wait 1500
+report models-large
+deskgrab @O@/cg_large.png
+# the choices are kept; the settings window lists each model and how it was stood
+cg models @M@/models-single
+cg up z
+cg face 3
+modelswait 30000
+desk off
+wait 800
+desk on
+wait 1500
+modelswait 30000
+wait 500
+report models-kept
+cg up auto
+cg face 0
+cg models @M@/models-upright
+modelswait 60000
+scenedialog
+wait 800
+grabwindow @O@/cg_models_dialog.png dialog
+cg models @M@/models
+cg objects on
+modelswait 30000
 rendertime off
 desk off
 quit

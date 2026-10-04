@@ -45,6 +45,8 @@ struct AppSettings {
     int cgObjectSet = 0;
     bool cgBackground = true;
     QString cgModelsFolder;
+    int cgModelsFace = 0;    // 0 turning slowly, 1 as in the file, 2-4 turned by 90, 180, 270 degrees
+    int cgModelsUp = 0;      // which way is up in your models: 0 automatic, 1 Y, 2 Z, 3 X, 4 -Y, 5 -Z, 6 -X
     bool cgModels = true;
     int cgModelFinish = 0;   // picture in the theater: 0 35mm print, 1 worn 16mm, 2 drive-in, 3 keep the current look
     bool keepAwake = true;  // no screen dimming / sleep while a video plays

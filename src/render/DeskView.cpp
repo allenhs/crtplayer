@@ -471,6 +471,7 @@ DeskRenderer::Pose DeskView::poseAt(double e, const QSize& vp, const Geo& g) con
 
 void DeskView::paintGL()
 {
+    ++m_paints;
     auto* gl = context()->extraFunctions();
     if (!m_glOk) {
         gl->glClearColor(0.2f, 0.f, 0.f, 0.6f);
@@ -571,13 +572,18 @@ void DeskView::paintGL()
     // Your 3D models: load the folder in the background; upload a new set once it is ready.
     if (m_sceneSet.scene == 4) {
         const QString folder = m_sceneSet.models ? m_sceneSet.modelsFolder : QString();
-        if (folder != m_library.folder()) m_library.setFolder(folder);
+        const auto up = ModelLibrary::Up(std::clamp(m_sceneSet.modelsUp, 0, 6));
+        m_library.setLight(m_flat->softwareRenderer());
+        m_library.setFolder(folder, up);   // (nothing happens when nothing has changed)
         int gen = 0;
         const auto meshes = m_library.meshes(&gen);
         if (gen != m_modelsUploaded) { m_desk.setModels(meshes); m_modelsUploaded = gen; }
     }
     f.models = m_sceneSet.scene == 4 && m_sceneSet.models && !m_sceneSet.modelsFolder.isEmpty();
     f.modelFinish = m_sceneSet.modelFinish;
+    // Which side is a model's front cannot be told from its file: by default the statues turn slowly (40 s a turn).
+    f.modelTurn = m_sceneSet.modelsFace == 0 ? float(std::fmod(double(time) * 9.0, 360.0)) : float((std::clamp(m_sceneSet.modelsFace, 1, 4) - 1) * 90);
+    f.modelSpread = m_sceneSet.modelsFace == 0 ? 60.f : 0.f;
     if (m_sceneSet.scene == 4) {
         const double dt = m_cgClock.isValid() ? std::min(0.25, m_cgClock.restart() / 1000.0) : 0.0;
         if (!m_cgClock.isValid()) m_cgClock.start();

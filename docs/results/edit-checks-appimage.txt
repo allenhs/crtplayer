@@ -12,17 +12,17 @@ PASS  … its subtitles are there, timed from the cut, and end at B: cue at 00:0
 PASS  WebM (VP9 + Opus): cut losslessly, in its own container: ultrawide_64x27_vp9 - cut 00-00-02 to 00-00-06.webm: {"video": true, "audio": true}
 PASS  MPEG-2 + AC-3 in Matroska: cut losslessly, in its own container: anamorphic_dvd_mpeg2 - cut 00-00-01 to 00-00-06.mkv: {"video": true, "audio": true}
 PASS  a video in a read-only folder is cut into ~/Videos instead: …/edit-home/Videos/sd_4x3_h264 - cut 00-00-08 to 00-00-12.mp4
-PASS  A–B (2–5 s) is saved as an animated GIF at the chosen size and frame rate: 480×360, 45 frames (15 a second, exactly), plays 3.00 s, 1.96 MB; made in 5.4 s
+PASS  A–B (2–5 s) is saved as an animated GIF at the chosen size and frame rate: 480×360, 45 frames (15 a second, exactly), plays 3.00 s, 1.96 MB; made in 7.9 s
 PASS  it loops: loop=0
 PASS  the original picture option: 320 wide, 10 frames a second: 320×240, 30 frames, 3.00 s
 PASS  with the look the GIF shows the CRT (curved screen, textured picture); without it, the plain picture: dark corners 4 vs 0; texture 6.4 vs 0.0
 PASS  without A–B: the next 5 seconds: from 10000 ms, 75 frames, plays 5.00 s
-PASS  Full HD: a 4:3 picture is 1440×1080: 1440×1080, 10 frames, 1.00 s, 3.4 MB; made in 2.6 s
-PASS  4K: a 4:3 picture is 2880×2160: 2880×2160, 10 frames, 1.00 s, 12.7 MB; made in 4.7 s
+PASS  Full HD: a 4:3 picture is 1440×1080: 1440×1080, 10 frames, 1.00 s, 3.4 MB; made in 3.5 s
+PASS  4K: a 4:3 picture is 2880×2160: 2880×2160, 10 frames, 1.00 s, 12.7 MB; made in 5.8 s
 PASS  the 4K GIF is drawn at 4K, not enlarged: the tube shows all of the video's 480 scanlines: 476 scanlines counted at 4K (4.5 pixels each); 239 at Full HD, where 480 would not fit
 PASS  afterwards the player is as it was: paused, same look, A–B still set: paused, Clean Broadcast Monitor, A–B 2000–3000 ms
-PASS  4K: a 16:9 video fills 3840×2160: 3840×2160, 10 frames, 9.3 MB; made in 4.7 s
+PASS  4K: a 16:9 video fills 3840×2160: 3840×2160, 10 frames, 9.3 MB; made in 5.7 s
 PASS  in desk mode, the whole scene is recorded: 480×270 (the room, not just the picture), 30 frames, 2.00 s
-PASS  desk mode in HD: the scene is drawn at the GIF's size: 1280×720, 20 frames; fine detail 1.24 against 0.66 for the small GIF enlarged; made in 6.1 s
+PASS  desk mode in HD: the scene is drawn at the GIF's size: 1280×720, 20 frames; fine detail 1.24 against 0.66 for the small GIF enlarged; made in 8.2 s
 
 All edit checks passed

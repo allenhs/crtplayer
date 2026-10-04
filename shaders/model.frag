@@ -18,6 +18,7 @@ uniform vec3 uTvF;          // the TV's screen centre, floor frame
 uniform sampler2D uGlassTex;
 uniform bool uHasGlass;
 uniform float uGlassLod;
+uniform float uMirror;      // how strongly a mirror image is added (less for a point cloud, whose dots overlap)
 
 float hash2(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
 float noise2(vec2 p)
@@ -62,6 +63,6 @@ void main()
         col = vCol * (uAmbient + uSunColour * diff + tv) + uSunColour * pow(max(dot(n, H), 0.0), 60.0) * 0.2;
     }
     col = clamp(col, 0.0, 1.0);
-    if (uMode == 1) fragColor = vec4(col * 0.16, 0.0);   // mirror image: added faintly, floor pixels only
+    if (uMode == 1) fragColor = vec4(col * uMirror, 0.0);   // mirror image: added faintly, floor pixels only
     else fragColor = vec4(col, 1.0);
 }

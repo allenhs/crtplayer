@@ -1,6 +1,12 @@
 imageformats/libqgif.so
+imageformats/libqicns.so
 imageformats/libqico.so
 imageformats/libqjpeg.so
+imageformats/libqmng.so
+imageformats/libqtga.so
+imageformats/libqtiff.so
+imageformats/libqwbmp.so
+imageformats/libqwebp.so
 networkinformation/libqglib.so
 networkinformation/libqnetworkmanager.so
 platforminputcontexts/libcomposeplatforminputcontextplugin.so
