@@ -4,9 +4,9 @@ PASS  bumpers are read from their folder: channel 5: 3 programmes, 2 bumpers
 PASS  a Jellyfin folder becomes a channel with its episodes: channel 3 "Shows": 2 programmes, 20 s
 PASS  an empty folder is a channel with nothing on: channel 9: 0 programmes
 PASS  turning the TV on tunes the first channel, with static until the picture arrives: channel 2, static
-PASS  it comes on partway through, where the broadcast is: "Another Film": the broadcast is 19.9 s in, the player 19.1 s
+PASS  it comes on partway through, where the broadcast is: "Another Film": the broadcast is 20.0 s in, the player 16.4 s
 PASS  the channel number and what is on show for a few seconds after tuning, then go: just after tuning: "CH 02 MOVIES", "Another Film", "NEXT  7:13 AM  Tall Story"; later the number has gone
-PASS  channel up: the Jellyfin channel plays, in step with its schedule: "Test Show · S01E01 · Pilot": the broadcast is 7.2 s in, the player 6.8 s
+PASS  channel up: the Jellyfin channel plays, in step with its schedule: "Test Show · S01E01 · Pilot": the broadcast is 7.3 s in, the player 6.8 s
 PASS  programmes follow one another on their own, as scheduled: Toon Episode 1 → Toon Episode 1 → Toon Episode 1 → ident-b → Toon Episode 10 (5 of 5 looks in step, 0 during a change-over)
 PASS  bumpers play between programmes: 1 bumper(s), 4 programmes played so far
 PASS  W shows the guide over the lower part of the picture, through the tube: 98% blue in the lower part with the guide, 0% without; the video stays on above (22% blue)

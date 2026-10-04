@@ -65,6 +65,10 @@ for surface, title in (('raster', 'plain window surface (what a machine without 
     software = vp('fast-play')['software']
     want = 'raster' if surface == 'raster' else 'gl widget'
     check('the window surface is the one asked for', vp('fast-play')['surface'] == want, vp('fast-play')['surface'])
+    # (2.12.1: offered video "in any kind of memory", a hardware decoder kept its frames on the
+    # graphics card, where the player's scaler cannot read them, and failed.)
+    check('the video sink asks the decoder for frames in ordinary memory only', vp('fast-play').get('sinkForeignMemory') == 0,
+          f"{vp('fast-play').get('sinkForeignMemory')} other kinds of memory offered")
     if not software:
         # A real graphics card: the fast path stays off by itself, and nothing else here applies.
         check('with a graphics card the frames stay as decoded (the card converts them)', not vp('fast-play')['fast'], vp('fast-play')['output'])

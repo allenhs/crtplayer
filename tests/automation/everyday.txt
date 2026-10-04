@@ -187,8 +187,9 @@ report quiet
 night on
 wait 1800
 report quiet-night
-seek 7.5
-wait 2500
+# (the loud part runs from 6 s to the clip's end at 12 s: both measurements must fall well inside it)
+seek 6.3
+wait 2300
 report loud-night
 night off
 wait 1500

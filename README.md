@@ -1538,6 +1538,21 @@ Settings are saved whenever the player exits: window close, Ctrl+Q, or logout.
 - If only the audio decoder is missing, the video still plays and a notice names the
   missing audio decoder.
 
+**A video stays on its last picture and the playlist does not go on** (2.11 to 2.12.1)
+
+- A known fault, not yet fixed: a video played from its start to its end without a
+  jump, with a subtitle track other than the first selected, does not end.
+- Any jump in the video (the arrow keys, the seek bar) gets past it, as does *Next*.
+  Videos resumed partway through, and Cable TV programmes joined partway through, are
+  not affected.
+
+**"Hardware decoder … failed; switched to software decoding" on every video** (2.12.0)
+
+- A fault in 2.12.0 on systems with a hardware decoder (seen with NVIDIA): fixed in
+  2.12.1. The video still played, decoded by the CPU.
+- If the message appears with 2.12.1 or later, the decoder itself failed (a driver
+  mismatch after an update is the usual cause); playback carries on in software.
+
 **Video plays slowly in a virtual machine** (or anywhere without a graphics card)
 
 - Press **I**. If the *Drawing* line says *no graphics acceleration (software OpenGL)*,

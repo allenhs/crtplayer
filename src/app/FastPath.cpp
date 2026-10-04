@@ -143,5 +143,5 @@ QJsonObject MainWindow::videoPathReport() const
                        {"lookScale", m_video->lookScale()},
                        {"fastSize", QJsonArray{fast.width(), fast.height()}}, {"frameSize", QJsonArray{frame.width(), frame.height()}},
                        {"frameDirect", m_video->frameDirect()}, {"frameScaled", m_video->frameIsScaled()},
-                       {"decoderThreads", m_player->decoderThreads()}, {"cpuThreads", QThread::idealThreadCount()}};
+                       {"sinkForeignMemory", m_player->sinkForeignMemoryEntries()}, {"decoderThreads", m_player->decoderThreads()}, {"cpuThreads", QThread::idealThreadCount()}};
 }

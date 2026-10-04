@@ -117,7 +117,7 @@ check('progressive video is never touched', ev['progressive']['deinterlace'] and
 
 # ---- night mode (levels measured on the sound leaving the player's own sound chain)
 q, qn, ln, l = (ev[k]['soundLevelDb'] for k in ('quiet', 'quiet-night', 'loud-night', 'loud'))
-pos_ok = rep['quiet']['positionMs'] < 5500 and rep['quiet-night']['positionMs'] < 5800 and rep['loud-night']['positionMs'] > 6500 and rep['loud']['positionMs'] > 6500
+pos_ok = rep['quiet']['positionMs'] < 5500 and rep['quiet-night']['positionMs'] < 5800 and rep['loud-night']['positionMs'] > 6500 and 6500 < rep['loud']['positionMs'] < 11500
 check('night mode lifts the quiet part and holds down the loud part', pos_ok and qn - q > 8 and ln - l < -2 and (ln - qn) < 0.6 * (l - q),
       f"quiet {q:.1f} -> {qn:.1f} dB, loud {l:.1f} -> {ln:.1f} dB: {ln - qn:.1f} dB apart instead of {l - q:.1f}")
 

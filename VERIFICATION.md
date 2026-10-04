@@ -1,6 +1,6 @@
 # Verification report
 
-This report covers the build delivered alongside it (CRT Player 2.12.0).
+This report covers the build delivered alongside it (CRT Player 2.12.1).
 
 The final X11 and Wayland suites were run against the exact stripped `crtplayer` binary
 that is delivered, and **again against the AppImage with the system's Qt libraries
@@ -287,6 +287,86 @@ was **not measured**, because there is no GPU in this environment.
 - the interlaced style's look at real refresh rates (only its field alternation was
   measured).
 
+## 2.12.1: hardware decoding with a graphics card (from real use)
+
+**The report:** on a Bazzite system with an NVIDIA card, 2.12.0 showed *Hardware decoder
+nvh265dec failed; switched to software decoding* as soon as a video opened. Earlier
+versions decoded in hardware there.
+
+**The cause** was 2.12.0's own. To keep GStreamer's single-threaded converter out of the
+way, the player's video sink answers the question "what do you accept?" with "any raw
+video" (see 2.12 below). The answer was taken from the scaler's template, which also
+lists raw video *in any kind of memory*: the scaler can pass such frames on untouched.
+Offered that, NVIDIA's decoder kept its frames on the graphics card (CUDA or OpenGL
+memory), where the scaler and converter cannot read them. The stream failed, and the
+player's fallback switched to software decoding.
+
+**The fix:** the sink now answers with raw video in ordinary (system) memory only, as
+the sink of 2.11 did in effect. The decoder copies its frames to ordinary memory, as
+before 2.12.
+
+| Check | Result |
+|---|---|
+| On the reporter's system (Bazzite, NVIDIA): the same video with a test build of 2.12.1 | Reported working: no message, hardware decoding as before |
+| The video sink asks the decoder for frames in ordinary memory only (`scripts/check-nogpu.py`, both window surfaces) | PASS: 0 other kinds of memory offered |
+
+**Why the 2.12.0 checks did not catch it:** the test machine has no graphics card and no
+hardware decoder, so no decoder there could take up the offer. VERIFICATION for 2.12
+said "with a real graphics card nothing changes by default"; that was an assumption, and
+it was wrong. The new check reads what the sink offers, which can be done without a
+graphics card. It does not replace a run on real hardware: hardware decoding itself
+remains **not tested here**, and is confirmed for 2.12.1 only by the report above (one
+system, NVIDIA, H.265).
+
+**Also in 2.12.1:** the night-mode check measured its second loud level at the very end
+of the test clip (position 12.0 s of 12.0 s), where the result depended on timing; it
+failed once in a development run (−14.3 dB instead of −12.0). Both measurements now fall
+well inside the loud part. A fault in the test, not in the player.
+
+**Full suites for 2.12.1:**
+
+| Run | Result |
+|---|---|
+| Native X11 | 431 passed, none failed |
+| Native X11, the path a graphics card takes (`CRTPLAYER_VIDEO_SURFACE=gl CRTPLAYER_FAST_PATH=never`) | 431 passed, none failed |
+| Native Wayland | 18 passed, none failed |
+| AppImage, X11, the system's Qt removed | 429 passed, **2 failed** (below) |
+| AppImage, Wayland, the system's Qt removed | 18 passed, none failed |
+
+### The two failed checks, and the fault behind them (not fixed in 2.12.1)
+
+Both are in the 2.11 Cable TV checks of the everyday suite, which, unlike the TV suite,
+do not pin the TV's clock: what is on when the test tunes in depends on the time of day
+the test runs. In this run it tuned in during a programme's first second.
+
+- *The sound's language carries over (721 and 880 Hz heard)*: the level meter's half
+  second included the moment of silence before the preferred sound track is switched
+  in. A fault in the test's timing.
+- *In TV mode, "at the end of this video" waits for the programme to end, then turns the
+  TV off*: **the programme never ended.** This one is a real fault in the player, and it
+  is older than 2.12:
+
+**A video that is played from its start to its end without a jump, with a subtitle track
+other than the first selected, does not end.** It stays on its last picture, "playing":
+the playlist does not go on, and a TV channel stays where it is.
+
+| Reproduced (a 30-second clip with two subtitle tracks, subtitles on) | 2.12.1 | 2.11.0 |
+|---|---|---|
+| Second subtitle track, played from the start | never ends | never ends |
+| Second subtitle track, after one jump (a seek) | ends | not run |
+| First subtitle track, played from the start | ends | ends |
+| Second *sound* track, subtitles off | ends | not run |
+
+In TV mode nearly every tune-in begins with a jump to where the broadcast is, which is
+why the TV checks had always passed: only a tune-in within a programme's first 3 seconds
+starts it from its top. Plain GStreamer (`gst-launch-1.0 playbin`) ends the same clip
+normally with its first subtitle track; the cause inside GStreamer's track selection was
+not established.
+
+It is **not fixed in 2.12.1**, which was held to the hardware-decoder fix. Until it is:
+a jump anywhere in the video (or *Next*) gets past it.
+
+
 ## 2.12: playback without a graphics card
 
 From real use: in a QEMU / virt-manager guest (Virtio video, no 3D acceleration, 12
@@ -500,8 +580,9 @@ before is kept).
 - **The four decoded frames kept at hand** hold on to that much more of the decoder's
   memory while the fast path is on (for 4K 10-bit, about 100 MB). Not measured, and not
   tried with a hardware decoder (there is none without a graphics card).
-- **With a real graphics card** nothing changes by default (*CPU fast path: Automatic*).
-  *Always* was not tested on a real graphics card.
+- **With a real graphics card** nothing was meant to change by default (*CPU fast path:
+  Automatic*). That was not tested, and it was wrong: 2.12.0 broke hardware decoding
+  (see 2.12.1 above). *Always* was not tested on a real graphics card.
 - **Windows:** not run. The same code applies there without a graphics card; untested.
 
 ## 2.11: subtitles that stay as set, and everyday playback

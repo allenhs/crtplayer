@@ -134,6 +134,7 @@ public:
     QSize fastOutput() const { return m_output == Output::RgbScaled ? m_fastSize : QSize(); }
     // The video as decoded (before any such scaling): size, pixel shape, format name. False until known.
     bool nativeFormat(int* width, int* height, int* parN, int* parD, QString* format = nullptr) const;
+    int sinkForeignMemoryEntries() const;
     // The frame as decoded that `shown` (a converted or scaled frame) was made from, or null
     // when it is no longer at hand. The caller unrefs it.
     GstSample* nativeSample(GstSample* shown);

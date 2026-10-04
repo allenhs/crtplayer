@@ -370,12 +370,23 @@ bool Player::openInternal(const QString& uri, bool autoplay, qint64 startNs, boo
     // playbin's own converter and scaler would otherwise oblige, on a single thread and at the
     // video's full size. Asked what it accepts, the sink says "any raw video"; it then does the
     // work itself, scaling first and on all cores.
+    // Any raw video in ordinary memory, that is. The scaler's template also lists video in any
+    // kind of memory (it can pass such frames through untouched); offered that, a hardware
+    // decoder keeps its frames on the graphics card (CUDA or OpenGL memory), where the scaler and
+    // converter cannot read them, and the decoder fails (2.12.0, with NVIDIA's decoders).
     gst_pad_add_probe(pad, GST_PAD_PROBE_TYPE_QUERY_DOWNSTREAM, [](GstPad* p, GstPadProbeInfo* info, gpointer) -> GstPadProbeReturn {
         GstQuery* q = GST_PAD_PROBE_INFO_QUERY(info);
         if (GST_QUERY_TYPE(q) != GST_QUERY_CAPS) return GST_PAD_PROBE_OK;
         GstCaps* filter = nullptr;
         gst_query_parse_caps(q, &filter);
-        GstCaps* any = gst_pad_get_pad_template_caps(p);
+        GstCaps* tmpl = gst_pad_get_pad_template_caps(p);
+        GstCaps* any = gst_caps_new_empty();
+        for (guint i = 0; i < gst_caps_get_size(tmpl); ++i) {
+            const GstCapsFeatures* f = gst_caps_get_features(tmpl, i);
+            if (f && (gst_caps_features_is_any(f) || !gst_caps_features_is_equal(f, GST_CAPS_FEATURES_MEMORY_SYSTEM_MEMORY))) continue;
+            gst_caps_append_structure(any, gst_structure_copy(gst_caps_get_structure(tmpl, i)));
+        }
+        gst_caps_unref(tmpl);
         GstCaps* res = filter ? gst_caps_intersect_full(filter, any, GST_CAPS_INTERSECT_FIRST) : gst_caps_ref(any);
         gst_query_set_caps_result(q, res);
         gst_caps_unref(res);
@@ -773,6 +784,31 @@ GstSample* Player::nativeSample(GstSample* shown)
         if (GST_BUFFER_PTS(it->buffer) == GST_BUFFER_PTS(b))
             return gst_sample_new(it->buffer, it->caps, gst_sample_get_segment(shown), nullptr);
     return nullptr;
+}
+
+// What the video sink tells the decoder it accepts: the number of entries that are not plain
+// raw video in ordinary memory (must be 0), or -1 when there is no sink to ask.
+int Player::sinkForeignMemoryEntries() const
+{
+    if (!m_pipe) return -1;
+    GstElement* sink = nullptr;
+    g_object_get(m_pipe, "video-sink", &sink, nullptr);
+    if (!sink) return -1;
+    GstPad* pad = gst_element_get_static_pad(sink, "sink");
+    gst_object_unref(sink);
+    if (!pad) return -1;
+    GstCaps* caps = gst_pad_query_caps(pad, nullptr);
+    gst_object_unref(pad);
+    if (!caps) return -1;
+    int foreign = gst_caps_is_any(caps) ? 1 : 0;
+    for (guint i = 0; i < gst_caps_get_size(caps); ++i) {
+        const GstCapsFeatures* f = gst_caps_get_features(caps, i);
+        const bool plain = !f || (!gst_caps_features_is_any(f) && gst_caps_features_is_equal(f, GST_CAPS_FEATURES_MEMORY_SYSTEM_MEMORY));
+        if (!plain || !gst_structure_has_name(gst_caps_get_structure(caps, i), "video/x-raw")) ++foreign;
+    }
+    if (gst_caps_is_empty(caps)) foreign = -1;
+    gst_caps_unref(caps);
+    return foreign;
 }
 
 bool Player::nativeFormat(int* width, int* height, int* parN, int* parD, QString* format) const
