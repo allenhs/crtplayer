@@ -531,7 +531,9 @@ void DeskView::paintGL()
     // CRT output rendered to a texture shaped like the glass; curvature comes from the
     // real geometry here, so the flat bulge and corners are turned off.
     const QRectF gr = m_desk.glassRect(pose, vp);
-    const int texH = std::clamp(int(std::ceil(std::max(gr.height(), gr.width() / g.displayAspect) / 64.0)) * 64, 256, 2160);
+    // (in whole 64s; a glass with no sensible size, as for a moment while the window is being set up, gets the smallest)
+    const double wantH = std::ceil(std::max(gr.height(), gr.width() / g.displayAspect) / 64.0) * 64.0;
+    const int texH = std::isfinite(wantH) ? int(std::clamp(wantH, 256.0, 2160.0)) : 256;
     const QSize texSize(std::clamp(int(texH * g.displayAspect), 64, 4096), texH);
     m_glassSize = texSize;
     ViewSettings gvs = vs;

@@ -8,6 +8,7 @@
 #include "GlSurfaceWidget.h"
 #include <gst/gst.h>
 #include <QTimer>
+#include "render/NvEnhancer.h"
 
 class Player;
 class QLabel;
@@ -131,6 +132,10 @@ private:
     bool plainPaintable() const;
     GstSample* m_curSample = nullptr;   // the frame on screen (a reference)
     bool m_enhUp = false, m_enhMotion = false;
+    NvEnhancer m_nv;
+    bool m_nvOn = false;
+    int m_nvQuality = 3, m_nvMode = 1;
+    QTimer m_nvTimer;                     // while the helper is starting: looks for its answer
     double m_enhSharp = 0.5;
     double m_lastPhase = 1.0;
     quint64 m_phaseDraws = 0, m_betweenDraws = 0;
@@ -219,7 +224,15 @@ public:
     bool smoothMotionUseful() const;       // wanted, available, and the screen refreshes clearly faster than the video's frames come
     bool smoothMotionRunning() const;      // frames are being generated between the video's own
     QJsonObject enhanceReport() const;
-    QImage grabBetween(double t, int mode);   // the picture at phase t between the frame before and this one (mode 1: a plain mix)
+    QImage grabBetween(double t, int mode);
+    // 2.15: NVIDIA's Video Super Resolution and Video Frame Generation in place of the built-in
+    // methods, where the NVIDIA Video Effects SDK is installed (see NvEnhancer.h).
+    void setNvidiaInstall(const NvEnhancer::Install& in);
+    void setNvidia(bool on, int quality, int mode);
+    void nvidiaForgive();                 // a new video: what failed before may be tried again
+    const NvEnhancer& nvidia() const { return m_nv; }
+    bool nvidiaUpscaling() const;         // the picture on screen was upscaled by NVIDIA's
+    bool nvidiaMotion() const;            // frames between are NVIDIA's   // the picture at phase t between the frame before and this one (mode 1: a plain mix)
 private:
     bool m_softwareGl = false;
     int m_paintN = 0;

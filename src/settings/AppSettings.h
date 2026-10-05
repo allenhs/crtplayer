@@ -70,6 +70,9 @@ struct AppSettings {
     bool enhanceUpscale = false;       // Enhance: sharper upscaling with effects off (graphics card)
     double enhanceSharpness = 0.5;
     bool smoothMotion = false;         // Enhance: frame generation (graphics card)
+    bool enhanceNvidia = true;         // Enhance: NVIDIA's AI methods for both, where the NVIDIA Video Effects SDK is installed
+    int nvidiaQuality = 3;             // Video Super Resolution: 1 low .. 4 ultra
+    int nvidiaMotion = 1;              // Video Frame Generation: 0 low, 1 medium, 2 high
     int videoPath = 0;                 // without a graphics card: 0 the fast path when effects are off, 1 always, 2 never
     QString hiddenPluginNotice;   // the missing-plugin list the user chose not to see again
     QStringList recentFiles;   // local files, most recent first (max 15)   // 0 CRT television, 1 flat-face CRT, 2 flat panel

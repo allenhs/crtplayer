@@ -34,6 +34,7 @@ signals:
     // 2.13: Enhance
     void enhanceUpscaleChanged(bool on);
     void enhanceSharpnessChanged(double v);   // 0 .. 1
+    void nvidiaChanged(bool on, int quality, int mode);   // 2.15
     void smoothMotionChanged(bool on);
     void autoNextChanged(bool on);
     void sleepTimerChanged(int minutes);    // 0 off, -1 at the end of this video
@@ -48,6 +49,8 @@ public:
     void setLookDetail(int mode);
     void setEnhance(bool upscale, double sharpness, bool smoothMotion);
     void setEnhanceStatus(bool available, const QString& status);
+    void setNvidia(bool on, int quality, int mode);
+    void setNvidiaStatus(bool installed, const QString& status);
     void setAutoNext(bool on);
     void setSleepTimer(int minutes, const QString& status);   // the choice, and what is left ("" when off)
     void setKeepAwake(bool on);
@@ -75,6 +78,12 @@ private:
     QCheckBox* m_enhMotion = nullptr;
     class QSlider* m_enhSharp = nullptr;
     class QLabel* m_enhStatus = nullptr;
+    QCheckBox* m_nvOn = nullptr;
+    class QComboBox* m_nvQuality = nullptr;
+    class QComboBox* m_nvMode = nullptr;
+    class QLabel* m_nvStatus = nullptr;
+    class QWidget* m_nvRows = nullptr;
+    bool m_enhAvailable = true, m_nvInstalled = false;
     QComboBox* m_videoPath = nullptr;
     QComboBox* m_lookDetail = nullptr;
     QCheckBox* m_autoNext = nullptr;

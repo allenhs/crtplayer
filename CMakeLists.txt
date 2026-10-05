@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(CRTPlayer VERSION 2.14.0 LANGUAGES C CXX)
+project(CRTPlayer VERSION 2.15.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -58,6 +58,7 @@ add_executable(crtplayer
   src/playback/Player.cpp     src/playback/Player.h
   src/render/CrtRenderer.cpp
     src/render/Enhance.cpp  src/render/CrtRenderer.h
+  src/render/NvEnhancer.cpp   src/render/NvEnhancer.h
   src/render/GlSurfaceWidget.cpp src/render/GlSurfaceWidget.h
   src/render/VideoWidget.cpp  src/render/VideoWidget.h
   src/render/ViewSettings.h
@@ -105,8 +106,32 @@ endif()
 target_compile_definitions(crtplayer PRIVATE CRTPLAYER_VERSION="${PROJECT_VERSION}")
 install(TARGETS crtplayer RUNTIME DESTINATION bin)
 
+# NVIDIA's AI methods for Enhance (Linux): a helper program beside the player. It opens the
+# NVIDIA Video Effects SDK at run time, from wherever the user installed it; nothing of the
+# SDK is needed to build it (the three API headers in third_party/nvidia-vfx are MIT-licensed).
+# Its C++ runtime is linked in, so that the SDK's libraries meet no second copy of it.
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+  add_executable(crtplayer-nvfx
+    tools/nvfx/main.cpp tools/nvfx/Serve.cpp
+    tools/nvfx/NvFx.cpp tools/nvfx/NvFx.h tools/nvfx/NvShm.h
+    tools/nvfx/NvProxy.cpp tools/nvfx/NvProxy.h)
+  set_target_properties(crtplayer-nvfx PROPERTIES AUTOMOC OFF AUTORCC OFF CXX_VISIBILITY_PRESET hidden)
+  target_include_directories(crtplayer-nvfx PRIVATE third_party/nvidia-vfx)
+  target_link_libraries(crtplayer-nvfx PRIVATE ${CMAKE_DL_LIBS} pthread)
+  # (Some distributions keep the static C++ runtime in a package of its own: without it, the shared one.)
+  include(CheckCXXSourceCompiles)
+  set(CMAKE_REQUIRED_LINK_OPTIONS -static-libstdc++ -static-libgcc)
+  check_cxx_source_compiles("#include <string>\nint main() { std::string s(\"x\"); return int(s.size()) - 1; }" CRTPLAYER_STATIC_CXX_RUNTIME)
+  unset(CMAKE_REQUIRED_LINK_OPTIONS)
+  if(CRTPLAYER_STATIC_CXX_RUNTIME)
+    target_link_options(crtplayer-nvfx PRIVATE -static-libstdc++ -static-libgcc)
+  endif()
+  install(TARGETS crtplayer-nvfx RUNTIME DESTINATION bin)
+endif()
+
 if(CRTPLAYER_BUILD_TESTS)
   enable_testing()
+  find_package(Python3 COMPONENTS Interpreter)
   add_executable(test_geometry tests/test_geometry.cpp)
   target_link_libraries(test_geometry PRIVATE crtcore)
   add_test(NAME geometry COMMAND test_geometry)
@@ -132,6 +157,19 @@ if(CRTPLAYER_BUILD_TESTS)
   target_include_directories(test_gif PRIVATE src)
   target_link_libraries(test_gif PRIVATE Qt6::Core Qt6::Gui)
   add_test(NAME gif COMMAND test_gif)
+  if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND Python3_Interpreter_FOUND)
+    # The helper against a stand-in for the SDK (plain arithmetic in place of the AI models).
+    set(NVFX_MOCK ${CMAKE_CURRENT_BINARY_DIR}/nvfx-mock-sdk)
+    file(MAKE_DIRECTORY ${NVFX_MOCK}/lib ${NVFX_MOCK}/features/nvvfxvideosuperres/lib ${NVFX_MOCK}/features/nvvfxvideoframegeneration/lib)
+    add_library(NVCVImage SHARED tests/nvfx_mock/mock_image.cpp)
+    add_library(VideoFX SHARED tests/nvfx_mock/mock_vfx.cpp)
+    target_link_libraries(VideoFX PRIVATE NVCVImage)
+    foreach(t NVCVImage VideoFX)
+      target_include_directories(${t} PRIVATE third_party/nvidia-vfx)
+      set_target_properties(${t} PROPERTIES AUTOMOC OFF AUTORCC OFF CXX_VISIBILITY_PRESET hidden LIBRARY_OUTPUT_DIRECTORY ${NVFX_MOCK}/lib)
+    endforeach()
+    add_test(NAME nvfx COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/nvfx_serve_test.py $<TARGET_FILE:crtplayer-nvfx> ${NVFX_MOCK})
+  endif()
   # Command-line front end to the lossless cutter, for the verification scripts.
   add_executable(cut_tool tests/cut_tool.cpp src/edit/LosslessCutter.cpp src/edit/LosslessCutter.h)
   target_include_directories(cut_tool PRIVATE src)

@@ -10,20 +10,20 @@ PASS  the next video: the same languages, wherever they are in the file: subtitl
 PASS  a video without subtitles in between changes nothing: back at the first video: subtitles en, sound track 2 (ja, 880 Hz heard)
 PASS  turned off, they stay off in the next video: track -1; the sound is still ja
 PASS  a subtitle file next to the video is not shown while subtitles are off, and is there as soon as they are on: subs_clip.srt: off, then on (bottom of the picture changed by 6.10)
-PASS  subtitle delay −1.5 s: the line is on screen before its stored time: at 3.3 s the line shows (stored from 4 s; at 3 s without the delay: not shown)
-PASS  subtitle delay +1.5 s: the line comes later and stays later: at 4.8 s not yet shown (without the delay it is, at 4.5 s); at 6.7 s still shown (stored until 6 s)
+PASS  subtitle delay −1.5 s: the line is on screen before its stored time: at 3.2 s the line shows (stored from 4 s; at 3 s without the delay: not shown)
+PASS  subtitle delay +1.5 s: the line comes later and stays later: at 4.8 s not yet shown (without the delay it is, at 4.5 s); at 6.6 s still shown (stored until 6 s)
 PASS  size: small, normal, very large: the text is 2.7%, 4.0% and 6.5% of the picture's height
 PASS  colour: yellow: 97% of the bright text pixels are yellow (0% when white)
 PASS  behind the text: a dark box: 71% of the text's rectangle is dark with the box, 14% with the outline
 PASS  position: bottom, raised, top: the text starts 89%, 77% and 6% of the way down
 PASS  sound delay +400 ms: the sound is held back: sound output delayed 400 ms, picture 0 ms
-PASS  sound delay −400 ms: the picture is held back instead (measured on the frames): picture output delayed 400 ms; frames arrive 396 ms later against the sound's clock than before
+PASS  sound delay −400 ms: the picture is held back instead (measured on the frames): picture output delayed 400 ms; frames arrive 400 ms later against the sound's clock than before
 PASS  the sound delay carries over to the next video; a subtitle delay does not: sound 100 ms; subtitles 700 ms -> 0 ms in the next video
 PASS  interlaced video is deinterlaced: combing -0.12 deinterlaced, 2.98 as stored
 PASS  switched off, the frames are shown as stored: deinterlacing: False
 PASS  progressive video is never touched: setting on, deinterlacing: False
 PASS  night mode lifts the quiet part and holds down the loud part: quiet -46.0 -> -32.0 dB, loud -12.0 -> -15.8 dB: 16.2 dB apart instead of 34.0
-PASS  shuffle: every video once, then the end: a → b → e → c → d; then paused
+PASS  shuffle: every video once, then the end: a → b → c → e → d; then paused
 PASS  repeat the playlist: after the last video, the first: e → a
 PASS  repeat this video: the same one again: a → a → a
 PASS  the playlist saves as an .m3u8 file and opens again: 5 entries loaded, playing short_a.mp4

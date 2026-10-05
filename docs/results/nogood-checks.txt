@@ -2,7 +2,7 @@ player exit code 0
 PASS  --check-gstreamer: nothing essential missing: the core is there
 PASS  --check-gstreamer: names the Arch package and command: pacman command shown
 PASS  the player starts without the good plugins: it ran instead of refusing
-PASS  an Ogg (Theora/Vorbis) file plays with the base plugins: playing, 6 frames
+PASS  an Ogg (Theora/Vorbis) file plays with the base plugins: playing, 7 frames
 PASS  audio uses a fallback output: none
 PASS  it reports what will not work: MP4 / MOV files [gst-plugins-good] | MKV / WebM files [gst-plugins-good] | network streams (Jellyfin) [gst-plugins-good]
 PASS  an MP4 fails with the Arch fix in the message:   • Quicktime demuxer

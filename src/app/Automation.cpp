@@ -302,12 +302,35 @@ void Automation::next()
         if (what == "upscale") { m_w->setEnhanceUpscale(a.value(2) == "on"); log(line); }
         else if (what == "sharp") { m_w->setEnhanceSharpness(a.value(2).toDouble()); log(line); }
         else if (what == "motion") { m_w->setSmoothMotion(a.value(2) == "on"); log(line); }
+        // enhance nvidia on|off | nvquality 1..4 | nvmode 0..2 | nvwait STATE TIMEOUT_MS (ready, failed, stopped, off, idle: NVIDIA's helper)
+        else if (what == "nvidia") { m_w->setEnhanceNvidia(a.value(2) == "on", m_w->settings().nvidiaQuality, m_w->settings().nvidiaMotion); log(line); }
+        else if (what == "nvquality") { m_w->setEnhanceNvidia(m_w->settings().enhanceNvidia, a.value(2).toInt(), m_w->settings().nvidiaMotion); log(line); }
+        else if (what == "nvmode") { m_w->setEnhanceNvidia(m_w->settings().enhanceNvidia, m_w->settings().nvidiaQuality, a.value(2).toInt()); log(line); }
+        else if (what == "nvwait") {
+            const QString want = a.value(2);
+            const int timeout = a.value(3, "8000").toInt();
+            const qint64 t0 = m_clock.elapsed();
+            auto* poll = new QTimer(this);
+            poll->setInterval(20);
+            connect(poll, &QTimer::timeout, this, [=] {
+                const QString st = m_w->video()->nvidia().stateName();
+                if (st == want || m_clock.elapsed() - t0 > timeout) {
+                    poll->deleteLater();
+                    if (st != want) ++m_failures;
+                    log(line, {{"ok", st == want}, {"state", st}, {"waitedMs", double(m_clock.elapsed() - t0)}});
+                    QTimer::singleShot(10, this, &Automation::next);
+                } else m_w->video()->update();
+            });
+            poll->start();
+            return;
+        }
         else if (what == "grab") {
             const QImage img = m_w->video()->grabBetween(a.value(2).toDouble(), a.value(4) == "mix" ? 1 : a.value(4) == "flow" ? 2 : a.value(4) == "flowback" ? 3 : 0);
             const bool ok = !img.isNull() && img.save(a.value(3));
             log(line, {{"ok", ok}});
         } else log(line, {{"ok", false}});
     }
+    else if (cmd == "infooverlay") { m_w->setInfoOverlay(a.value(1) != "off"); log(line); }   // the technical info overlay (I)
     else if (cmd == "profile") { m_w->video()->setProfiling(a.value(1) != "off"); log(line); }   // per-stage timing (see report: profile)
     else if (cmd == "hw") { p->setHardwareDecoding(a.value(1) == "on"); log(line); }
     else if (cmd == "moment") {

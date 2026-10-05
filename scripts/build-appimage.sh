@@ -49,6 +49,9 @@ cmake -S "$HERE" -B "$BUILD" -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/
 cmake --build "$BUILD" -j"$(nproc)"
 DESTDIR="$APPDIR" cmake --install "$BUILD" > /dev/null
 strip "$APPDIR/usr/bin/crtplayer"
+# The helper for NVIDIA's AI methods (it needs nothing of the bundle: its C++ runtime is linked in).
+[ -f "$APPDIR/usr/bin/crtplayer-nvfx" ] || { echo "ERROR: crtplayer-nvfx was not built" >&2; exit 1; }
+strip "$APPDIR/usr/bin/crtplayer-nvfx"
 install -Dm644 "$HERE/packaging/io.github.crtplayer.desktop" "$APPDIR/usr/share/applications/io.github.crtplayer.desktop"
 install -Dm644 "$HERE/packaging/crtplayer.png" "$APPDIR/usr/share/icons/hicolor/512x512/apps/crtplayer.png"
 
@@ -90,6 +93,11 @@ for so in "$APPDIR"/usr/plugins/wayland-graphics-integration-client/*.so; do
     done
 done
 
+# The helper must not depend on the bundle (it runs NVIDIA's libraries, with the system's own beneath them).
+patchelf --remove-rpath "$APPDIR/usr/bin/crtplayer-nvfx"
+if readelf -d "$APPDIR/usr/bin/crtplayer-nvfx" | grep -E "RUNPATH|RPATH|libstdc\+\+|libQt6" ; then
+    echo "ERROR: crtplayer-nvfx is tied to the bundle or to a C++ runtime" >&2; exit 1
+fi
 # Safety net: nothing from the host-only list may end up in the bundle.
 for pat in "${EXCLUDES[@]}"; do
     find "$APPDIR/usr/lib" -maxdepth 1 -name "$pat" -print -delete | sed 's/^/   removed host-only library: /'

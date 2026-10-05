@@ -81,6 +81,7 @@ void MainWindow::applyEverydaySettings()
     m_playbackPanel->setVideoPath(m_settings.videoPath);
     m_playbackPanel->setLookDetail(m_settings.lookDetail);
     m_playbackPanel->setEnhance(m_settings.enhanceUpscale, m_settings.enhanceSharpness, m_settings.smoothMotion);
+    m_playbackPanel->setNvidia(m_settings.enhanceNvidia, m_settings.nvidiaQuality, m_settings.nvidiaMotion);
     applyEnhance();
     m_playbackPanel->setAutoNext(m_settings.autoNext);
     m_playbackPanel->setSleepTimer(0, QString());

@@ -1,6 +1,6 @@
 # Verification report
 
-This report covers the build delivered alongside it (CRT Player 2.14.0).
+This report covers the build delivered alongside it (CRT Player 2.15.0).
 
 The final X11 and Wayland suites were run against the exact stripped `crtplayer` binary
 that is delivered, and **again against the AppImage with the system's Qt libraries
@@ -20,7 +20,10 @@ This environment differs from Bazzite in important ways.
 | Wayland | Weston 13 headless compositor with its GL renderer, 1600×900 (Qt platform `wayland`) |
 | Audio | PulseAudio with a null sink. A real audio sink drives the clock (`GstPulseSinkClock`), but no sound device exists |
 
-**The binary has not been run on Bazzite, on a real GPU, or with hardware decoding.**
+**The checks in this report were not run on Bazzite, on a real GPU, or with hardware
+decoding.** (The player's user runs it on Bazzite with an NVIDIA card; faults found there
+are reported in the sections of the releases that fixed them, and the one part of 2.15
+that needs an NVIDIA card was run there and is reported in that section.)
 
 ## Samples tested
 
@@ -286,6 +289,294 @@ was **not measured**, because there is no GPU in this environment.
 - GPU performance;
 - the interlaced style's look at real refresh rates (only its field alternation was
   measured).
+
+## 2.15: NVIDIA AI for Enhance (Video Super Resolution, Video Frame Generation); an A-B loop that stopped at the video's end
+
+Asked for: NVIDIA's AI upscaling and frame generation as an optional part of Enhance, for
+an RTX card on Bazzite, with the built-in methods where NVIDIA's are not there.
+
+### What could be tested here, and what could not
+
+**This machine has no NVIDIA card, and NVIDIA's SDK cannot run on it.** Everything below
+under "Results" was done with a **stand-in for the SDK** (`tests/nvfx_mock`): two small
+libraries with the SDK's names and the functions the helper calls, whose "super
+resolution" is a plain enlargement and whose "frame generation" is a plain mix of the two
+frames. The player, its helper program, the traffic between them, the shared memory, the
+textures and every failure path are the real ones. **What the stand-in cannot show is
+anything about NVIDIA's models or NVIDIA's libraries themselves:** that part was run by
+the user on the machine it was written for, and is reported under "On the real card".
+
+### What was built
+
+**A helper program, `crtplayer-nvfx`** (`tools/nvfx`, no Qt; in the AppImage and beside
+the plain binary). The player does not load NVIDIA's libraries: the helper does, so that a
+fault in them cannot take the player down, and so that they meet nothing of the player's
+Qt or the AppImage's bundle.
+
+- It opens the SDK at run time from wherever it is installed (`NvProxy.cpp`, as NVIDIA's
+  own samples do): nothing of the SDK is needed to build, and nothing of it is in the
+  source or the downloads. It starts itself a second time with the SDK's folders on the
+  library path. Its C++ runtime is linked in; it needs only the C library.
+- `--serve`: at work for the player (below). `--where`: where the SDK is and which
+  features it has, without loading it. `--probe`: both effects on test pictures at
+  several sizes and settings, with the time for each picture, how close the result is to
+  the true picture, and crops to look at.
+- **The two effects together** (`NvPipeline` in `NvFx.cpp`): the frame is upscaled first
+  and frames are generated at the larger size. Super resolution then sees only real,
+  consecutive frames, and a generated picture costs one step instead of two. The upscaled
+  frame is handed to frame generation on the card; if the card refuses that, it goes
+  through ordinary memory instead (decided by a trial run on blank pictures when the
+  effects are opened, which also catches a fault there and not on the first frame).
+
+**Between player and helper** (`src/render/NvEnhancer.*`, `tools/nvfx/NvShm.h`): one
+socket carrying lines of text, and a block of shared memory for the pictures (the video's
+frame in, two picture slots out). Answers come in the order of the requests, so the
+player may ask before it has read the last answer.
+
+- Starting the helper and opening the effects (a few hundred milliseconds) never hold
+  the player up: the draw is done with the built-in methods until they are ready.
+- A helper that does not answer within a second and a half is stopped. A helper that has
+  stopped is started again after three seconds, four times at most. A set of effects that
+  could not be opened is tried again after five seconds, three times at most. A new video
+  or a changed setting clears these counts.
+- A window being resized asks for a new size at every draw: the effects are opened for
+  the size it settles at (a quarter of a second without change).
+- What the helper and NVIDIA's libraries print goes to `~/.cache/CRTPlayer/CRTPlayer/nvfx.log`.
+
+**In the renderer** (the last part of `src/render/Enhance.cpp`): each of the video's
+frames is read back from the picture texture and given to the helper; its pictures are
+put into the textures the built-in methods would have filled.
+
+- Effects off and the picture enlarged: the upscaled picture comes from the helper whole,
+  at the draw's moment between two frames when smooth motion is on.
+- With a look, or with nothing to upscale: frames between come from it at the video's
+  size, and everything downstream works from them as from any frame.
+- **While the video plays with smooth motion, a draw shows the picture asked for at the
+  draw before** and asks for its own, which the next draw shows. The helper then works
+  while the player draws instead of the player waiting for it; the price is one refresh
+  of the screen of delay (8 ms at 120 Hz), which is not added to the sound's delay. A
+  draw on its own (paused, a screenshot, draws more than 50 ms apart) asks and waits.
+- Whenever the helper has no picture to give, that draw is done by the built-in methods.
+- Super resolution is asked for the size the picture is shown at, by the same factor in
+  both directions (at most four times), in even numbers.
+
+**In the settings** (*Playback → Enhance*): *Use NVIDIA AI for both (RTX graphics cards)*,
+on by default; *AI upscaling* Low / Medium / High / Ultra (default High); *AI motion*
+Fast / Balanced / Best (default Balanced); and a line that says what is going on (not
+installed; ready; at work, with the sizes, the milliseconds a picture and a frame cost,
+and the pictures drawn a second; or why it could not be used). The same line is in the
+**I** overlay. The two boxes above still turn upscaling and smooth motion on and off.
+
+### On the real card
+
+Run by the user: Bazzite (`bazzite-nvidia-open`, KDE, Wayland), RTX 4090, driver
+615.71.09, a 3840×2160 screen at 120 Hz, NVIDIA Video Effects SDK 1.3.0 installed in an
+Ubuntu box and copied to `~/.local/share/crtplayer/VideoFX`.
+
+**`crtplayer-nvfx --probe`** ran all 22 cases, inside the box and on Bazzite itself with
+the same times. A test scene whose true pictures are known; times for one picture, going
+in from and coming back to ordinary memory:
+
+| Video Super Resolution | Time | Against the true picture (a plain enlargement) |
+|---|---|---|
+| 1920×1080 to 3840×2160, High | 5.2 ms | 40.8 dB (36.0) |
+| the same, Low / Ultra | 3.8 / 5.9 ms | 38.3 / 40.7 dB |
+| the same, NVIDIA's two "streaming" settings | 4.1 / 7.1 ms | 31.2 / 29.9 dB: **worse than plain** on this scene; not offered in the settings |
+| 1280×720 to 2560×1440, and to 3840×2160, High | 2.4 / 3.9 ms | 37.0 (30.3) / 35.5 (30.6) dB |
+| 720×480 three and four times, 640×360 three times, High | 1.6 / 2.3 / 1.1 ms | 25.2 (26.1) / 25.1 (25.9) / 24.5 (25.1) dB: **slightly below plain** on this scene |
+
+| Video Frame Generation, one generated picture | Fast | Balanced | Best | Against the true in-between (a plain mix 18.1 dB) |
+|---|---|---|---|---|
+| 1920×1080 | 1.6 ms | 2.2 ms | 7.0 ms | 24.7 / 22.4 / 25.0 dB |
+| 1280×720 | | 1.5 ms | 6.4 ms | 22.3 / 25.3 dB |
+| 3840×2160 | 5.6 ms | 6.1 ms | 11.1 ms | 24.1 / 22.4 / 24.6 dB |
+
+The crops were looked at: the generated frame has the moving disc cleanly halfway, where
+the plain mix shows it twice; the upscaled stripes are sharper than the plain ones.
+On this scene the Fast model was closer to the true picture than Balanced; the scene is
+synthetic (flat shapes on a moving background), so nothing is concluded from that for
+real video, and NVIDIA's default (Balanced) is the player's.
+
+**In the player** (a test build of this release, from its AppImage), the user's report:
+"it works". The line in the settings at that moment: *NVIDIA AI at work: upscaling
+576×1024 to 1032×1836 (high), smooth motion (fast). 2.8 ms a picture, 0.8 ms a frame of
+the video. 107 pictures a second on a 120 Hz screen.* That one report shows, on NVIDIA's
+real libraries: the helper found and started from the AppImage on Bazzite; both effects
+together, upscaled first and generated at the larger size; an enlargement that is not a
+whole number (1.79 times); and pictures taken from one draw to the next.
+
+**Not shown by it:** 107 of 120, so about one refresh in nine went without a new picture
+there, and why is not known (the settings panel was open; the time per picture was a
+third of what a refresh allows). 1080p to 4K at full screen, and the Balanced and Best
+models at 4K, were measured only by the probe, not in the player. How NVIDIA's pictures
+look on real films was judged by the user's eye on NVIDIA's own sample programs ("sharper
+and smoother"), not measured.
+
+### Results
+
+**The helper alone** (`tests/nvfx_serve_test.py`, run by `ctest` as `nvfx`, against the
+stand-in): 48 checks, all passed. Among them:
+
+| Check | Result |
+|---|---|
+| `hello`: the SDK's version and both features | PASS |
+| Super resolution alone: the picture at the larger size, channels in place, rows packed, the next slot untouched | PASS |
+| Frame generation alone: a quarter of the way between two frames; at 0 the frame before and at 1 the newest, as they are | PASS |
+| The pair moves on with each frame; across a cut nothing is generated (the nearer real frame) | PASS |
+| Requests sent together are answered in order, each with its own picture | PASS |
+| Both: generated between two upscaled frames, on the card; the same through ordinary memory when the card refuses | PASS (`card=1`, `card=0`) |
+| An effect that cannot be loaded: refused with the reason, and the helper is still there for what does work | PASS |
+| Sizes out of range, a size the effect refuses, shared memory that is not there, an unknown request | PASS: each refused, none fatal |
+| The helper dying shows as a closed connection; it leaves when the player's end closes | PASS |
+| No SDK, and an SDK that cannot be loaded: it says why | PASS |
+
+**In the player** (`tests/automation/nvidia*.txt`, `scripts/check-nvidia.py`; the stand-in
+stamps the top left corner of what it makes: super resolution a red square and a blue
+one, frame generation a green one below): 42 checks, all passed in every full run
+below. Among them:
+
+| Check | Result |
+|---|---|
+| A 960×540 video shown at 1920×1080: the effects are opened for exactly that | PASS |
+| The picture on screen is the helper's: its stamp in the top left corner, the right way up, in the right colours | PASS |
+| Away from the stamp it is the same frame as the built-in upscaler shows | PASS: mean difference 2.6 of 255 |
+| Paused, each frame is sent once and its picture taken once | PASS |
+| Switched off, the built-in upscaler is back and the helper is gone; on again, it is back | PASS |
+| Another quality opens the effects anew; a CRT look is left alone | PASS |
+| Between two frames: the stand-in's mix with its stamp; a quarter of the way is a quarter; at 0 and 1 the real frames, exactly | PASS: largest differences 0 |
+| Playing, effects off, full screen: upscaled, and frames generated at the larger size | PASS: 960×540 to 1920×1080, about 50 pictures taken, none of the draws without |
+| Paused: the real frame, upscaled, not a generated one | PASS |
+| Playing with a look, and in a window with upscaling off: frames between at the video's size | PASS |
+| Draws that follow one another take the picture asked for at the draw before | PASS: 0.1 ms waited for a picture on average, the helper taking 1.3 ms to make one |
+| A 60 frames a second video on a 60 Hz screen: nothing asked of the helper | PASS |
+| Switched off while playing, the built-in frame generation carries on; on again, the helper's | PASS |
+| The choices are kept from one run to the next | PASS |
+
+Software OpenGL draws too slowly here for draws to count as following one another
+quickly, so in the main run they are made to (`CRTPLAYER_NVFX_QUICK_MS=1000`); the fault
+runs below use the player as it is.
+
+**Things going wrong** (the same short script, playing full screen with both on, with one
+fault each):
+
+| Fault | Result |
+|---|---|
+| The card cannot hand a picture from one effect to the other | PASS: through ordinary memory; the helper's pictures as before |
+| The helper takes 25 ms longer for everything | PASS: still its pictures |
+| An effect cannot be loaded; cannot be created | PASS: the reason kept, three tries, then left; the built-in upscaler does the work |
+| The helper dies in the middle of the video | PASS: playback carries on with the built-in methods; the helper is started again |
+| The helper gets stuck | PASS: stopped after a second and a half; the player's longest pause 2 to 3 s here; playback carries on |
+| No SDK; no helper program; `CRTPLAYER_NVFX_OFF=1` | PASS: nothing is started |
+
+No helper process and no shared memory was left behind after any run.
+
+**With AddressSanitizer and UndefinedBehaviorSanitizer** (player, helper and stand-in all
+built with them): the helper's 48 checks passed; the player suite ran through with no
+report in the new code. One check failed there, *some of them generated*: at that speed
+every draw falls on a real frame. Two reports in older code were fixed (below).
+
+**The AppImage's helper** is found and used both with the system's Qt (the player then
+runs from another folder of the AppImage) and with the bundled Qt: the suite passes with
+each.
+
+**Full suites for 2.15.0:**
+
+| Run | Result |
+|---|---|
+| Unit tests (`ctest`) | 8 of 8 passed |
+| Native X11 | 513 passed, **4 failed** (speed, below) |
+| Native X11, the path a graphics card takes (`CRTPLAYER_VIDEO_SURFACE=gl CRTPLAYER_FAST_PATH=never`) | 511 passed, **7 failed** (the same four; two NVIDIA checks that were themselves at fault; one Jellyfin check) |
+| Native Wayland | 18 passed, none failed |
+| AppImage, X11, the system's Qt removed | 512 passed, **5 failed** (the same four; one subtitle check) |
+| AppImage, Wayland, the system's Qt removed | 18 passed, none failed |
+
+43 more checks than 2.14: the 42 NVIDIA checks and the loop check.
+
+**The four that fail in every X11 run are the test machine's speed**, as in 2.14: the
+speed checks of the no-graphics-card suite run through the OpenGL widget (software
+OpenGL). *1080p plays at full rate* 22.6, 19.8 and 20.5 frames a second in the three
+runs, *4K* 15.4, 14.2 and 15.1, *fullscreen 1080p* 12.1, 12.0 and 11.2, *twelve changes
+of size and look* 22.8, 21.4 and 22.6; the 2.14 release measured 21.6, 15.8, 11.3 and
+21.5, and the 2.13.0 binary run beside it the same. The same checks on the default path
+without a graphics card pass at 28 to 30 frames a second in every run.
+
+**Two NVIDIA checks failed once, and the checks were wrong, not the player.** In the fault
+runs the video goes round in an A-B loop, and the checks required the player to say
+"playing" at the moment of the report; while the loop jumps back it says "paused" for a
+moment, and in that run two reports fell on such a moment (*a helper that takes 25 ms
+longer*, *no helper program*). The checks now ask whether frames kept coming. Evaluated
+again on that run's own recordings, all 42 pass; the later AppImage run used the corrected
+checks.
+
+**Two failures that are not explained**, each once, in different runs, neither in code
+that 2.15 changes (the playback code, `Player`, is as in 2.14):
+
+- *Jellyfin 10.8: a converted video resumes at its saved position*: 2,135 ms, where 12 s
+  was saved. The server's log of that run shows the stream fetched from its beginning
+  (segments 0 to 6) and no jump. The same check passed in this release's other runs (17.2,
+  16.0 and, for 10.10, 17.0, 14.7 and 15.7 s) and in all 40 runs kept from the releases
+  since 2.8. The jump to the saved position is asked for once, when the stream first
+  reports ready, and a refusal at that moment would go unnoticed: that is the suspect, not
+  a finding.
+- *With subtitles on, the sidecar subtitle file is loaded by itself and drawn into the
+  picture* (AppImage run): the screenshot taken after a jump to 5 s and a pause had no
+  subtitle line in it. It passed in the two native runs here and in the 14 recorded runs
+  before. The known limit that a line already on screen at a jump comes back only with
+  the next line (README, *No subtitles*) produces exactly this if the jump lands a moment
+  late; that, too, is a suspect only.
+
+Both were on a machine that was slower than usual during these runs (the speed checks
+above). They are listed so that a second sighting is recognised.
+
+### Faults found on the way, and fixed
+
+- **An A-B loop stopped when it reached the video's end** (since 1.8). The loop is closed
+  by a look at the position several times a second; with the loop's end at the video's
+  end, or the player busy for a moment near it, the end of the video came first:
+  playback stopped, paused at the loop's start. Found because the fault runs with a stuck
+  helper kept ending "paused at 200 ms". Now the end of the video inside a loop goes
+  round as well. A check was added (`polish.txt`: a loop from 0.5 s to the end of a 3 s
+  video is still playing after seven seconds); **the 2.14.0 binary fails it** (*paused at
+  500 ms*).
+- **Two things the sanitizer pointed at in older code**, neither seen to do harm: the
+  settings and playlist panels told the main window they were being hidden while the
+  window was already being destroyed (they are now disconnected first); and in desk mode
+  the size of the glass texture was computed in whole numbers from a rectangle that has
+  no sensible size for a moment while the window is set up (now computed with care for
+  that).
+- **While building this:** a draw that found no fresh picture from the draw before went
+  without one, which with slow draws meant most of them (now it asks and waits, and
+  leaves a picture for the next); `CRTPLAYER_NVFX_HELPER` naming a missing file fell back
+  to the helper beside the player (now: that file or none); the helper needed zlib only
+  to write the probe's pictures (now it writes them uncompressed and needs nothing).
+
+### Known limits and what was not tested
+
+- **NVIDIA's models were not run here**, as said above. One report from one card
+  (RTX 4090) on one system (Bazzite, Wayland). Other RTX cards, older drivers, X11, other
+  distributions, and a card with little memory were not tried. The SDK's own minimum
+  (RTX 20 series, driver 570.26) is NVIDIA's statement, not something measured.
+- **Keeping up at 4K and 120 Hz is not established.** By the probe a generated 4K picture
+  takes 6 ms on that card with the Balanced model (11 ms with Best), and the player adds
+  putting it into a texture; a refresh is 8.3 ms. The helper and the player work side by
+  side, so it may fit; the one report in the player (107 of 120, at a smaller size) does
+  not settle it. The line in the settings shows the figures.
+- **Every picture goes through ordinary memory twice** (from the card to the helper's
+  side of the shared memory, and from there into the player's texture). Sharing the
+  picture on the card between the two programs would avoid that; it was not attempted.
+- **The picture runs one refresh later** while NVIDIA's frame generation is at work, and
+  the sound is not held back by that much more.
+- **Small videos:** on the probe's scene, super resolution of 480p and 360p pictures was
+  slightly further from the true picture than a plain enlargement. Whether that holds for
+  real DVDs was not examined; the built-in upscaler is one click away.
+- **Only what the built-in Enhance covers:** no NVIDIA upscaling with a CRT look, none in
+  desk mode, none of the SDK's other effects (denoising, HDR).
+- **8 bits per colour.** The pictures exchanged are 8-bit, as the player's picture
+  texture is.
+- **The installation instructions in the README** are the steps the user followed on
+  Bazzite, written down afterwards; they were not followed a second time from the text.
+  NVIDIA's download pages and their names can change.
+- **Windows:** the player there is built without this (the helper is for Linux).
 
 ## 2.14: 3D models: standing upright; PLY, GLB / glTF and FBX; pictures; large models
 

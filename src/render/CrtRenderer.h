@@ -1,5 +1,6 @@
 #pragma once
 #include <QColor>
+#include <QElapsedTimer>
 #include "render/Geometry.h"
 #include "render/ViewSettings.h"
 #include "settings/CrtParams.h"
@@ -46,6 +47,7 @@ public:
         bool enhanceUp = false;  // effects off and the picture larger than the video: upscale it sharply
         float enhanceSharp = 0.5f;
         float framePhase = 1.f;  // frame generation: 1 = this frame; 0..1 = that far from the frame before to this one
+        bool live = false;       // draws follow one another at the screen's rate (the video is playing with frame generation)
     };
 
     // Builds draw parameters for `area` (target pixels) exactly as the flat view does.
@@ -158,12 +160,44 @@ public:
     bool frameGeneration() const { return m_fgOn; }
     bool framePairValid() const { return m_fgOn && m_pairValid; }
     qint64 framePairNs() const { return m_pairValid ? m_framePts - m_prevPts : 0; }   // video time between the two frames
-    struct EnhanceStats { quint64 upscaled = 0, pairs = 0, between = 0; QSize upSize, flowSize; };
+    struct EnhanceStats {
+        quint64 upscaled = 0, pairs = 0, between = 0;
+        QSize upSize, flowSize;
+        // NVIDIA's: pictures taken from the helper (upscaled / at the video's size), and draws that wanted one and went without
+        quint64 nvUpscaled = 0, nvBetween = 0, nvMissed = 0;
+        quint64 nvPassing = 0;                 // ... of them, those asked for at one draw and taken at the next
+        double nvReadMs = 0, nvUploadMs = 0;   // running means: reading a frame back for the helper, and putting its picture into a texture
+        int nvKind = 0;                        // the last draw: 0 not NVIDIA's, 1 frames between at the video's size, 2 the upscaled picture
+    };
     EnhanceStats enhanceStats() const { return m_enh; }
     // The picture at phase t between the frame before and this one, at the video's own size
     // (mode 1: a plain mix of the two frames, for comparison). Null without a valid pair.
     QImage renderBetweenImage(float t, int mode = 0);
+    // NVIDIA's Video Super Resolution and Video Frame Generation in place of the built-in
+    // methods, where the helper has them ready (see NvEnhancer.h). quality 1..4, mode 0..2.
+    void setNvidia(class NvEnhancer* nv, bool upscale, bool motion, int quality, int mode);
 private:
+    class NvEnhancer* m_nv = nullptr;
+    bool m_nvUp = false, m_nvMotion = false;
+    int m_nvQuality = 3, m_nvMode = 1;
+    quint64 m_epochs = 0, m_curEpoch = 0, m_prevEpoch = 0;   // names for the frames, as the helper is told them
+    int m_nvTicket = 0, m_nvTicketGen = -1, m_nvTicketKind = 0;   // the picture asked for at the last draw (shown at the next)
+    QElapsedTimer m_nvLastLive;       // when a draw last took a picture in passing (see nvTake)
+    bool m_nvAskAgain = false;
+    float m_nvAskAgainT = 1.f;
+    void nvAfterUpload();
+    quint64 m_nvUpEpoch = 0;          // what the upscaled picture in m_upTex[1] was made from (0: not NVIDIA's)
+    float m_nvUpT = -1.f;
+    int m_nvUpGen = -1;
+    QSize upscaleTarget(const DrawParams& d, bool uniform) const;
+    int nvPrepare(const DrawParams& d, bool plain);
+    bool nvFeed(bool pair);
+    bool nvSendFrame(GLuint fbo, quint64 epoch, bool cut);
+    const uchar* nvTake(float t, bool live, int kind);
+    void nvDropTicket();
+    GLuint nvPicture(const DrawParams& d);
+    int nvBetween(float t, bool live);
+    void nvUpload(const uchar* px, GLuint tex, const QSize& size);
     bool initEnhance(QString* error);
     void destroyEnhance();
     void keepPreviousFrame();
@@ -172,7 +206,7 @@ private:
     void ensureTargetF(GLuint& tex, GLuint& fbo, QSize& cur, const QSize& size, bool mipmaps);
     void computeFlow();
     bool renderBetween(float t, int mode);
-    bool beginBetween(float t);
+    bool beginBetween(float t, bool nvidia, bool live);
     void endBetween();
     QOpenGLShaderProgram m_enhUp, m_enhSharp, m_fiLuma, m_fiFlow, m_fiBlend;
     GLuint m_upTex[2] = {0, 0}, m_upFbo[2] = {0, 0};

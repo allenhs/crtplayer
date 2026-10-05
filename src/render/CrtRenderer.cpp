@@ -163,7 +163,7 @@ void CrtRenderer::setOrientation(const Orientation& o)
 {
     if (o == m_orient) return;
     m_orient = o;
-    if (m_hasFrame) convert();
+    if (m_hasFrame) { convert(); m_curEpoch = ++m_epochs; }   // (another picture, as far as NVIDIA's helper is concerned)
 }
 
 // Profiling: the time since `t` was (re)started, with the GL work done so far completed.
@@ -593,12 +593,17 @@ void CrtRenderer::draw(GLuint targetFbo, const DrawParams& d)
 void CrtRenderer::drawCrt(GLuint targetFbo, const DrawParams& d)
 {
     // Frame generation: for this draw, the picture is the one between the frame before and this one.
+    // (NVIDIA's methods, where their helper is ready: the upscaled picture comes from it whole,
+    // at the draw's moment; or frames between do, at the video's size.)
+    const bool plainUp = d.bypass && d.split < 0.f && d.enhanceUp;
+    const int nvKind = nvPrepare(d, d.bypass && d.split < 0.f);
+    GLuint upTex = nvKind == 2 ? nvPicture(d) : 0;
     struct Between {
         CrtRenderer* r; bool on;
         ~Between() { if (on) r->endBetween(); }
-    } between{this, beginBetween(d.framePhase)};
+    } between{this, upTex ? false : beginBetween(d.framePhase, nvKind == 1, d.live)};
     // Enhance: the picture upscaled to the size it is shown at (effects off only).
-    const GLuint upTex = (d.bypass && d.split < 0.f && d.enhanceUp) ? upscaledPicture(d) : 0;
+    if (!upTex && plainUp) upTex = upscaledPicture(d);
     if (!(d.bypass && d.split < 0.f)) ensureMipmaps();   // (the looks sample the picture's smaller copies)
     const bool wantBlur = !d.bypass && (d.params.bloom > 0.f || d.params.glow > 0.f) && m_hasFrame;
     const bool lowRes = !d.bypass && m_hasFrame && !d.pixelSize.isEmpty();

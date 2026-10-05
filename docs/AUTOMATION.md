@@ -60,6 +60,9 @@ buttons and shortcuts use.
 | `marqueetitle NAME`, `marqueeimage PATH` | How a file name is tidied for the marquee; save the marquee's lettering |
 | `looksound on\|off`, `looksound volume 0..2`, `looksound strength 0..1` | The look's sound; its noise volume and effect strength |
 | `settings TAB` | Show the settings panel on a tab (CRT, Display, Playback) |
+| `infooverlay on\|off` | The technical info overlay (I) |
+| `enhance nvidia on\|off`, `enhance nvquality 1..4`, `enhance nvmode 0..2` | NVIDIA AI for Enhance: the method, Video Super Resolution's quality, Video Frame Generation's model |
+| `enhance nvwait STATE [TIMEOUT_MS]` | Wait until NVIDIA's helper is `ready` (also `off`, `idle`, `starting`, `opening`, `stopped`, `failed`) |
 | `theatermarch ref\|normal` | Near-exact (slow) reference rendering of the seats, for comparisons |
 | `deskbackdrop room\|desktop` | 1.9 name: `room` = the desk scene |
 | `rate X` | Playback speed (0.25–4) |
@@ -127,3 +130,26 @@ Because the clock comes from the audio sink, this is the video's offset from the
 timeline at the moment the frame is drawn.
 
 It does not include display scan-out after the buffer swap.
+
+## NVIDIA AI (2.15)
+
+`report` carries `enhance.nvidia`: what was found (`helper`, `sdk`, `sdkVersion`, `superRes`, `frameGen`, `usable`),
+the helper's `state`, `error` (why it is not ready now) and `lastError`, the effects open (`srcWidth` … `outHeight`,
+`quality`, `mode`, `onCard`), what the last draw used (`kind`: 0 not NVIDIA's, 1 frames between at the video's size,
+2 the upscaled picture), counts (`frames` sent, `pictures` taken, `generated`, `upscaledPictures`, `betweenPictures`,
+`passing`: taken at the draw after the one that asked, `missed`: draws that went without, `opens`, `failures`,
+`restarts`) and running means in milliseconds (`frameMs`, `pictureMs`: the helper's work; `waitMs`, `readMs`,
+`uploadMs`: the player's).
+
+Environment, for the checks:
+
+| Variable | Effect |
+|---|---|
+| `CRTPLAYER_NVFX_SDK=FOLDER` | Where the SDK is (that folder or none) |
+| `CRTPLAYER_NVFX_HELPER=FILE` | The helper program (that file or none) |
+| `CRTPLAYER_NVFX_OFF=1` | NVIDIA's methods are not looked for at all (set by `scripts/run-verification.sh` for every suite but `nvidia`) |
+| `CRTPLAYER_NVFX_QUICK_MS=N` | Draws up to N ms apart count as following one another quickly (default 50): they take the picture asked for at the draw before instead of waiting for their own |
+| `NVFX_MOCK_*` | Read by the stand-in SDK in `tests/nvfx_mock` (stamps, delays and faults; listed at the top of `mock_vfx.cpp`) |
+
+The `nvidia` suite needs the stand-in SDK that the normal build makes (`build/nvfx-mock-sdk`; elsewhere:
+`NVFX_MOCK_SDK=FOLDER`). `tests/nvfx_serve_test.py` (run by `ctest` as `nvfx`) tests the helper alone.

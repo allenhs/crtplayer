@@ -135,6 +135,12 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent)
             else m_tv->programEnded();
             return;
         }
+        // An A-B loop whose end lies at the video's end (or so near it that the end came first): round again.
+        if (m_loopB > m_loopA && m_loopA >= 0 && !m_gifRecording) {
+            m_player->seek(m_loopA, Player::SeekMode::Accurate);
+            m_player->play();
+            return;
+        }
         if (m_sleepAtEnd) { goToSleep(); return; }   // the sleep timer was waiting for this
         if (!playAfterEnd()) {
             m_player->pause();
@@ -372,6 +378,14 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent)
     connect(m_playbackPanel, &PlaybackPanel::enhanceUpscaleChanged, this, &MainWindow::setEnhanceUpscale);
     connect(m_playbackPanel, &PlaybackPanel::enhanceSharpnessChanged, this, &MainWindow::setEnhanceSharpness);
     connect(m_playbackPanel, &PlaybackPanel::smoothMotionChanged, this, &MainWindow::setSmoothMotion);
+    connect(m_playbackPanel, &PlaybackPanel::nvidiaChanged, this, &MainWindow::setEnhanceNvidia);
+    {
+        // What NVIDIA's methods are doing changes as the video plays: the line in the panel follows.
+        auto* nvTimer = new QTimer(this);
+        nvTimer->setInterval(1000);
+        connect(nvTimer, &QTimer::timeout, this, &MainWindow::refreshNvidiaStatus);
+        nvTimer->start();
+    }
     connect(m_playbackPanel, &PlaybackPanel::autoNextChanged, this, &MainWindow::setAutoNext);
     connect(m_playbackPanel, &PlaybackPanel::sleepTimerChanged, this, &MainWindow::setSleepTimer);
     connect(m_playbackPanel, &PlaybackPanel::keepAwakeChanged, this, [this, updateSleep](bool on) { m_settings.keepAwake = on; updateSleep(); });
@@ -450,6 +464,9 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent)
 MainWindow::~MainWindow()
 {
     qApp->removeEventFilter(this);
+    // (the docks are destroyed after this, with the window's other children, and say so: nobody is listening by then)
+    if (m_settingsDock) m_settingsDock->disconnect(this);
+    if (m_playlistDock) m_playlistDock->disconnect(this);
     delete m_desk;
 }
 
@@ -461,6 +478,7 @@ void MainWindow::buildUi()
     setDockOptions(QMainWindow::AnimatedDocks);
 
     m_video = new VideoWidget(m_player, this);
+    m_video->setNvidiaInstall(NvEnhancer::findInstall());
     m_video->installEventFilter(this);
     setCentralWidget(m_video);
 
@@ -639,11 +657,15 @@ void MainWindow::buildActions()
     add({Qt::Key_E}, [this] { m_settingsDock->setVisible(!m_settingsDock->isVisible()); });
     add({Qt::Key_L}, [this] { m_playlistDock->setVisible(!m_playlistDock->isVisible()); });
     add({QKeySequence(Qt::CTRL | Qt::Key_J)}, [this] { showJellyfin(!m_jfDock->isVisible()); });
-    add({Qt::Key_I}, [this] {
-        m_info->setVisible(!m_info->isVisible());
-        if (m_info->isVisible()) { updateInfoOverlay(); m_infoTimer.start(); } else m_infoTimer.stop();
-    });
+    add({Qt::Key_I}, [this] { setInfoOverlay(!m_info->isVisible()); });
     add({QKeySequence::Quit, QKeySequence(Qt::CTRL | Qt::Key_Q)}, [] { qApp->quit(); });   // also from the desk window
+}
+
+void MainWindow::setInfoOverlay(bool on)
+{
+    m_info->setVisible(on);
+    if (on) { updateInfoOverlay(); m_infoTimer.start(); } else m_infoTimer.stop();
+    layoutOverlays();
 }
 
 void MainWindow::restoreSettings()
@@ -870,6 +892,7 @@ void MainWindow::openResolved(int i, const QString& uri, qint64 start, const QSt
     if (i >= 0) m_playlist->setCurrentIndex(i);
     m_lastError.clear();
     m_emptyHint->hide();
+    m_video->nvidiaForgive();   // (what NVIDIA's helper could not do for the last video it may do for this one)
     const bool tv = tvOn();
     if (tv) {
         // Changing channel: static until the picture arrives. One programme following
@@ -2335,6 +2358,11 @@ void MainWindow::updateInfoOverlay()
     lines << tr("Audio       %1 via %2").arg(m_player->audioCodec(), m_player->audioDecoder());
     lines << tr("Drawing     %1").arg(videoPathDescription());
     if (const QString enh = enhanceDescription(); !enh.isEmpty()) lines << tr("Enhance     %1").arg(enh);
+    // NVIDIA's methods at work (or failing): their line from the settings panel, a sentence to a row.
+    if (m_settings.enhanceNvidia && (m_settings.enhanceUpscale || m_settings.smoothMotion) && m_video->nvidia().install().usable()) {
+        if (m_video->nvidiaUpscaling() || m_video->nvidiaMotion() || !m_video->nvidia().error().isEmpty())
+            lines << tr("NVIDIA      %1").arg(nvidiaStatus().replace(QStringLiteral(". "), QStringLiteral(".\n            ")));
+    }
     if (m_player->deinterlacing()) lines << tr("Interlaced  deinterlaced for display");
     if (m_player->audioDelay() != 0) lines << tr("Sound delay %1 ms").arg(m_player->audioDelay());
     if (f.isValid()) {

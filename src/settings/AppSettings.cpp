@@ -108,6 +108,9 @@ void AppSettings::load()
     enhanceUpscale = s.value("enhance/upscale", false).toBool();
     enhanceSharpness = std::clamp(s.value("enhance/sharpness", 0.5).toDouble(), 0.0, 1.0);
     smoothMotion = s.value("enhance/smoothMotion", false).toBool();
+    enhanceNvidia = s.value("enhance/nvidia", true).toBool();
+    nvidiaQuality = std::clamp(s.value("enhance/nvidiaQuality", 3).toInt(), 1, 4);
+    nvidiaMotion = std::clamp(s.value("enhance/nvidiaMotion", 1).toInt(), 0, 2);
     {   // (CRTPLAYER_FAST_PATH=auto|always|never sets the default, for tests of the path a graphics card takes)
         const QByteArray e = qgetenv("CRTPLAYER_FAST_PATH");
         const int def = e == "never" ? 2 : e == "always" ? 1 : 0;
@@ -203,6 +206,9 @@ void AppSettings::save() const
     s.setValue("enhance/upscale", enhanceUpscale);
     s.setValue("enhance/sharpness", enhanceSharpness);
     s.setValue("enhance/smoothMotion", smoothMotion);
+    s.setValue("enhance/nvidia", enhanceNvidia);
+    s.setValue("enhance/nvidiaQuality", nvidiaQuality);
+    s.setValue("enhance/nvidiaMotion", nvidiaMotion);
     s.setValue("playback/lookDetail", lookDetail);
     s.sync();
 }

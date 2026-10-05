@@ -1,10 +1,16 @@
 // Enhance (2.13), as part of CrtRenderer: sharper upscaling with effects off, and frame
 // generation (the picture at moments between two frames, along the motion between them).
 //
-// Both are for a graphics card. Neither is an AI model: the upscaler is a Lanczos
-// reconstruction with a contrast-adaptive sharpening pass, and frame generation is a
-// coarse-to-fine block motion search with a motion-compensated blend.
+// Both are for a graphics card. The built-in methods are not AI models: the upscaler is a
+// Lanczos reconstruction with a contrast-adaptive sharpening pass, and frame generation is
+// a coarse-to-fine block motion search with a motion-compensated blend.
+//
+// 2.15: where NVIDIA's Video Effects SDK is installed, its Video Super Resolution and Video
+// Frame Generation (which are AI models) take their place, through a helper program (see
+// NvEnhancer.h, and the last part of this file). Whenever the helper has no picture to
+// give, the draw is done with the built-in methods.
 #include "CrtRenderer.h"
+#include "NvEnhancer.h"
 
 #include <QElapsedTimer>
 #include <algorithm>
@@ -36,6 +42,8 @@ void CrtRenderer::destroyEnhance()
     m_prevSize = m_fgSize = QSize();
     m_prevHas = m_pairValid = m_flowReady = false;
     m_upDirty = true;
+    nvDropTicket();
+    m_nvUpEpoch = 0;
 }
 
 // A float target (vectors): RGBA16F, filtered.
@@ -58,18 +66,32 @@ void CrtRenderer::ensureTargetF(GLuint& tex, GLuint& fbo, QSize& cur, const QSiz
 
 // ---- upscaling ------------------------------------------------------------------------
 
+// The size the picture is upscaled to: the size it is shown at; empty when it is not being
+// enlarged (or by too little to matter). uniform: by the same factor both ways, to even
+// numbers (what NVIDIA's super resolution is given; the rest of the way it is stretched).
+QSize CrtRenderer::upscaleTarget(const DrawParams& d, bool uniform) const
+{
+    if (!m_hasFrame || m_imgSize.isEmpty() || d.image.isEmpty() || d.src.width() <= 0 || d.src.height() <= 0) return {};
+    // The whole picture's size on screen (the part shown may be a window of it).
+    const double w = d.image.width() / d.src.width(), h = d.image.height() / d.src.height();
+    if (std::max(w / m_imgSize.width(), h / m_imgSize.height()) < 1.15) return {};
+    // Not more than four times the video in either direction, nor much more than the target can show.
+    const double cap = std::min({1.0, 4.0 * m_imgSize.width() / w, 4.0 * m_imgSize.height() / h, 4096.0 / w, 4096.0 / h,
+                                 2.0 * d.viewport.width() / w, 2.0 * d.viewport.height() / h});
+    if (!uniform) return QSize(std::max(2, int(std::lround(w * cap))), std::max(2, int(std::lround(h * cap))));
+    const double k = std::min(w * cap / m_imgSize.width(), h * cap / m_imgSize.height());
+    if (k < 1.15) return {};
+    return QSize(std::max(2, int(std::lround(m_imgSize.width() * k / 2.0)) * 2), std::max(2, int(std::lround(m_imgSize.height() * k / 2.0)) * 2));
+}
+
 // The picture at the size it is shown at, upscaled and sharpened; 0 when it is not being
 // enlarged (or by too little to matter). Made once per frame and size.
 GLuint CrtRenderer::upscaledPicture(const DrawParams& d)
 {
     if (!m_hasFrame || !m_imgTex || d.image.isEmpty() || d.src.width() <= 0 || d.src.height() <= 0) return 0;
-    // The whole picture's size on screen (the part shown may be a window of it).
-    double w = d.image.width() / d.src.width(), h = d.image.height() / d.src.height();
-    if (std::max(w / m_imgSize.width(), h / m_imgSize.height()) < 1.15) return 0;
-    // Not more than four times the video in either direction, nor much more than the target can show.
-    const double cap = std::min({1.0, 4.0 * m_imgSize.width() / w, 4.0 * m_imgSize.height() / h, 4096.0 / w, 4096.0 / h,
-                                 2.0 * d.viewport.width() / w, 2.0 * d.viewport.height() / h});
-    const QSize target(std::max(2, int(std::lround(w * cap))), std::max(2, int(std::lround(h * cap))));
+    const QSize target = upscaleTarget(d, false);
+    if (target.isEmpty()) return 0;
+    if (m_nvUpEpoch) { m_upDirty = true; m_nvUpEpoch = 0; }   // (the texture held NVIDIA's picture)
     if (!m_upDirty && m_upTex[1] && m_upSize[1] == target && m_upSharp == d.enhanceSharp) return m_upTex[1];
     glDisable(GL_BLEND);
     glDisable(GL_DEPTH_TEST);
@@ -127,11 +149,13 @@ void CrtRenderer::keepPreviousFrame()
     m_lumValid[1] = m_lumValid[0];
     m_lumValid[0] = false;
     m_prevPts = m_framePts;
+    m_prevEpoch = m_curEpoch;
     m_prevHas = true;
 }
 
 void CrtRenderer::frameArrived()
 {
+    m_curEpoch = ++m_epochs;
     m_upDirty = true;
     m_flowReady = false;
     m_lumValid[0] = false;
@@ -254,9 +278,24 @@ bool CrtRenderer::renderBetween(float t, int mode)
 // For one draw, the picture's place is taken by the frame before (phase 0) or by a frame
 // generated between the two. Everything downstream (the looks, the glow, upscaling) then
 // works from it as from any frame. endBetween() puts the real frame back.
-bool CrtRenderer::beginBetween(float t)
+bool CrtRenderer::beginBetween(float t, bool nvidia, bool live)
 {
-    if (!m_fgOn || !m_pairValid || m_fgSwap != 0 || t >= 0.995f) return false;
+    if (!m_fgOn || m_fgSwap != 0) return false;
+    if (nvidia) {
+        // NVIDIA's frame generation: 1 its picture is in m_fgTex; 0 this draw shows the newest frame; -1 no picture from it.
+        const int got = nvBetween(t, live);
+        if (got == 0) return false;
+        if (got == 1) {
+            m_fgSavedMips = m_mipsStale;
+            std::swap(m_imgTex, m_fgTex);
+            std::swap(m_imgFbo, m_fgFbo);
+            m_fgSwap = 2;
+            m_mipsStale = true;
+            m_blurDirty = m_lowDirty = m_upDirty = true;
+            return true;
+        }
+    }
+    if (!m_pairValid || t >= 0.995f) return false;
     m_fgSavedMips = m_mipsStale;
     if (t <= 0.01f) {
         std::swap(m_imgTex, m_prevTex);
@@ -285,10 +324,199 @@ void CrtRenderer::endBetween()
 
 QImage CrtRenderer::renderBetweenImage(float t, int mode)
 {
-    if (!m_pairValid || !renderBetween(t, mode)) return {};
+    if (!m_pairValid) return {};
+    // NVIDIA's, when it is what a draw would use now.
+    if (mode == 0 && m_nv && m_nvMotion && m_fgOn) {
+        NvEnhancer::Config c;
+        c.src = c.out = m_imgSize;
+        c.mode = m_nvMode;
+        if (m_nv->ready(c) && nvFeed(true))
+            if (const uchar* px = nvTake(t <= 0.f ? 0.f : t >= 1.f ? 1.f : t, false, 1)) {
+                ++m_enh.nvBetween;
+                return QImage(px, m_imgSize.width(), m_imgSize.height(), m_imgSize.width() * 4, QImage::Format_RGBA8888).convertToFormat(QImage::Format_RGB32);
+            }
+    }
+    if (!renderBetween(t, mode)) return {};
     QImage img(m_imgSize, QImage::Format_RGBA8888);
     glBindFramebuffer(GL_FRAMEBUFFER, m_fgFbo);
     glPixelStorei(GL_PACK_ALIGNMENT, 4);
     glReadPixels(0, 0, m_imgSize.width(), m_imgSize.height(), GL_RGBA, GL_UNSIGNED_BYTE, img.bits());
     return img.convertToFormat(QImage::Format_RGB32);   // (the picture's textures have row 0 at the top)
+}
+
+// ---- NVIDIA's Video Super Resolution and Video Frame Generation ---------------------------
+//
+// The helper is given each of the video's frames (read back from the picture texture) and
+// asked for pictures, which are put into the textures the built-in methods would have
+// filled: m_fgTex (a frame between, at the video's size) or m_upTex[1] (the upscaled picture).
+//
+// While the video plays with frame generation, a draw asks for its picture and shows the
+// one asked for at the draw before: the helper then works while the player draws, instead
+// of the player waiting for it, at the price of one screen refresh of delay. A draw on its
+// own (paused, a screenshot) asks and waits.
+
+void CrtRenderer::setNvidia(NvEnhancer* nv, bool upscale, bool motion, int quality, int mode)
+{
+    if (nv != m_nv) nvDropTicket();
+    m_nv = nv;
+    m_nvUp = nv && upscale;
+    m_nvMotion = nv && motion;
+    m_nvQuality = std::clamp(quality, 1, 4);
+    m_nvMode = std::clamp(mode, 0, 2);
+    if (!nv) m_enh.nvKind = 0;
+}
+
+void CrtRenderer::nvDropTicket()
+{
+    if (m_nv && m_nvTicket) m_nv->abandon(m_nvTicket);
+    m_nvTicket = 0;
+    m_nvAskAgain = false;
+}
+
+// What this draw wants of NVIDIA's, with the effects for it open: 2 the upscaled picture
+// (frames generated at that size, if frame generation is on), 1 frames between at the
+// video's size, 0 nothing (or the helper is not ready: the built-in methods do this draw).
+int CrtRenderer::nvPrepare(const DrawParams& d, bool plain)
+{
+    m_enh.nvKind = 0;
+    if (!m_nv || !m_hasFrame || m_imgSize.isEmpty() || m_fgSwap != 0) return 0;
+    const bool motion = m_fgOn && m_nvMotion;
+    NvEnhancer::Config c;
+    c.src = c.out = m_imgSize;
+    if (motion) c.mode = m_nvMode;
+    int kind = motion ? 1 : 0;
+    if (plain && d.enhanceUp && m_nvUp) {
+        const QSize target = upscaleTarget(d, true);
+        if (!target.isEmpty()) { c.out = target; c.quality = m_nvQuality; kind = 2; }
+    }
+    if (!kind || !m_nv->ready(c)) { nvDropTicket(); return 0; }
+    m_enh.nvKind = kind;
+    return kind;
+}
+
+bool CrtRenderer::nvSendFrame(GLuint fbo, quint64 epoch, bool cut)
+{
+    uchar* in = m_nv->beginFrame();
+    if (!in) return false;
+    QElapsedTimer t;
+    t.start();
+    glBindFramebuffer(GL_FRAMEBUFFER, fbo);
+    glPixelStorei(GL_PACK_ALIGNMENT, 1);
+    glPixelStorei(GL_PACK_ROW_LENGTH, 0);
+    glReadPixels(0, 0, m_imgSize.width(), m_imgSize.height(), GL_RGBA, GL_UNSIGNED_BYTE, in);
+    glPixelStorei(GL_PACK_ALIGNMENT, 4);
+    const double ms = t.nsecsElapsed() / 1e6;
+    m_enh.nvReadMs = m_enh.nvReadMs <= 0 ? ms : m_enh.nvReadMs + (ms - m_enh.nvReadMs) * 0.1;
+    return m_nv->endFrame(epoch, cut);
+}
+
+// The helper has the newest frame (pair: and, before it, the frame before).
+bool CrtRenderer::nvFeed(bool pair)
+{
+    const bool wantPair = pair && m_pairValid && m_prevTex && m_prevSize == m_imgSize;
+    if (m_nv->lastEpoch() == m_curEpoch && (!wantPair || m_nv->prevEpoch() == m_prevEpoch)) return true;
+    if (wantPair && m_nv->lastEpoch() != m_prevEpoch && !nvSendFrame(m_prevFbo, m_prevEpoch, true)) return false;
+    return nvSendFrame(m_imgFbo, m_curEpoch, !wantPair);
+}
+
+// The helper's picture for this draw. A draw on its own asks for the picture at t and waits
+// for it. With draws following one another quickly (live), the picture asked for at the
+// draw before is taken and this draw's is asked for, to be taken at the next; the first
+// such draw waits for its own and (nvAfterUpload) asks for it once more for the next one.
+const uchar* CrtRenderer::nvTake(float t, bool live, int kind)
+{
+    m_nvAskAgain = false;
+    if (!live) {
+        nvDropTicket();
+        m_nvLastLive.invalidate();
+        return m_nv->wait(m_nv->request(t));
+    }
+    // (the draw before was a moment ago; CRTPLAYER_NVFX_QUICK_MS, for the checks: what counts as a moment)
+    static const int quickMs = qEnvironmentVariableIsSet("CRTPLAYER_NVFX_QUICK_MS") ? qEnvironmentVariableIntValue("CRTPLAYER_NVFX_QUICK_MS") : 50;
+    const bool quick = m_nvLastLive.isValid() && m_nvLastLive.elapsed() < quickMs;
+    m_nvLastLive.start();
+    const int before = m_nvTicket;
+    const bool fresh = quick && before && m_nvTicketGen == m_nv->generation() && m_nvTicketKind == kind;
+    m_nvTicketGen = m_nv->generation();
+    m_nvTicketKind = kind;
+    if (fresh) {
+        m_nvTicket = m_nv->request(t);
+        const uchar* px = m_nv->wait(before);
+        if (px) ++m_enh.nvPassing;
+        return px;
+    }
+    nvDropTicket();
+    m_nvAskAgain = quick;
+    m_nvAskAgainT = t;
+    return m_nv->wait(m_nv->request(t));
+}
+
+// (after the picture taken has been put into its texture: its memory may be written again)
+void CrtRenderer::nvAfterUpload()
+{
+    if (!m_nvAskAgain) return;
+    m_nvAskAgain = false;
+    m_nvTicket = m_nv->request(m_nvAskAgainT);
+}
+
+void CrtRenderer::nvUpload(const uchar* px, GLuint tex, const QSize& size)
+{
+    QElapsedTimer t;
+    t.start();
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, tex);
+    glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+    glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
+    glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, size.width(), size.height(), GL_RGBA, GL_UNSIGNED_BYTE, px);
+    glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
+    const double ms = t.nsecsElapsed() / 1e6;
+    m_enh.nvUploadMs = m_enh.nvUploadMs <= 0 ? ms : m_enh.nvUploadMs + (ms - m_enh.nvUploadMs) * 0.1;
+}
+
+// The upscaled picture for this draw (at the draw's moment between two frames, with frame
+// generation), in m_upTex[1]; 0: none this time.
+GLuint CrtRenderer::nvPicture(const DrawParams& d)
+{
+    const NvEnhancer::Config c = m_nv->config();
+    const bool motion = c.mode >= 0;
+    if (!nvFeed(motion)) { ++m_enh.nvMissed; return 0; }
+    const float t = !motion || !m_pairValid || d.framePhase >= 0.995f ? 1.f : d.framePhase <= 0.01f ? 0.f : d.framePhase;
+    // A draw on its own, of what the texture already holds: nothing to ask.
+    if (!d.live && m_upTex[1] && m_upSize[1] == c.out && m_nvUpEpoch == m_curEpoch && m_nvUpT == t && m_nvUpGen == m_nv->generation()) {
+        nvDropTicket();
+        return m_upTex[1];
+    }
+    const uchar* px = nvTake(t, d.live, 2);
+    if (!px) { ++m_enh.nvMissed; return 0; }
+    ensureTarget(m_upTex[1], m_upFbo[1], m_upSize[1], c.out, false, false);
+    nvUpload(px, m_upTex[1], c.out);
+    nvAfterUpload();
+    m_nvUpEpoch = d.live ? ~quint64(0) : m_curEpoch;   // (a picture shown a draw late is not this frame's: not kept for another draw)
+    m_nvUpT = t;
+    m_nvUpGen = m_nv->generation();
+    m_upDirty = true;   // (for the built-in upscaler, should it be next)
+    ++m_enh.nvUpscaled;
+    m_enh.upSize = c.out;
+    return m_upTex[1];
+}
+
+// Frame generation at the video's size, for a draw with a look (or with nothing to upscale):
+// 1 the picture for this draw is in m_fgTex; 0 this draw shows the newest frame as it is;
+// -1 none this time.
+int CrtRenderer::nvBetween(float t, bool live)
+{
+    if (!nvFeed(true)) { ++m_enh.nvMissed; return -1; }
+    const bool between = m_pairValid && t > 0.01f && t < 0.995f;
+    if (!live) {
+        nvDropTicket();
+        if (!m_pairValid || t >= 0.995f) return 0;
+        if (!between) return -1;   // (the frame before: the texture has it)
+    }
+    const uchar* px = nvTake(between ? t : (!m_pairValid || t >= 0.995f) ? 1.f : 0.f, live, 1);
+    if (!px) { ++m_enh.nvMissed; return -1; }
+    ensureTarget(m_fgTex, m_fgFbo, m_fgSize, m_imgSize, true, false);
+    nvUpload(px, m_fgTex, m_imgSize);
+    nvAfterUpload();
+    ++m_enh.nvBetween;
+    return 1;
 }

@@ -82,6 +82,9 @@ configurable, GPU-rendered CRT presentation that respects every aspect ratio:
 - **Enhance** (for a graphics card, optional): **sharper upscaling** for DVDs and 720p video
   on a big screen, and **smooth motion**, which generates the pictures in between a film's
   24 or 30 frames a second so that motion is as smooth as the screen allows.
+  With an NVIDIA RTX card and NVIDIA's Video Effects SDK installed (free, a separate
+  download), both are done by **NVIDIA's AI models** instead: Video Super Resolution and
+  Video Frame Generation.
   See [Enhance](#enhance-sharper-upscaling-and-smooth-motion).
 - **Plays without a graphics card.** In a virtual machine without 3D acceleration (or
   anywhere OpenGL runs in software), the player moves colour conversion and scaling onto
@@ -104,6 +107,7 @@ configurable, GPU-rendered CRT presentation that respects every aspect ratio:
    - [Cutting without re-encoding, and GIF clips](#cutting-without-re-encoding-and-gif-clips)
    - [Without a graphics card](#without-a-graphics-card)
    - [Enhance: sharper upscaling and smooth motion](#enhance-sharper-upscaling-and-smooth-motion)
+   - [NVIDIA AI upscaling and frame generation (RTX cards)](#nvidia-ai-upscaling-and-frame-generation-rtx-cards)
 8. [Desk mode: a 3D TV on your desktop](#desk-mode-a-3d-tv-on-your-desktop)
 9. [Cable TV](#cable-tv)
 10. [Jellyfin](#jellyfin)
@@ -257,6 +261,11 @@ To install it for your user, with a menu entry and icon:
 scripts/install-local.sh ./crtplayer
 ```
 
+`crtplayer-nvfx`, which comes with it, is the helper for
+[NVIDIA AI](#nvidia-ai-upscaling-and-frame-generation-rtx-cards): keep it in the same
+folder as `crtplayer` (the install script copies both). Without it the player works as
+before, with the built-in methods.
+
 Before relying on the binary, it's worth a quick check:
 
 ```bash
@@ -368,6 +377,12 @@ X11.
 **Built in** (source in `third_party/`, nothing to install): [ufbx](https://github.com/ufbx/ufbx)
 0.23.1 by Samuli Raivio, which reads FBX models for the 90s CG room. MIT licence or
 public domain, as you prefer; its text is in `third_party/ufbx/LICENSE`.
+
+**Optional, at run time only:** NVIDIA's Video Effects SDK 1.3, for
+[NVIDIA AI](#nvidia-ai-upscaling-and-frame-generation-rtx-cards). Nothing of it is needed
+to build, and nothing of it is in the source or the downloads: the helper program opens
+its libraries from where you installed them. The three header files that describe its
+programming interface are in `third_party/nvidia-vfx/` (by NVIDIA, MIT licence).
 
 **Building the AppImage** additionally needs `qt6-wayland` development files, `patchelf`
 and `curl`.
@@ -1048,11 +1063,18 @@ yet enough for 4K HEVC 10-bit; more cores should help, which was not measured.
 Two optional enhancements for a system with a graphics card, both off until you turn
 them on in *Settings → Playback → Enhance*.
 
-They are **not** NVIDIA's DLSS, which works only inside games (it needs motion and depth
-information from the game), and they are not AI models. They are ordinary shaders, in
-the manner of the upscalers and motion interpolation that games and TVs use, and they
-run on any graphics card that runs the player. (NVIDIA's AI video upscaler, RTX Video
-Super Resolution, was not available on Linux when this was written.)
+Each can be done in two ways:
+
+- **Built in:** ordinary shaders, in the manner of the upscalers and motion interpolation
+  that games and TVs use. They are not AI models, need nothing installed, and run on any
+  graphics card that runs the player.
+- **NVIDIA AI** (2.15, for NVIDIA RTX cards): NVIDIA's Video Super Resolution and Video
+  Frame Generation, which are AI models and do both jobs clearly better. They come with
+  NVIDIA's Video Effects SDK, which you install yourself; see
+  [NVIDIA AI](#nvidia-ai-upscaling-and-frame-generation-rtx-cards) below.
+
+Neither is NVIDIA's DLSS, which works only inside games (it needs motion and depth
+information from the game).
 
 ### Sharper upscaling
 
@@ -1130,6 +1152,118 @@ second version, against the true frame from the 60 frames a second version:
   refresh of the screen. If playback stutters with it on, it is too much for the card:
   turn it off.
 
+### NVIDIA AI upscaling and frame generation (RTX cards)
+
+With an NVIDIA RTX graphics card you can have the two enhancements done by NVIDIA's AI
+models:
+
+- **Video Super Resolution** in place of the built-in upscaler. It rebuilds detail
+  rather than only keeping edges crisp, and cleans up compression damage on the way.
+- **Video Frame Generation** in place of the built-in smooth motion. It follows motion
+  that the built-in search loses (fast, fine, or partly hidden), so far fewer places
+  fall back to a real frame.
+
+Measured on an RTX 4090 with a test scene whose true pictures are known: upscaling
+1080p to 4K came 4.8 dB closer to the true 4K picture than a plain enlargement, in
+5 ms a picture; a generated in-between frame came 4 to 7 dB closer to the true one than
+a mix of its two neighbours, in 2 ms at 1080p and 6 ms at 4K.
+
+**What you need**
+
+- An NVIDIA RTX graphics card with NVIDIA's own driver. NVIDIA names the RTX 20 series
+  and newer, and driver 570.26 or newer, for the SDK. On Bazzite the driver comes with the
+  `bazzite-nvidia` images.
+- NVIDIA's Video Effects SDK 1.3 with two of its features: Video Super Resolution and
+  Video Frame Generation. It is free, but it is NVIDIA's software under NVIDIA's licence,
+  it is not part of the player, and NVIDIA hands it out only to signed-in members of its
+  developer programme (also free). About 4.5 GB on disk.
+
+**Installing the SDK on Bazzite**
+
+NVIDIA's installer expects Ubuntu, so it is run once inside a small Ubuntu box, and the
+result is copied out. After that the box is not needed again.
+
+1. Make a free account at <https://developer.nvidia.com> and sign in at
+   <https://catalog.ngc.nvidia.com>.
+2. Search there for **Maxine VFX SDK**, open **VFX SDK Core**, and download the version
+   named `1.3.0.0_linux`. You get `VFXSDK_linux_1.3.0.0.tgz` (2.6 GB); leave it in
+   `~/Downloads`.
+3. Make an API key: your account menu (top right) → **Setup** → **Generate API Key**
+   (NVIDIA's NGC User Guide shows it under "Generating a Personal API Key"). The key
+   starts with `nvapi-`. It is a password: keep it to yourself.
+4. In a terminal, make the box and go into it:
+
+   ```bash
+   distrobox create --name vfx --image ubuntu:24.04 --nvidia --yes
+   distrobox enter vfx
+   ```
+
+5. Inside the box (one line at a time; put your key in place of `PASTE-YOUR-KEY`):
+
+   ```bash
+   sudo apt-get update && sudo apt-get install -y curl xz-utils
+   sudo tar -xf ~/Downloads/VFXSDK_linux_1.3.0.0.tgz -C /usr/local
+   cd /usr/local/VideoFX/features
+   export NGC_CLI_API_KEY=PASTE-YOUR-KEY
+   sudo --preserve-env=NGC_CLI_API_KEY ./install_feature.sh -f nvvfxvideosuperres,nvvfxvideoframegeneration
+   mkdir -p ~/.local/share/crtplayer
+   cp -a /usr/local/VideoFX ~/.local/share/crtplayer/
+   exit
+   ```
+
+6. Start the player. *Settings → Playback → Enhance* now says
+   *NVIDIA AI: ready (upscaling and smooth motion)*.
+
+The box and the download can be deleted afterwards (`distrobox rm --force vfx`). On Ubuntu,
+Debian, Rocky or RHEL, NVIDIA's own instructions apply as they are; the player looks for
+the SDK in `~/.local/share/crtplayer/VideoFX`, `~/.local/share/VideoFX`, `~/VideoFX`,
+`/usr/local/VideoFX` and `/opt/VideoFX`, or wherever `CRTPLAYER_NVFX_SDK` points.
+
+**Using it**
+
+*Use NVIDIA AI for both* (on by default) only chooses the method. **Sharper upscaling**
+and **Smooth motion** above it still turn the two enhancements on and off, and
+everything said about them above still holds: upscaling applies with effects off when
+the picture is shown larger than the video, smooth motion works with every look and
+runs the picture one frame behind.
+
+- **AI upscaling: Low, Medium, High, Ultra.** How much work is done on each picture.
+  High is the default; in the measurement above it was as close to the true picture as
+  Ultra, and quicker.
+- **AI motion: Fast, Balanced, Best.** NVIDIA's three frame generation models. Best takes
+  several times longer for each picture: on a 4K screen at 120 Hz it may not keep up.
+- The line below says what is going on, for example *NVIDIA AI at work: upscaling
+  1920×1080 to 3840×2160 (high), smooth motion (balanced). 6.4 ms a picture, 3.1 ms a
+  frame of the video. 120 pictures a second on a 120 Hz screen.* The time for a picture has to
+  fit between two refreshes of the screen (8.3 ms at 120 Hz, 16.7 ms at 60 Hz). If
+  the pictures a second stay well below the screen's rate, choose a lower setting.
+- With both on and effects off, the frame is upscaled first and frames are generated at
+  the larger size. With a look, frames are generated at the video's size and the look is
+  drawn from them.
+- Video Super Resolution enlarges by the same factor in both directions, up to four
+  times; a DVD's non-square pixels are stretched the rest of the way as before.
+
+**When it cannot be used**
+
+Whenever NVIDIA's method has no picture to give, that draw is done by the built-in
+method, so the video never stops for it. The line in the panel says why: the SDK is not
+installed, an effect could not be loaded, the helper stopped. A failure is tried again
+a few times and then left alone until the next video or until you change a setting.
+
+The work is done by a helper program, `crtplayer-nvfx`, that the player starts when the
+first picture needs it and that holds NVIDIA's libraries, so that a fault in them
+cannot take the player down. It is inside the AppImage, and beside the plain binary.
+What it and NVIDIA's libraries print goes to `~/.cache/CRTPlayer/CRTPlayer/nvfx.log`.
+On its own it can measure your card:
+
+```bash
+./crtplayer-nvfx --probe          # both effects at several sizes and settings: time per picture, and pictures to look at
+```
+
+This part was written, measured and first used on Bazzite with an RTX 4090 (driver 615),
+on a 4K screen at 120 Hz. The checks that run without an NVIDIA card use a stand-in for
+the SDK (see [VERIFICATION.md](VERIFICATION.md)).
+
 ### Good to know
 
 - Press **I**: the *Enhance* line says what is on and what it is doing.
@@ -1137,6 +1271,7 @@ second version, against the true frame from the 60 frames a second version:
   the CPU fast path is used instead (see [Without a graphics card](#without-a-graphics-card)).
 - With either on, frames are taken as decoded: the *CPU fast path: Always* setting has
   no effect then.
+- `CRTPLAYER_NVFX_OFF=1` in the environment keeps NVIDIA's methods out altogether.
 
 ## Controllers, media keys and Steam Game Mode
 
@@ -1649,6 +1784,8 @@ supported.
 | Resume positions (local files) | `~/.local/share/CRTPlayer/resume.json` |
 | Recent files | in `CRTPlayer.conf` |
 | TV channels (folders, names, numbers, video lengths; no sign-in details) | `~/.config/CRTPlayer/CRTPlayer/channels.json` |
+| NVIDIA AI: the SDK you installed (not the player's; listed here so that you can find it) | `~/.local/share/crtplayer/VideoFX` |
+| NVIDIA AI: what the helper and NVIDIA's libraries printed, last runs | `~/.cache/CRTPlayer/CRTPlayer/nvfx.log` |
 
 Settings are saved whenever the player exits: window close, Ctrl+Q, or logout.
 
@@ -1787,6 +1924,25 @@ Settings are saved whenever the player exits: window close, Ctrl+Q, or logout.
   not beside it (an OBJ needs its `.mtl` and the pictures that names; a `.gltf` its
   `.bin` and pictures).
 
+**NVIDIA AI: "not installed", or "could not be used"**
+
+- *Not installed*: the player found no SDK. It looks in `~/.local/share/crtplayer/VideoFX`
+  first; that folder must contain `lib/libVideoFX.so`. See
+  [NVIDIA AI](#nvidia-ai-upscaling-and-frame-generation-rtx-cards) for the steps.
+- *The SDK is installed, but neither Video Super Resolution nor Video Frame Generation
+  is in it*: the second half of the installation (`install_feature.sh`) is missing; the
+  folders `features/nvvfxvideosuperres` and `features/nvvfxvideoframegeneration` are what
+  it adds.
+- *Could not be used:* followed by the reason NVIDIA's library gave. The video plays
+  with the built-in methods meanwhile. `~/.cache/CRTPlayer/CRTPlayer/nvfx.log` has what
+  the libraries printed, and `crtplayer-nvfx --probe` tries both effects outside the
+  player and says which sizes and settings work on your card.
+- Video Super Resolution is asked for the size the picture is shown at, whatever that
+  comes to (in real use a 576×1024 video at 1032×1836 worked). Should a size be refused,
+  the line says so; full screen, or another window size, is the thing to try.
+- The pictures a second stay below the screen's rate: each picture takes too long for
+  it. Lower *AI motion* to Fast or *AI upscaling* to Low, or turn one of the two off.
+
 **The AppImage opens, but the video area stays empty or see-through**
 
 - 1.9.2 and later use your system's Qt when it's suitable, which fixes this on Bazzite.
@@ -1846,6 +2002,7 @@ src/
   render/CrtRenderer.*     GL resources: frame upload, conversion, blur, CRT pass, offscreen capture
   render/Enhance.cpp       Enhance: the upscaling passes, the motion search and the generated in-between
                            frames (part of CrtRenderer)
+  render/NvEnhancer.*      NVIDIA AI for Enhance: starts the helper, talks to it, shares the pictures' memory
   render/GlSurfaceWidget.* the video's window surface: an OpenGL widget with a graphics card; without one, a
                            plain widget that paints frames itself and draws looks off screen
   render/VideoWidget.*     the video view: layout, compare divider, screenshots, sync statistics
@@ -1882,8 +2039,14 @@ shaders/                   quad.vert, convert.frag, downsample.frag, blur.frag, 
                            fi_luma.frag, fi_flow.frag, fi_blend.frag (Enhance: frame generation),
                            fmv_codec.frag, fmv_palette.frag (Sega CD FMV look),
                            desk.vert, desk.frag (3D cabinet, glass, shadow)
+tools/nvfx/                crtplayer-nvfx, the helper that runs NVIDIA's Video Super Resolution and Video Frame
+                           Generation (no Qt): NvProxy (opens the SDK's libraries at run time), NvFx (the two
+                           effects, and the two together), Serve (at work for the player; the protocol is in
+                           NvShm.h), main (--probe, --where)
 tests/                     unit tests + automation scripts
+tests/nvfx_mock/           a stand-in for NVIDIA's SDK (plain arithmetic), for checks without an NVIDIA card
 third_party/ufbx/          the FBX reader (ufbx, unmodified; MIT or public domain)
+third_party/nvidia-vfx/    the NVIDIA Video Effects SDK's three API headers (NVIDIA, MIT)
 scripts/                   build-bazzite.sh, install-local.sh, make-test-media.sh, run-verification.sh,
                            check-effects.py, check-desk.py (measure the captures),
                            run-jellyfin-tests.sh + check-jellyfin.py (with tests/jellyfin_mock.py),

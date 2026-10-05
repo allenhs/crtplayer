@@ -66,6 +66,13 @@ wait 1200
 screenshot original @O@/sub_en.png
 report sub-en
 subs off
+# 2.15: an A-B loop whose end is the video's own end goes round as well
+open @M@/short_a.mp4
+waitstate playing 15000
+loop 500 2990
+wait 7000
+report loop-end
+loop off
 open @M@/resume_clip.mp4
 waitstate playing 15000
 seek 45

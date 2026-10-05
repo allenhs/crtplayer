@@ -1,13 +1,13 @@
-PASS  9-bit colour depth limits the palette: 295 distinct colours (limit 512; full colour 41688)
-PASS  3-bit colour depth limits the palette: 8 distinct colours (limit 8; full colour 41688)
-PASS  Game Boy colour depth limits the palette: 4 distinct colours (limit 4; full colour 41688)
-PASS  CGA colour depth limits the palette: 4 distinct colours (limit 4; full colour 41688)
-PASS  EGA colour depth limits the palette: 15 distinct colours (limit 16; full colour 41688)
+PASS  9-bit colour depth limits the palette: 292 distinct colours (limit 512; full colour 41402)
+PASS  3-bit colour depth limits the palette: 8 distinct colours (limit 8; full colour 41402)
+PASS  Game Boy colour depth limits the palette: 4 distinct colours (limit 4; full colour 41402)
+PASS  CGA colour depth limits the palette: 4 distinct colours (limit 4; full colour 41402)
+PASS  EGA colour depth limits the palette: 15 distinct colours (limit 16; full colour 41402)
 PASS  Game Boy palette is green-tinted: G >= R and G >= B everywhere
-PASS  ordered dither reproduces tones better at a distance: 8x8-average error 2.13 with dither vs 10.84 without
-PASS  PAL fields run at 50 Hz (NTSC at 59.94 Hz): 10.000 s vs 10.017 s: NTSC fields differ (43.6), PAL same field (0.00)
-PASS  PAL shows line-alternating hue (Hanover bars): row-to-row chroma change PAL 1.23 vs NTSC 0.87
-PASS  persistence leaves an afterglow of the previous frame (only ever brighter): 1.59% of pixels brighter than the same moment without afterglow, 0.000% darker
+PASS  ordered dither reproduces tones better at a distance: 8x8-average error 2.11 with dither vs 11.72 without
+PASS  PAL fields run at 50 Hz (NTSC at 59.94 Hz): 10.000 s vs 10.017 s: NTSC fields differ (43.8), PAL same field (0.00)
+PASS  PAL shows line-alternating hue (Hanover bars): row-to-row chroma change PAL 1.25 vs NTSC 0.88
+PASS  persistence leaves an afterglow of the previous frame (only ever brighter): 1.71% of pixels brighter than the same moment without afterglow, 0.000% darker
 PASS  no afterglow with persistence off (live picture equals the screenshot): max difference 0
 PASS  power-on opens the raster from a line: lit rows 30% at 20% vs 100% when done
 PASS  power-off collapses to a line, then a dot, then dark: lit rows 69% at 11%, lit columns 19% at 44%, max level 0 at the end

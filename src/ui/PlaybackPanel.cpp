@@ -128,6 +128,49 @@ PlaybackPanel::PlaybackPanel(QWidget* parent) : QWidget(parent)
     m_enhStatus->setWordWrap(true);
     m_enhStatus->setObjectName("paramValue");
     ef->addWidget(m_enhStatus);
+    // 2.15: NVIDIA's AI methods for the two above
+    m_nvOn = new QCheckBox(tr("Use NVIDIA AI for both (RTX graphics cards)"));
+    m_nvOn->setToolTip(tr("With an NVIDIA RTX graphics card and NVIDIA's Video Effects SDK installed (the README says how), sharper\n"
+                          "upscaling is done by NVIDIA's Video Super Resolution and smooth motion by NVIDIA's Video Frame Generation:\n"
+                          "AI models that rebuild detail and follow motion far better than the built-in methods.\n"
+                          "This only chooses the method: the two boxes above still turn upscaling and smooth motion on and off.\n"
+                          "Whenever NVIDIA's cannot be used, the built-in methods are, and the line below says why."));
+    ef->addWidget(m_nvOn);
+    m_nvRows = new QWidget;
+    {
+        auto* row = new QFormLayout(m_nvRows);
+        row->setContentsMargins(0, 0, 0, 0);
+        m_nvQuality = new QComboBox;
+        m_nvQuality->addItem(tr("Low (fastest)"), 1);
+        m_nvQuality->addItem(tr("Medium"), 2);
+        m_nvQuality->addItem(tr("High"), 3);
+        m_nvQuality->addItem(tr("Ultra"), 4);
+        m_nvQuality->setCurrentIndex(2);
+        m_nvQuality->setFocusPolicy(Qt::StrongFocus);
+        m_nvQuality->installEventFilter(new WheelGuard(m_nvQuality));
+        m_nvQuality->setToolTip(tr("How much work NVIDIA's upscaling does on each picture. High is as good as Ultra on most video and quicker."));
+        row->addRow(tr("AI upscaling"), m_nvQuality);
+        m_nvMode = new QComboBox;
+        m_nvMode->addItem(tr("Fast"), 0);
+        m_nvMode->addItem(tr("Balanced"), 1);
+        m_nvMode->addItem(tr("Best (slowest)"), 2);
+        m_nvMode->setCurrentIndex(1);
+        m_nvMode->setFocusPolicy(Qt::StrongFocus);
+        m_nvMode->installEventFilter(new WheelGuard(m_nvMode));
+        m_nvMode->setToolTip(tr("Which of NVIDIA's three frame generation models is used. Best takes several times longer for each picture:\n"
+                                "on a 120 Hz screen at 4K it may not keep up (the line below shows the time each picture takes)."));
+        row->addRow(tr("AI motion"), m_nvMode);
+    }
+    ef->addWidget(m_nvRows);
+    auto nvChanged = [this] { emit nvidiaChanged(m_nvOn->isChecked(), m_nvQuality->currentData().toInt(), m_nvMode->currentData().toInt()); };
+    connect(m_nvOn, &QCheckBox::toggled, this, nvChanged);
+    connect(m_nvQuality, &QComboBox::currentIndexChanged, this, nvChanged);
+    connect(m_nvMode, &QComboBox::currentIndexChanged, this, nvChanged);
+    m_nvStatus = new QLabel;
+    m_nvStatus->setWordWrap(true);
+    m_nvStatus->setObjectName("paramValue");
+    m_nvStatus->setTextInteractionFlags(Qt::TextSelectableByMouse);
+    ef->addWidget(m_nvStatus);
     v->addWidget(enhBox);
 
     auto* shotBox = new QGroupBox(tr("Screenshots"), this);
@@ -309,10 +352,30 @@ void PlaybackPanel::setEnhance(bool upscale, double sharpness, bool smoothMotion
 }
 void PlaybackPanel::setEnhanceStatus(bool available, const QString& status)
 {
+    m_enhAvailable = available;
     m_enhUp->setEnabled(available);
     m_enhSharp->setEnabled(available);
     m_enhMotion->setEnabled(available);
     m_enhStatus->setText(status);
+    m_enhStatus->setVisible(!status.isEmpty());
+    setNvidiaStatus(m_nvInstalled, m_nvStatus->text());
+}
+void PlaybackPanel::setNvidia(bool on, int quality, int mode)
+{
+    const QSignalBlocker b1(m_nvOn), b2(m_nvQuality), b3(m_nvMode);
+    m_nvOn->setChecked(on);
+    m_nvQuality->setCurrentIndex(std::max(0, m_nvQuality->findData(quality)));
+    m_nvMode->setCurrentIndex(std::max(0, m_nvMode->findData(mode)));
+    setNvidiaStatus(m_nvInstalled, m_nvStatus->text());
+}
+void PlaybackPanel::setNvidiaStatus(bool installed, const QString& status)
+{
+    m_nvInstalled = installed;
+    const bool usable = installed && m_enhAvailable;
+    m_nvOn->setEnabled(usable);
+    m_nvRows->setEnabled(usable && m_nvOn->isChecked());
+    m_nvRows->setVisible(installed);
+    if (m_nvStatus->text() != status) m_nvStatus->setText(status);
 }
 void PlaybackPanel::setAutoNext(bool on) { QSignalBlocker b(m_autoNext); m_autoNext->setChecked(on); }
 void PlaybackPanel::setSleepTimer(int minutes, const QString& status)

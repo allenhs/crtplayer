@@ -5,6 +5,7 @@
 #include "settings/PresetManager.h"
 
 #include <QJsonObject>
+#include <QElapsedTimer>
 #include <QMainWindow>
 #include "playback/TapeAudio.h"
 #include <QTimer>
@@ -142,8 +143,8 @@ private:
     QLabel* m_osd;
     QLabel* m_info;
     QLabel* m_emptyHint;
-    QDockWidget* m_settingsDock;
-    QDockWidget* m_playlistDock;
+    QDockWidget* m_settingsDock = nullptr;
+    QDockWidget* m_playlistDock = nullptr;
     QTabWidget* m_tabs;
     CrtPanel* m_crtPanel;
     DisplayPanel* m_displayPanel;
@@ -193,6 +194,14 @@ public:
     void setSmoothMotion(bool on);
     void applyEnhance();
     QString enhanceDescription() const;
+    // 2.15: NVIDIA's AI methods for Enhance (where the NVIDIA Video Effects SDK is installed)
+    void setInfoOverlay(bool on);     // the technical info overlay (I)
+    void setEnhanceNvidia(bool on, int quality, int mode);
+    QString nvidiaStatus() const;
+    void refreshNvidiaStatus();
+    double m_nvDrawRate = 0;          // pictures drawn a second, lately (for the status line)
+    double m_nvDrawsSeen = -1;
+    QElapsedTimer m_nvRateTimer;
     void updateVideoPath();
     qint64 shownFrameTime() const;
     bool ensureNativeFrame();                   // a frame as decoded, for original-frame grabs; then releaseNativeFrame()

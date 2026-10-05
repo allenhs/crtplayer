@@ -39,6 +39,13 @@ VideoWidget::VideoWidget(Player* player, QWidget* parent, GlSurfaceWidget::Mode 
     connect(m_player, &Player::frameReady, this, [this] { update(); });
     // Frame generation: a new moment for every refresh of the screen.
     connect(this, &GlSurfaceWidget::frameSwapped, this, [this] { if (smoothMotionRunning()) update(); });
+    // NVIDIA's helper starting, or opening its effects: the picture is drawn again when it is ready.
+    m_nvTimer.setInterval(40);
+    connect(&m_nvTimer, &QTimer::timeout, this, [this] {
+        const bool changed = m_nv.poll();
+        if (!m_nv.busy()) m_nvTimer.stop();
+        if (changed || !m_nv.busy()) update();
+    });
     m_animTimer.setInterval(16);
     m_animTimer.setTimerType(Qt::PreciseTimer);
     connect(&m_animTimer, &QTimer::timeout, this, [this] {
@@ -62,6 +69,7 @@ VideoWidget::~VideoWidget()
     if (m_curNative) gst_sample_unref(m_curNative);
     if (m_curSample) gst_sample_unref(m_curSample);
     makeCurrent();
+    m_renderer.setNvidia(nullptr, false, false, 3, 1);
     m_renderer.destroy();
     doneCurrent();
 }
@@ -211,10 +219,48 @@ bool VideoWidget::smoothMotionRunning() const
     return smoothMotionUseful() && m_hasFrame && m_player->isPlaying() && !m_player->isSeeking();
 }
 
+void VideoWidget::setNvidiaInstall(const NvEnhancer::Install& in)
+{
+    m_nv.setInstall(in);
+    update();
+}
+
+void VideoWidget::setNvidia(bool on, int quality, int mode)
+{
+    const bool changed = on != m_nvOn || quality != m_nvQuality || mode != m_nvMode;
+    m_nvOn = on;
+    m_nvQuality = std::clamp(quality, 1, 4);
+    m_nvMode = std::clamp(mode, 0, 2);
+    if (!changed) return;
+    m_nv.forgive();
+    if (!on) m_nv.shutdown();   // (the helper holds graphics memory: not kept for nothing)
+    update();
+}
+
+void VideoWidget::nvidiaForgive() { m_nv.forgive(); }
+
+bool VideoWidget::nvidiaUpscaling() const { return m_nvOn && m_renderer.enhanceStats().nvKind == 2; }
+bool VideoWidget::nvidiaMotion() const
+{
+    const int kind = m_renderer.enhanceStats().nvKind;
+    return m_nvOn && (kind == 1 || (kind == 2 && m_nv.config().mode >= 0));
+}
+
 QJsonObject VideoWidget::enhanceReport() const
 {
     const CrtRenderer::EnhanceStats st = m_renderer.enhanceStats();
-    return QJsonObject{{"available", enhanceAvailable()}, {"upscale", m_enhUp}, {"sharpness", m_enhSharp}, {"motion", m_enhMotion},
+    QJsonObject nv = m_nv.report();
+    nv["on"] = m_nvOn;
+    nv["wantQuality"] = m_nvQuality;
+    nv["wantMode"] = m_nvMode;
+    nv["kind"] = st.nvKind;
+    nv["upscaledPictures"] = double(st.nvUpscaled);
+    nv["betweenPictures"] = double(st.nvBetween);
+    nv["missed"] = double(st.nvMissed);
+    nv["passing"] = double(st.nvPassing);
+    nv["readMs"] = st.nvReadMs;
+    nv["uploadMs"] = st.nvUploadMs;
+    return QJsonObject{{"nvidia", nv},{"available", enhanceAvailable()}, {"upscale", m_enhUp}, {"sharpness", m_enhSharp}, {"motion", m_enhMotion},
                        {"upscaledFrames", double(st.upscaled)}, {"upscaledWidth", st.upSize.width()}, {"upscaledHeight", st.upSize.height()},
                        {"framePairs", double(st.pairs)}, {"framesGenerated", double(st.between)},
                        {"motionWidth", st.flowSize.width()}, {"motionHeight", st.flowSize.height()},
@@ -229,6 +275,8 @@ QImage VideoWidget::grabBetween(double t, int mode)
     makeCurrent();
     m_renderer.setFrameGeneration(true);
     uploadCurrent();
+    const bool nv = m_nvOn && enhanceAvailable() && m_nv.install().usable();
+    m_renderer.setNvidia(nv ? &m_nv : nullptr, nv && m_nv.install().superRes(), nv && m_nv.install().frameGen(), m_nvQuality, m_nvMode);
     QImage img = m_renderer.renderBetweenImage(float(t), mode);
     doneCurrent();
     return img;
@@ -541,6 +589,10 @@ void VideoWidget::paintGL()
         m_orientDirty = false;
     }
     m_renderer.setFrameGeneration(smoothMotionUseful());   // (before a new frame is taken: it keeps the one before)
+    {
+        const bool nv = m_nvOn && enhanceAvailable() && m_nv.install().usable();
+        m_renderer.setNvidia(nv ? &m_nv : nullptr, nv && m_nv.install().superRes(), nv && m_nv.install().frameGen(), m_nvQuality, m_nvMode);
+    }
     takeNewFrame();
     ++m_frameCounter;
     // (Without a graphics card the look may be drawn smaller than the widget and enlarged.)
@@ -561,10 +613,12 @@ void VideoWidget::paintGL()
         if (interval > 0 && m_player->frameLateness(m_curSample, &late)) phase = std::clamp(double(late) / interval, 0.0, 1.0);
     }
     d.framePhase = float(phase);
+    d.live = smoothMotionRunning();
     m_lastPhase = phase;
     ++m_phaseDraws;
     if (phase > 0.01 && phase < 0.995) ++m_betweenDraws;
     m_renderer.draw(defaultFramebufferObject(), d);
+    if (m_nv.busy() && !m_nvTimer.isActive()) m_nvTimer.start();
     if (needsAnimation() && !m_animTimer.isActive()) m_animTimer.start();
     const double pms = paintTimer.nsecsElapsed() / 1e6;
     ++m_paintN;

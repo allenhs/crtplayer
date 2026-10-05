@@ -27,6 +27,8 @@ trap 'rm -rf "$TMPCFG"' EXIT
 # checks compare pictures pixel by pixel, so they ask for full size; the no-GPU suite
 # tests the half-size drawing itself.
 export CRTPLAYER_LOOK_DETAIL=${CRTPLAYER_LOOK_DETAIL:-full}
+# NVIDIA's AI methods (2.15) stay out of every suite but their own, whatever is installed here.
+export CRTPLAYER_NVFX_OFF=1
 render() { sed -e "s#@M@#$M#g" -e "s#@O@#$O#g" "$HERE/tests/automation/$1" > "$O/$1"; }
 run() { # name script [env...]
   local name=$1 script=$2; shift 2
@@ -129,6 +131,52 @@ enhance_suite() {
   echo "== Enhance checks"
   checker "$O/enhance-checks.txt" python3 "$HERE/scripts/check-enhance.py" "$O"
 }
+# 1.8 features; three launches share settings and data so resume can be tested across restarts
+polish_suite() {
+  rm -rf "$XDG_CONFIG_HOME" "$XDG_DATA_HOME"
+  export XDG_CACHE_HOME=$TMPCFG/cache
+  run polish polish.txt
+  run polish-restore polish-restore.txt
+  run polish-restore2 polish-restore2.txt
+  echo "== polish checks"
+  checker "$O/polish-checks.txt" python3 "$HERE/scripts/check-polish.py" "$O" "$M"
+}
+# 2.15: NVIDIA's AI methods for Enhance, with a stand-in for NVIDIA's SDK (build/nvfx-mock-sdk,
+# or NVFX_MOCK_SDK): the player, its helper program and everything between them are the real
+# ones; only the AI models are not. Then the ways it can fail.
+nvidia_suite() {
+  local sdk=${NVFX_MOCK_SDK:-$HERE/build/nvfx-mock-sdk}
+  if [[ ! -f "$sdk/lib/libVideoFX.so" ]]; then echo "== NVIDIA checks skipped: no stand-in SDK at $sdk"; return; fi
+  local base=(CRTPLAYER_VIDEO_SURFACE=gl CRTPLAYER_FAST_PATH=never CRTPLAYER_ENHANCE_FORCE=1 CRTPLAYER_NVFX_SDK="$sdk" HOME="$O/nv-home" XDG_CACHE_HOME="$O/nv-home/cache")
+  rm -rf "$XDG_CONFIG_HOME" "$XDG_DATA_HOME" "$O/nv-home"; mkdir -p "$O/nv-home"
+  # (software OpenGL draws too slowly here for draws to count as following one another quickly:
+  # in this run they are made to, so that the hand-over from draw to draw is what gets exercised)
+  run nvidia nvidia.txt -u CRTPLAYER_NVFX_OFF "${base[@]}" NVFX_MOCK_MARK=1 CRTPLAYER_NVFX_QUICK_MS=1000
+  run nvidia-restore nvidia-restore.txt -u CRTPLAYER_NVFX_OFF "${base[@]}" NVFX_MOCK_MARK=1
+  local name
+  fault() { # name [env...]
+    name=$1; shift
+    rm -rf "$XDG_CONFIG_HOME" "$XDG_DATA_HOME"
+    sed -e "s#@N@#$name#g" "$HERE/tests/automation/nvidia-fault.txt" > "$O/$name.src"
+    sed -e "s#@M@#$M#g" -e "s#@O@#$O#g" "$O/$name.src" > "$O/$name.txt"; rm -f "$O/$name.src"
+    echo "== $name"
+    env -u CRTPLAYER_NVFX_OFF "${base[@]}" NVFX_MOCK_MARK=1 "$@" timeout 600 "$BIN" --automation "$O/$name.txt" --automation-log "$O/$name.json" > "$O/$name.log" 2>&1
+    echo "   exit code $?"
+  }
+  fault nv-fine
+  fault nv-nocard NVFX_MOCK_FAIL_CARD=1
+  fault nv-slow NVFX_MOCK_DELAY_MS=25
+  fault nv-noload NVFX_MOCK_FAIL_LOAD=sr
+  fault nv-nocreate NVFX_MOCK_FAIL_CREATE=1
+  fault nv-crash NVFX_MOCK_CRASH_AFTER=60
+  fault nv-hang NVFX_MOCK_HANG_AFTER=60
+  fault nv-nosdk CRTPLAYER_NVFX_SDK=/nonexistent
+  fault nv-nohelper CRTPLAYER_NVFX_HELPER=/nonexistent/crtplayer-nvfx PATH=/usr/bin:/bin
+  fault nv-switchedoff CRTPLAYER_NVFX_OFF=1
+  cp "$O/nv-home/cache/CRTPlayer/CRTPlayer/nvfx.log" "$O/nv-helper.log" 2>/dev/null
+  echo "== NVIDIA checks"
+  checker "$O/nvidia-checks.txt" python3 "$HERE/scripts/check-nvidia.py" "$O"
+}
 desk_suite() {
   rm -rf "$XDG_CONFIG_HOME"
   run desk desk.txt
@@ -169,14 +217,7 @@ else
   run sim sim.txt
   echo "== simulation image checks"
   checker "$O/sim-checks.txt" python3 "$HERE/scripts/check-sim.py" "$O"
-  # 1.8 features; three launches share settings and data so resume can be tested across restarts
-  rm -rf "$XDG_CONFIG_HOME" "$XDG_DATA_HOME"
-  export XDG_CACHE_HOME=$TMPCFG/cache
-  run polish polish.txt
-  run polish-restore polish-restore.txt
-  run polish-restore2 polish-restore2.txt
-  echo "== polish checks"
-  checker "$O/polish-checks.txt" python3 "$HERE/scripts/check-polish.py" "$O" "$M"
+  polish_suite
   # 2.0 desk-mode scenes
   rm -rf "$XDG_CONFIG_HOME"
   run scene scene.txt
@@ -200,6 +241,7 @@ else
   if python3 -c "import PIL" 2>/dev/null; then everyday_suite; fi
   if python3 -c "import PIL" 2>/dev/null; then nogpu_suite; fi
   if python3 -c "import PIL" 2>/dev/null; then enhance_suite; fi
+  if python3 -c "import PIL" 2>/dev/null; then nvidia_suite; fi
   rm -rf "$XDG_CONFIG_HOME"
   run sound sound.txt
   echo "== sound checks"

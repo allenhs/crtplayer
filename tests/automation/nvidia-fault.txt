@@ -1,0 +1,23 @@
+# 2.15: NVIDIA's methods failing in one way or another (the way is set by the environment):
+# the video plays on, with the built-in methods.
+bypass on
+enhance nvidia on
+enhance upscale on
+enhance motion on
+open @M@/enh_motion_30.mp4
+waitstate playing 20000
+loop 200 2800
+fullscreen on
+wait 7000
+report playing
+screenshot filtered @O@/@N@-playing.png
+pause
+wait 1200
+report paused
+screenshot filtered @O@/@N@-paused.png
+play
+wait 1500
+report end
+fullscreen off
+wait 800
+quit

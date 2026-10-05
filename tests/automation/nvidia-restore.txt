@@ -1,0 +1,8 @@
+# 2.15: the NVIDIA choices come back with the settings.
+wait 800
+report restored
+enhance nvidia off
+enhance nvquality 3
+enhance nvmode 1
+wait 300
+quit

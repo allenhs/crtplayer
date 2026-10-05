@@ -47,6 +47,9 @@ check('resume: the next launch continues where the file was left', 44000 <= pos(
 check('resume: a file left in its last 30 s starts from the beginning', pos('fresh') < 4000, f"{pos('fresh'):.0f} ms")
 check('recent files list the played file', 'resume_clip.mp4' in rep['resumed']['recentFiles'], ', '.join(rep['resumed']['recentFiles'][:4]))
 
+le = rep['loop-end']
+check('an A-B loop that ends at the video\'s end goes round too (2.15: it used to stop there)', le['state'] == 'playing' and 400 <= le['positionMs'] <= 3000,
+      f"{le['state']} at {le['positionMs']:.0f} ms, seven seconds into a loop from 0.5 s to the end of a 3 s video")
 txt = (out / 'sysreport.txt').read_text()
 need = ['CRT Player:', 'OS:', 'Session:', 'Qt:', 'OpenGL:', 'GStreamer:', 'Hardware decoders:', 'Current video:', 'Jellyfin:']
 missing = [k for k in need if k not in txt]

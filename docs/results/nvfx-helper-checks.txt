@@ -1,0 +1,53 @@
+PASS hello: the SDK's version and both features  [ok proto=1 sdk=1.3.0 features=nvvfxvideoframegeneration,nvvfxvideosuperres]
+PASS an unknown request is refused, not fatal
+PASS a frame before anything is open is refused
+PASS open: super resolution alone  [ok load=0 card=1]
+PASS frame
+PASS get: the newest frame  [ok kind=c ms=0.03 run=0.00 down=0.03]
+PASS the result has the larger size's content (a ramp left to right)  [((19, 60, 200), (241, 60, 200))]
+PASS the other channels are in place (RGBA)  [(128, 60, 200)]
+PASS rows are packed: the last row is written, the next slot untouched
+PASS without frame generation every moment is the newest frame  [ok kind=c ms=0.01 run=0.00 down=0.01]
+PASS a third slot is refused
+PASS open: frame generation alone  [ok load=0 card=1]
+PASS a picture before any frame is refused
+PASS one frame only: that frame, whatever the moment  [ok kind=c ms=0.01 run=0.00 down=0.01]
+PASS between two frames: generated  [ok kind=g ms=0.01 run=0.01 down=0.00]
+PASS ... a quarter of the way from the frame before to the newest  [(150, 25, 0)]
+PASS t = 0: the frame before, as it was
+PASS t = 1: the newest frame, as it is
+PASS the pair moves on with each frame  [(0, 50, 40)]
+PASS across a cut nothing is generated: the nearer real frame  [('ok kind=p ms=0.00 run=0.00 down=0.00', 'ok kind=c ms=0.00 run=0.00 down=0.00')]
+PASS requests sent together are answered in order  [['22 ok ms=0.00', '23 ok kind=g ms=0.01 run=0.01 down=0.00', '24 ok kind=c ms=0.00 run=0.00 down=0.00']]
+PASS ... each with its own picture  [(100, 50, 0)]
+PASS close
+PASS the helper leaves when the connection closes
+PASS open: both, on the card  [ok load=1 card=1]
+PASS   generated between the two upscaled frames  [('ok kind=g ms=0.13 run=0.07 down=0.06', (150, 150, 150))]
+PASS   super resolution's stamp: red, then blue, top left  [((255, 0, 0), (0, 0, 255))]
+PASS   frame generation's stamp: green, below  [(0, 255, 0)]
+PASS   the newest frame: upscaled, not generated  [('ok kind=c ms=0.06 run=0.00 down=0.06', (100, 100, 100))]
+PASS   the frame before: upscaled, not generated  [ok kind=p ms=0.02 run=0.00 down=0.02]
+PASS open: both, through ordinary memory when the card cannot  [ok load=1 card=0]
+PASS   generated between the two upscaled frames  [('ok kind=g ms=0.12 run=0.07 down=0.06', (150, 150, 150))]
+PASS   super resolution's stamp: red, then blue, top left  [((255, 0, 0), (0, 0, 255))]
+PASS   frame generation's stamp: green, below  [(0, 255, 0)]
+PASS   the newest frame: upscaled, not generated  [('ok kind=c ms=0.05 run=0.00 down=0.05', (100, 100, 100))]
+PASS   the frame before: upscaled, not generated  [ok kind=p ms=0.01 run=0.00 down=0.01]
+PASS an effect that cannot be loaded: open is refused with the reason  [err loading Video Super Resolution: error (mock) (-10)]
+PASS ... and the helper is still there for what does work  [ok load=0 card=1]
+PASS a size the effect refuses
+PASS a size out of range
+PASS another size without super resolution
+PASS neither effect
+PASS shared memory that is not there  [err the shared memory /crtplayer-nvfx-nonexistent could not be opened: No such file or directory]
+PASS the helper dying shows as a closed connection  [['ok kind=g ms=0.02 run=0.01 down=0.01', 'ok kind=g ms=0.01 run=0.01 down=0.00', '(closed)', '(closed)']]
+PASS no SDK: the helper says so  [err the NVIDIA Video Effects SDK could not be loaded: it is not installed (no SDK folder was found)]
+PASS an SDK that cannot be loaded: hello and open say why  [err the NVIDIA Video Effects SDK could not be loaded: /tmp/nvfx-empty-sdk/lib/libNVCVImage.so: cannot open shared object file: No such file or directory]
+PASS --where: the folder and the features, without loading anything  [sdk=nvfx-mock-sdk
+features=nvvfxvideoframegeneration,nvvfxvideosuperres
+]
+PASS --where: nothing installed  [sdk=
+]
+
+48 passed, 0 failed

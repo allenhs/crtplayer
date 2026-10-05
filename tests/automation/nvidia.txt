@@ -1,0 +1,119 @@
+# 2.15: NVIDIA's Video Super Resolution and Video Frame Generation in place of the built-in
+# methods. Run with a stand-in for NVIDIA's SDK (tests/nvfx_mock: plain arithmetic, and a
+# stamp in the top left corner of everything it makes), on the path a graphics card takes.
+bypass on
+enhance nvidia on
+enhance upscale on
+# ---- upscaling: a 960 x 540 video shown at 1920 x 1080
+open @M@/enh_detail_half.mp4
+waitstate playing 20000
+pause
+seek 2
+wait 1500
+fullscreen on
+wait 1500
+enhance nvwait ready 8000
+wait 800
+screenshot filtered @O@/nv-up.png
+report up
+# the built-in upscaler on the same frame
+enhance nvidia off
+wait 1000
+screenshot filtered @O@/nv-up-builtin.png
+report up-builtin
+enhance nvidia on
+enhance nvwait ready 8000
+wait 800
+screenshot filtered @O@/nv-up-again.png
+# another quality: the effects are opened anew
+enhance nvquality 4
+wait 1800
+report up-ultra
+enhance nvquality 3
+wait 1800
+# a CRT look is left alone
+bypass off
+preset Clean Broadcast Monitor
+wait 1200
+screenshot filtered @O@/nv-look.png
+report look
+bypass on
+fullscreen off
+wait 1500
+# ---- frame generation: pictures between two frames, at the video's size
+enhance upscale off
+enhance motion on
+open @M@/enh_motion_30.mp4
+waitstate playing 20000
+pause
+seek 1.0
+wait 1500
+screenshot original @O@/nv-fg-a.png
+step fwd
+wait 1500
+enhance nvwait ready 8000
+wait 600
+report pair
+screenshot original @O@/nv-fg-b.png
+enhance grab 0.5 @O@/nv-fg-mid.png
+enhance grab 0.25 @O@/nv-fg-t25.png
+enhance grab 0.0 @O@/nv-fg-t0.png
+enhance grab 1.0 @O@/nv-fg-t1.png
+report grabbed
+# ---- playing, effects off, fullscreen: upscaled, and frames generated at the larger size
+enhance upscale on
+loop 200 2800
+play
+fullscreen on
+wait 5000
+report playing-up
+screenshot filtered @O@/nv-playing-up.png
+pause
+wait 1200
+screenshot filtered @O@/nv-paused-up.png
+report paused-up
+play
+wait 500
+# ---- playing with a look: frames between at the video's size
+bypass off
+wait 4500
+report playing-look
+screenshot filtered @O@/nv-playing-look.png
+bypass on
+# ---- playing in a window, upscaling off: the same
+enhance upscale off
+fullscreen off
+wait 4500
+report playing-plain
+# ---- a video with as many frames a second as the screen shows: nothing to generate
+loop off
+open @M@/enh_motion_60.mp4
+waitstate playing 20000
+wait 2500
+report sixty
+# ---- turned off while playing, and on again
+open @M@/enh_motion_30.mp4
+waitstate playing 20000
+loop 200 2800
+wait 2000
+enhance nvidia off
+wait 3000
+report playing-builtin
+enhance nvidia on
+wait 3500
+report playing-again
+# ---- desk mode: no frame generation there (as before)
+desk on
+wait 3000
+report desk
+desk off
+wait 2000
+# the panel, with the line that says what is going on
+settings Playback
+wait 2500
+grabwindow @O@/nv-panel.png
+# the choices are kept
+enhance nvquality 2
+enhance nvmode 0
+wait 500
+quit
