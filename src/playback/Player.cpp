@@ -20,6 +20,31 @@ namespace {
 constexpr int kFlagVideo = 1 << 0;
 constexpr int kFlagAudio = 1 << 1;
 constexpr int kFlagText = 1 << 2;
+
+// "Nothing for this stretch" notices (GAP events) that must not go on: see where these are installed.
+GstPadProbeReturn dropBrokenGap(GstPad*, GstPadProbeInfo* info, gpointer)
+{
+    GstEvent* ev = GST_PAD_PROBE_INFO_EVENT(info);
+    if (GST_EVENT_TYPE(ev) != GST_EVENT_GAP) return GST_PAD_PROBE_OK;
+    GstClockTime at = GST_CLOCK_TIME_NONE, length = GST_CLOCK_TIME_NONE;
+    gst_event_parse_gap(ev, &at, &length);
+    const GstClockTime sane = GstClockTime(1000) * 3600 * GST_SECOND;   // (a thousand hours)
+    const bool broken = !GST_CLOCK_TIME_IS_VALID(at) || at > sane || (GST_CLOCK_TIME_IS_VALID(length) && length > sane);
+    return broken ? GST_PAD_PROBE_DROP : GST_PAD_PROBE_OK;
+}
+
+GstPadProbeReturn dropGap(GstPad*, GstPadProbeInfo* info, gpointer)
+{
+    return GST_EVENT_TYPE(GST_PAD_PROBE_INFO_EVENT(info)) == GST_EVENT_GAP ? GST_PAD_PROBE_DROP : GST_PAD_PROBE_OK;
+}
+
+void onMatroskaPad(GstElement*, GstPad* pad, gpointer)
+{
+    gchar* name = gst_pad_get_name(pad);
+    const bool video = name && g_str_has_prefix(name, "video_");
+    g_free(name);
+    if (video) gst_pad_add_probe(pad, GST_PAD_PROBE_TYPE_EVENT_DOWNSTREAM, &dropGap, nullptr, nullptr);
+}
 constexpr int kFlagDeinterlace = 1 << 9;
 constexpr int kFlagSoftColorbalance = 1 << 10;
 
@@ -104,10 +129,23 @@ Player::Player(QObject* parent) : QObject(parent)
         // A flushing seek should always complete with ASYNC_DONE; never leave the UI stuck.
         m_seekInFlight = false;
         if (m_hasPendingSeek) { m_hasPendingSeek = false; doSeek(m_pendingSeek, m_pendingMode); }
+        else if (m_refreshWanted) { m_refreshWanted = false; refreshSubtitles(); }
     });
+    // The subtitle lines the player keeps itself: read some minutes ahead of the picture as it moves on.
+    m_feed.setNotify([this] { QMetaObject::invokeMethod(this, [this] { onFeedNotify(); }, Qt::QueuedConnection); });
+    m_feedTimer.setInterval(500);
+    connect(&m_feedTimer, &QTimer::timeout, this, [this] { if (m_pipe && m_loaded && m_feedOn) m_feed.playedTo(position()); });
+    m_feedTimer.start();
+    m_feedRefresh.setSingleShot(true);
+    m_feedRefresh.setInterval(250);
+    connect(&m_feedRefresh, &QTimer::timeout, this, [this] { refreshSubtitles(); });
 }
 
-Player::~Player() { teardown(); }
+Player::~Player()
+{
+    m_feed.setNotify(nullptr);
+    teardown();
+}
 
 QStringList Player::missingEssentialElements()
 {
@@ -291,6 +329,7 @@ bool Player::open(const QString& in, bool autoplay, qint64 startNs)
     if (!in.contains(QStringLiteral("://")))
         uri = QUrl::fromLocalFile(QFileInfo(in).absoluteFilePath()).toString(QUrl::FullyEncoded);
     m_hwRetried = false;
+    m_carrySel = -1;
     return openInternal(uri, autoplay, startNs, false);
 }
 
@@ -410,11 +449,31 @@ bool Player::openInternal(const QString& uri, bool autoplay, qint64 startNs, boo
         gst_caps_unref(any);
         return GST_PAD_PROBE_HANDLED;
     }, nullptr, nullptr);
-    gst_element_add_pad(bin, gst_ghost_pad_new("sink", pad));
+    // 2.16: text subtitles are drawn here, from the lines the player keeps (SubtitleFeed.h), before anything
+    // else is done to the picture. (CRTPLAYER_SUBTITLE_FEED_OFF: GStreamer's own subtitle path for everything.)
+    GstElement* subs = qEnvironmentVariableIsSet("CRTPLAYER_SUBTITLE_FEED_OFF") ? nullptr : m_feed.build(GST_BIN(bin));
+    GstPad* in = subs ? gst_element_get_static_pad(subs, "video_sink") : nullptr;
+    if (subs && in && gst_element_link_pads(subs, "src", scale ? scale : conv, "sink")) {
+        m_feedOn = true;
+        m_feed.playedTo(std::max<qint64>(0, m_startPos));   // (where this video is going to start: its lines are read from around there)
+        gst_element_add_pad(bin, gst_ghost_pad_new("sink", in));
+    } else {
+        m_feedOn = false;
+        if (subs) m_feed.unbuild();
+        gst_element_add_pad(bin, gst_ghost_pad_new("sink", pad));
+    }
+    if (in) gst_object_unref(in);
     gst_object_unref(pad);
+    m_subSel = -1;
+    m_nEmbeddedText = 0;
+    m_trackFiles.clear();
+    m_trackFileAsked = -1;
+    m_trackFileWaiting = false;
+    m_textReopenPending = false;
 
     g_object_set(m_pipe, "video-sink", bin, "uri", uri.toUtf8().constData(), nullptr);
-    if (!m_subUri.isEmpty()) g_object_set(m_pipe, "suburi", m_subUri.toUtf8().constData(), nullptr);
+    // (A subtitle file is read by the player's own feed; without the feed, by playbin.)
+    if (!m_subUri.isEmpty() && !m_feedOn) g_object_set(m_pipe, "suburi", m_subUri.toUtf8().constData(), nullptr);
     if (GstElement* as = fallbackAudioSink(&m_audioOutput)) g_object_set(m_pipe, "audio-sink", as, nullptr);
     // Keeps voices at their normal pitch when the speed changes (passthrough at 1x).
     // Audio chain: natural-sounding speed changes, then the look's tape and speaker sound.
@@ -422,6 +481,15 @@ bool Player::openInternal(const QString& uri, bool autoplay, qint64 startNs, boo
         crtTapeRegister();
         GstElement* bin = gst_bin_new("audiochain");
         GstElement* st = gst_element_factory_make("scaletempo", nullptr);
+        // At another speed, scaletempo recalculates the time of a "nothing for this stretch" notice passing through it,
+        // and for one that lies before the place just jumped to (MPEG-TS and some Matroska files send such) the
+        // result is a time hundreds of years ahead. The sound output then waits for that time, in a way that the
+        // next jump cannot interrupt: the player would stand still for good. Such a notice goes no further.
+        if (st)
+            if (GstPad* sp = gst_element_get_static_pad(st, "src")) {
+                gst_pad_add_probe(sp, GST_PAD_PROBE_TYPE_EVENT_DOWNSTREAM, &dropBrokenGap, nullptr, nullptr);
+                gst_object_unref(sp);
+            }
         GstElement* c1 = gst_element_factory_make("audioconvert", nullptr);
         GstElement* tape = gst_element_factory_make("crttape", nullptr);
         GstElement* c2 = gst_element_factory_make("audioconvert", nullptr);
@@ -452,7 +520,13 @@ bool Player::openInternal(const QString& uri, bool autoplay, qint64 startNs, boo
     flags |= kFlagVideo | kFlagAudio;
     // The subtitle path is always built, so subtitles can come on at any moment; while they
     // are not wanted the overlay is told to stay silent (applySubtitleShown).
-    flags |= kFlagText;
+    // 2.16: with the lines in the player's own hands, playbin's subtitle path stays switched off: nothing of the
+    // video's subtitle streams then flows through the playing pipeline (where a stream of lines waiting for its
+    // pictures could bring a jump to a standstill). A video that turns out to need it (picture subtitles) is
+    // opened again with it on: it is set here, before anything flows, and never while the pipeline runs
+    // (switched on then, playbin now and again never delivered another picture).
+    m_playbinText = !m_feedOn || m_playbinTextFor.contains(m_uri);
+    if (m_playbinText) flags |= kFlagText; else flags &= ~kFlagText;
     m_subShown = m_subsWanted;
     if (m_deinterlace) flags |= kFlagDeinterlace; else flags &= ~kFlagDeinterlace;
     flags &= ~kFlagSoftColorbalance;  // colour controls live in the shader
@@ -460,7 +534,7 @@ bool Player::openInternal(const QString& uri, bool autoplay, qint64 startNs, boo
     m_audioPicked = false;
     m_pendingAudio = -1;
     m_prefMuted = false;
-    m_subPicked = m_subUriChosen;
+    m_subPicked = m_subUriChosen || (m_carrySel >= 0 && m_carryPicked);
     applyOffsets();
     applySubtitleStyle();
     gst_stream_volume_set_volume(GST_STREAM_VOLUME(m_pipe), GST_STREAM_VOLUME_FORMAT_CUBIC, m_volume);
@@ -494,7 +568,10 @@ void Player::teardown()
         gst_bus_set_sync_handler(bus, nullptr, nullptr, nullptr);
         gst_object_unref(bus);
         g_signal_handlers_disconnect_by_data(m_pipe, this);
+        m_feed.setShown(false);   // (a picture held back for its subtitle lines is let go)
         gst_element_set_state(m_pipe, GST_STATE_NULL);
+        m_feed.unbuild();
+        m_feedOn = false;
         gst_object_unref(m_pipe);
         m_pipe = nullptr;
         m_appsink = nullptr;
@@ -503,7 +580,8 @@ void Player::teardown()
     }
     QMutexLocker lock(&m_mutex);
     if (m_videoDec) { gst_object_unref(m_videoDec); m_videoDec = nullptr; }
-    if (m_textOverlay) { gst_object_unref(m_textOverlay); m_textOverlay = nullptr; }
+    for (GstElement* e : m_textOverlays) gst_object_unref(e);
+    m_textOverlays.clear();
     if (m_subOverlay) { gst_object_unref(m_subOverlay); m_subOverlay = nullptr; }
     if (m_deintEl) { gst_object_unref(m_deintEl); m_deintEl = nullptr; }
     if (m_sample) { gst_sample_unref(m_sample); m_sample = nullptr; }
@@ -524,6 +602,7 @@ void Player::teardown()
 void Player::close()
 {
     teardown();
+    m_feed.clearSource();
     m_uri.clear();
     m_duration = -1;
     m_audioTracks.clear();
@@ -572,6 +651,7 @@ qint64 Player::position() const
 void Player::seek(qint64 posNs, SeekMode mode)
 {
     if (!m_pipe || !m_loaded) { m_startPos = posNs; return; }
+    if (!m_refreshing) m_lateRefreshes = 0;
     if (m_duration > 0) posNs = std::clamp<qint64>(posNs, 0, m_duration);
     else posNs = std::max<qint64>(posNs, 0);
     if (m_seekInFlight) {
@@ -596,10 +676,15 @@ void Player::doSeek(qint64 posNs, SeekMode mode)
     m_endReported = false;
     m_videoDone = false;
     m_seekWatchdog.start();
+    // The subtitle lines follow the jump: the picture after it waits (a few milliseconds; a quarter of a second
+    // at the very most) until the lines in force there have been handed to the overlay.
+    const quint64 hold = m_feedOn ? m_feed.aboutToSeek(posNs) : 0;
+    m_refreshWanted = false;   // (the jump brings the lines as they now are)
     if (!gst_element_seek(m_pipe, m_rate, GST_FORMAT_TIME, GstSeekFlags(flags), GST_SEEK_TYPE_SET, posNs,
                           GST_SEEK_TYPE_NONE, GST_CLOCK_TIME_NONE)) {
         m_seekInFlight = false;
         m_seekWatchdog.stop();
+        if (m_feedOn) m_feed.jumpFailed(hold);
     }
 }
 
@@ -615,8 +700,11 @@ void Player::seekKeyframe(bool forward)
     m_endReported = false;
     m_videoDone = false;
     m_seekWatchdog.start();
+    const quint64 hold = m_feedOn ? m_feed.aboutToSeek(target) : 0;
+    m_refreshWanted = false;
     if (!gst_element_seek(m_pipe, m_rate, GST_FORMAT_TIME, GstSeekFlags(flags), GST_SEEK_TYPE_SET, target,
                           GST_SEEK_TYPE_NONE, GST_CLOCK_TIME_NONE)) {
+        if (m_feedOn) m_feed.jumpFailed(hold);
         m_seekInFlight = false;
         m_seekWatchdog.stop();
     }
@@ -632,24 +720,143 @@ void Player::setTapeParams(const TapeParams& p)
 
 void Player::setSubtitlesWanted(bool on)
 {
+    const bool was = m_subShown;
     m_subsWanted = on;
     m_subPicked = false;
     m_subShown = on;
     if (!m_pipe) return;
-    applySubtitleShown();
+    if (!m_feedOn) applySubtitleShown();   // (with the feed, updateSubtitleFeed does it, once the lines' source is set)
     if (on) applyTrackPreferences();
+    updateSubtitleFeed();
+    if (m_feedOn && was != on && m_loaded) refreshSubtitles();   // (the picture on screen gets its line, or loses it)
 }
 
-// Shows or hides the subtitles of the current video (the overlay draws them or stays silent).
+// The subtitle track chosen: among the file's own (playbin's numbering), or the subtitle file after them.
+int Player::selectedText() const
+{
+    if (m_feedOn) return m_subSel;
+    gint cur = -1;
+    if (m_pipe) g_object_get(m_pipe, "current-text", &cur, nullptr);
+    return cur;
+}
+
+void Player::selectText(int idx)
+{
+    m_subSel = idx;
+    if (!m_pipe || idx < 0 || m_feedOn) return;   // (with the feed, playbin hears of it only for picture subtitles)
+    gint cur = -1;
+    g_object_get(m_pipe, "current-text", &cur, nullptr);
+    if (cur != idx) g_object_set(m_pipe, "current-text", idx, nullptr);
+}
+
+// Where the feed takes its lines from: the chosen track, while subtitles are shown.
+void Player::updateSubtitleFeed()
+{
+    if (!m_feedOn) return;
+    if (!m_subShown || m_subSel < 0 || m_subSel >= m_textTracks.size()) m_feed.clearSource();
+    else if (m_subSel >= m_nEmbeddedText) m_feed.setSource(m_subUri, -1);
+    else if (m_trackFiles.contains(m_subSel)) m_feed.setSource(m_trackFiles.value(m_subSel), -1);
+    else if (QUrl(m_uri).isLocalFile()) m_feed.setSource(m_uri, m_subSel);
+    else {
+        // Not a file on this computer: reading it a second time, for its lines, would fetch the whole video twice.
+        // Whoever knows the server is asked for the track as a file; until then playbin draws it (applySubtitleShown).
+        m_feed.clearSource();
+        // (Asked once the video has opened: until then its list of subtitle tracks may be incomplete, and the
+        // answer depends on it.)
+        if (m_loaded && m_trackFileAsked != m_subSel) {
+            m_trackFileAsked = m_subSel;
+            m_trackFileWaiting = true;
+            const int idx = m_subSel;
+            const quint64 gen = m_generation;
+            QMetaObject::invokeMethod(this, [this, idx] { emit embeddedSubtitleFileWanted(idx); }, Qt::QueuedConnection);
+            // (no answer in five seconds is taken for a no)
+            QTimer::singleShot(5000, this, [this, idx, gen] { if (gen == m_generation && m_trackFileWaiting && m_trackFileAsked == idx) setEmbeddedSubtitleFile(idx, QString()); });
+        }
+    }
+    applySubtitleShown();
+}
+
+// The answer to embeddedSubtitleFileWanted: the track's lines as a file, or nothing (it cannot be had).
+void Player::setEmbeddedSubtitleFile(int textIndex, const QString& fileUri)
+{
+    if (!m_pipe || !m_feedOn || textIndex < 0) return;
+    if (textIndex == m_trackFileAsked) m_trackFileWaiting = false;
+    if (!fileUri.isEmpty()) m_trackFiles.insert(textIndex, fileUri);
+    if (textIndex != m_subSel) return;
+    updateSubtitleFeed();
+    if (m_loaded && !fileUri.isEmpty()) refreshSubtitles();
+}
+
+void Player::onFeedNotify()
+{
+    if (!m_pipe) return;
+    applySubtitleShown();
+    // A line for the picture that stands on screen arrived after it: the picture is fetched again, with it.
+    // (not again and again: three times in a row at most, until the viewer jumps somewhere himself)
+    if (m_feed.takeLateLine() && m_loaded && m_subShown && m_state == State::Paused && !m_targetPlaying && m_lateRefreshes < 3) {
+        ++m_lateRefreshes;
+        refreshSubtitles();
+    }
+}
+
+// The picture on screen once more, with the subtitle lines as they now are (a jump to where the video stands).
+// While a jump is under way the picture on screen is not where the video is going: it is done once that jump
+// is over (if no other follows it, which brings the lines by itself).
+void Player::refreshSubtitles()
+{
+    if (!m_pipe || !m_loaded || (m_state != State::Playing && m_state != State::Paused)) return;
+    if (m_seekInFlight) { m_refreshWanted = true; return; }
+    const qint64 shown = m_lastFrameStreamTime;
+    m_refreshing = true;
+    seek(shown >= 0 ? shown + 1000000 : position(), SeekMode::Accurate);
+    m_refreshing = false;
+}
+
+QJsonObject Player::subtitleFeedReport() const
+{
+    QJsonObject o = m_feed.report();
+    o["on"] = m_feedOn;
+    o["videoOpens"] = double(m_generation);
+    o["selected"] = m_subSel;
+    o["ownTracks"] = m_nEmbeddedText;
+    return o;
+}
+
+// Shows or hides the subtitles of the current video. Text subtitles are drawn by the feed's overlay; picture
+// subtitles (and everything, without the feed) by playbin's. The one that is not drawing stays silent.
 void Player::applySubtitleShown()
 {
+    const SubtitleFeed::Kind kind = m_feedOn ? m_feed.kind() : SubtitleFeed::Kind::None;
+    const bool viaFeed = m_feedOn && kind == SubtitleFeed::Kind::Text;
+    const bool viaPlaybin = playbinDraws();
+    if (m_feedOn) {
+        m_feed.setDelayNs(qint64(m_subDelayMs) * GST_MSECOND);
+        m_feed.setShown(m_subShown && (viaFeed || kind == SubtitleFeed::Kind::Reading));
+        // Picture subtitles (or lines the player cannot have): playbin's own path draws them.
+        const bool want = m_subShown && viaPlaybin;
+        const quint64 gen = m_generation;
+        if (want && !m_playbinText) {
+            if (!m_textReopenPending) {
+                m_textReopenPending = true;
+                QMetaObject::invokeMethod(this, [this, gen] { if (gen == m_generation) reopenWithPlaybinText(); }, Qt::QueuedConnection);
+            }
+        } else if (want) {
+            gint cur = -1;
+            g_object_get(m_pipe, "current-text", &cur, nullptr);
+            if (cur != m_subSel) {
+                g_object_set(m_pipe, "current-text", m_subSel, nullptr);
+                // (the file is read again from here, with this track: its lines already read went elsewhere)
+                if (m_loaded) QMetaObject::invokeMethod(this, [this, gen] { if (gen == m_generation) refreshSubtitles(); }, Qt::QueuedConnection);
+            }
+        }
+    }
     GstElement* ov = nullptr;
     {
         QMutexLocker lock(&m_mutex);
         if (m_subOverlay) ov = GST_ELEMENT(gst_object_ref(m_subOverlay));
     }
     if (!ov) return;
-    g_object_set(ov, "silent", m_subShown ? FALSE : TRUE, nullptr);
+    g_object_set(ov, "silent", (m_subShown && viaPlaybin) ? FALSE : TRUE, nullptr);
     // The subtitle delay: an offset on the overlay's subtitle input, so it holds for every
     // kind of subtitle (playbin's own text-offset misses subtitles stored inside the video).
     if (GstPad* pad = gst_element_get_static_pad(ov, "subtitle_sink")) {
@@ -657,6 +864,35 @@ void Player::applySubtitleShown()
         gst_object_unref(pad);
     }
     gst_object_unref(ov);
+}
+
+// Must playbin's own subtitle path draw the track that is showing? Picture subtitles; a track the player's
+// reader failed on; a track of a video not on this computer that the server does not hand out as a file
+// (asked, and answered no). Not: a track whose lines are still being looked for, or simply none set yet.
+bool Player::playbinDraws() const
+{
+    if (!m_feedOn) return true;
+    if (m_subSel < 0 || m_subSel >= m_nEmbeddedText) return false;   // (a subtitle file, or nothing)
+    const SubtitleFeed::Kind kind = m_feed.kind();
+    if (kind == SubtitleFeed::Kind::Unsupported || kind == SubtitleFeed::Kind::Failed) return true;
+    return kind == SubtitleFeed::Kind::None && !QUrl(m_uri).isLocalFile() && m_trackFileAsked == m_subSel && !m_trackFileWaiting &&
+           !m_trackFiles.contains(m_subSel);
+}
+
+// This video needs playbin's own subtitle path: it is opened again, where it stands, with that path set up
+// from the start (and so is every later opening of it in this session).
+void Player::reopenWithPlaybinText()
+{
+    m_textReopenPending = false;
+    if (!m_pipe || m_uri.isEmpty() || m_playbinText) return;
+    if (!m_subShown || !playbinDraws()) return;   // (not needed after all)
+    m_playbinTextFor.insert(m_uri);
+    m_carrySel = m_subSel;
+    m_carryPicked = m_subPicked;
+    const qint64 pos = m_loaded ? position() : m_startPos;
+    const bool shown = m_subShown;
+    openInternal(m_uri, m_targetPlaying, pos, true);
+    m_subShown = shown;
 }
 
 void Player::setPreferredLanguages(const QString& audio, const QString& subtitle)
@@ -687,12 +923,11 @@ void Player::applyTrackPreferences()
                 }
     }
     if (!m_subPicked && m_subShown && !m_prefSubLang.isEmpty() && m_textTracks.size() > 1) {
-        gint cur = -1;
-        g_object_get(m_pipe, "current-text", &cur, nullptr);
+        const int cur = selectedText();
         const bool curMatches = cur >= 0 && cur < m_textTracks.size() && m_textTracks[cur].lang == m_prefSubLang;
         if (!curMatches)
             for (const TrackInfo& t : m_textTracks)
-                if (t.lang == m_prefSubLang) { g_object_set(m_pipe, "current-text", t.index, nullptr); break; }
+                if (t.lang == m_prefSubLang) { selectText(t.index); break; }
     }
 }
 
@@ -704,8 +939,11 @@ void Player::setAudioDelay(int ms)
 
 void Player::setSubtitleDelay(int ms)
 {
+    const int before = m_subDelayMs;
     m_subDelayMs = std::clamp(ms, -60000, 60000);
     applyOffsets();
+    // (the feed's lines already handed over carry the old delay: they are handed over anew, once the value has settled)
+    if (m_feedOn && m_loaded && before != m_subDelayMs && m_subShown) m_feedRefresh.start();
 }
 
 void Player::applyOffsets()
@@ -737,21 +975,23 @@ void Player::applySubtitleStyle()
     static const int kSizes[4] = {13, 18, 24, 31};
     const QByteArray font = QStringLiteral("Sans Bold %1").arg(kSizes[std::clamp(m_subStyle.size, 0, 3)]).toUtf8();
     g_object_set(m_pipe, "subtitle-font-desc", font.constData(), nullptr);
-    GstElement* ov = nullptr;
+    if (m_feedOn && m_feed.overlay()) g_object_set(m_feed.overlay(), "font-desc", font.constData(), nullptr);
+    QVector<GstElement*> overlays;
     {
         QMutexLocker lock(&m_mutex);
-        if (m_textOverlay) ov = GST_ELEMENT(gst_object_ref(m_textOverlay));
+        for (GstElement* e : m_textOverlays) overlays.push_back(GST_ELEMENT(gst_object_ref(e)));
     }
-    if (!ov) return;
     const guint color = m_subStyle.color == 1 ? 0xFFFFE94Du : 0xFFFFFFFFu;
     const bool box = m_subStyle.background == 1;
-    g_object_set(ov, "font-desc", font.constData(), "color", color, "outline-color", 0xFF000000u, "draw-outline", TRUE,
-                 "draw-shadow", box ? FALSE : TRUE, "shaded-background", box ? TRUE : FALSE, "shading-value", 150u, nullptr);
-    // valignment: 1 bottom, 2 top, 3 a position down the picture (0..1)
-    if (m_subStyle.position == 2) g_object_set(ov, "valignment", 2, "ypad", 25, nullptr);
-    else if (m_subStyle.position == 1) g_object_set(ov, "valignment", 3, "ypos", 0.80, nullptr);
-    else g_object_set(ov, "valignment", 1, "ypad", 25, nullptr);
-    gst_object_unref(ov);
+    for (GstElement* ov : overlays) {
+        g_object_set(ov, "font-desc", font.constData(), "color", color, "outline-color", 0xFF000000u, "draw-outline", TRUE,
+                     "draw-shadow", box ? FALSE : TRUE, "shaded-background", box ? TRUE : FALSE, "shading-value", 150u, nullptr);
+        // valignment: 1 bottom, 2 top, 3 a position down the picture (0..1)
+        if (m_subStyle.position == 2) g_object_set(ov, "valignment", 2, "ypad", 25, nullptr);
+        else if (m_subStyle.position == 1) g_object_set(ov, "valignment", 3, "ypos", 0.80, nullptr);
+        else g_object_set(ov, "valignment", 1, "ypad", 25, nullptr);
+        gst_object_unref(ov);
+    }
 }
 
 // ---- the fast path without a graphics card ---------------------------------------------
@@ -940,6 +1180,7 @@ void Player::appliedOffsets(int* audioSinkMs, int* videoSinkMs, int* textMs) con
             }
         }
     }
+    if (m_feedOn && m_feed.kind() == SubtitleFeed::Kind::Text) *textMs = int(m_feed.delayNs() / GST_MSECOND);
     if (as) { sinkOffsetMs(as, audioSinkMs); gst_object_unref(as); }
     if (m_appsink) sinkOffsetMs(m_appsink, videoSinkMs);
 }
@@ -977,6 +1218,27 @@ void Player::setExternalSubtitle(const QString& in, bool chosenByViewer)
     if (in.isEmpty()) { m_subUri.clear(); return; }
     m_subUri = in.contains(QStringLiteral("://")) ? in
                                                   : QUrl::fromLocalFile(QFileInfo(in).absoluteFilePath()).toString(QUrl::FullyEncoded);
+}
+
+// A subtitle file picked, or put away, while the video is open. True: it is in effect (the lines are the
+// player's own to hand over, the video goes on as it is). False: the video has to be opened again for it.
+bool Player::changeExternalSubtitle(const QString& in, bool chosenByViewer)
+{
+    setExternalSubtitle(in, chosenByViewer);
+    if (!m_pipe || !m_feedOn) return false;
+    // (Also while the video is still opening: the file is simply there by the time its tracks are known. Opening
+    // it again then would start from wherever the player happened to stand, not from where it was asked to.)
+    m_subPicked = m_subUriChosen;
+    m_feed.clearSource();   // (the same name may hold other lines now)
+    if (m_subUri.isEmpty()) m_subSel = -1;   // (refreshTracks picks as at opening)
+    refreshTracks();
+    if (!m_subUri.isEmpty()) {
+        m_subSel = m_nEmbeddedText;
+        updateSubtitleFeed();
+        emit tracksChanged();
+    }
+    if (m_loaded) refreshSubtitles();
+    return true;
 }
 
 void Player::setRate(double rate)
@@ -1070,9 +1332,7 @@ int Player::currentAudioTrack() const
 int Player::currentSubtitleTrack() const
 {
     if (!m_pipe || !m_subShown || m_textTracks.isEmpty()) return -1;
-    gint cur = -1;
-    g_object_get(m_pipe, "current-text", &cur, nullptr);
-    return cur;
+    return selectedText();
 }
 
 void Player::setAudioTrack(int idx)
@@ -1106,6 +1366,13 @@ void Player::setSubtitleTrack(int idx)
     if (!m_pipe) return;
     m_subPicked = true;
     m_subShown = idx >= 0 && idx < m_textTracks.size();
+    if (m_feedOn) {
+        // The feed takes its lines from the track chosen; the picture on screen is fetched again with them.
+        if (m_subShown) selectText(idx);
+        updateSubtitleFeed();
+        if (m_loaded) refreshSubtitles();
+        return;
+    }
     if (m_subShown) {
         gint cur = -1;
         g_object_get(m_pipe, "current-text", &cur, nullptr);
@@ -1217,13 +1484,25 @@ void Player::onDeepElementAdded(GstBin*, GstBin*, GstElement* el, gpointer self)
         if (g_strcmp0(fname, "textoverlay") == 0) {
             {
                 QMutexLocker lock(&p->m_mutex);
-                if (p->m_textOverlay) gst_object_unref(p->m_textOverlay);
-                p->m_textOverlay = GST_ELEMENT(gst_object_ref(el));
+                if (!p->m_textOverlays.contains(el)) {
+                    if (p->m_textOverlays.size() >= 8) gst_object_unref(p->m_textOverlays.takeFirst());
+                    p->m_textOverlays.push_back(GST_ELEMENT(gst_object_ref(el)));
+                }
             }
             QMetaObject::invokeMethod(p, [p] { p->applySubtitleStyle(); }, Qt::QueuedConnection);
             return;
         }
+        // Matroska files whose subtitle lines are stored well ahead of the picture (as many programs other than
+        // mkvmerge write them): on meeting such a line the demuxer takes the picture to be lagging far behind and
+        // tells it "nothing for this stretch". The decoder, told so, throws away what it holds, and the picture
+        // then stands still until the next keyframe: for seconds, most visibly right after a jump. The picture is
+        // not lagging, its frames follow: the notice is dropped on its way out of the demuxer.
+        if (g_strcmp0(fname, "matroskademux") == 0) {
+            g_signal_connect(el, "pad-added", G_CALLBACK(&onMatroskaPad), nullptr);
+            return;
+        }
         if (g_strcmp0(fname, "subtitleoverlay") == 0) {
+            if (el == p->m_feed.overlay()) return;   // (the feed's own: set up by applySubtitleShown)
             {
                 QMutexLocker lock(&p->m_mutex);
                 if (p->m_subOverlay) gst_object_unref(p->m_subOverlay);
@@ -1290,6 +1569,8 @@ void Player::onStreamsChanged(GstElement*, gpointer self)
 GstBusSyncReply Player::busSyncHandler(GstBus*, GstMessage* m, gpointer self)
 {
     auto* p = static_cast<Player*>(self);
+    // The source of the subtitle lines failing is no reason to stop the video: it is started again with the next jump.
+    if (GST_MESSAGE_TYPE(m) == GST_MESSAGE_ERROR && p->m_feed.sourceFailed(GST_MESSAGE_SRC(m))) return GST_BUS_DROP;
     switch (GST_MESSAGE_TYPE(m)) {
     case GST_MESSAGE_ERROR: case GST_MESSAGE_WARNING: case GST_MESSAGE_EOS:
     case GST_MESSAGE_STATE_CHANGED: case GST_MESSAGE_ASYNC_DONE: case GST_MESSAGE_DURATION_CHANGED:
@@ -1332,6 +1613,8 @@ void Player::retryInSoftware()
     const QString dec = videoDecoder();
     m_hwRetried = true;
     applyDecoderPolicy(false);   // for this media only; the next open() restores the policy
+    m_carrySel = m_subSel;       // (the subtitle track that was showing stays)
+    m_carryPicked = m_subPicked;
     openInternal(m_uri, play, pos, true);
     emit warningOccurred(tr("Hardware decoder %1 failed; switched to software decoding.").arg(dec));
 }
@@ -1435,6 +1718,7 @@ void Player::handleMessage(GstMessage* m, quint64 generation)
         } else {
             emit seekFinished();
             switchPendingAudio();
+            if (m_refreshWanted) { m_refreshWanted = false; refreshSubtitles(); }
         }
         break;
     }
@@ -1499,7 +1783,22 @@ void Player::refreshTracks()
         }
     }
     m_audioTracks = a;
+    // With the feed, a subtitle file is not playbin's: it is listed after the file's own tracks, as playbin did.
+    if (nT != m_nEmbeddedText && !m_trackFileWaiting) m_trackFileAsked = -1;   // (more tracks have turned up: the answer may be another now)
+    m_nEmbeddedText = nT;
+    if (m_feedOn && !m_subUri.isEmpty()) t.push_back({nT, trackLabel(nT, nullptr, GST_TAG_SUBTITLE_CODEC), QString()});
     m_textTracks = t;
+    if (m_feedOn && m_carrySel >= 0 && m_carrySel < m_textTracks.size()) {   // (opened again by the player itself: the track that was showing)
+        m_subSel = m_carrySel;
+        m_carrySel = -1;
+    }
+    if (m_feedOn && (m_subSel < 0 || m_subSel >= m_textTracks.size()) && !m_textTracks.isEmpty()) {
+        // As playbin chose: the subtitle file if there is one, else the file's first track.
+        gint cur = 0;
+        g_object_get(m_pipe, "current-text", &cur, nullptr);
+        m_subSel = !m_subUri.isEmpty() ? nT : std::clamp(int(cur), 0, int(m_textTracks.size()) - 1);
+    }
     applyTrackPreferences();
+    updateSubtitleFeed();
     emit tracksChanged();
 }

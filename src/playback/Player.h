@@ -1,5 +1,8 @@
 #pragma once
+#include <QJsonObject>
 #include <QMutex>
+#include <QHash>
+#include <QSet>
 #include <QObject>
 #include <QSize>
 #include <QString>
@@ -9,6 +12,7 @@
 #include <atomic>
 #include <deque>
 #include <gst/gst.h>
+#include "SubtitleFeed.h"
 #include "TapeAudio.h"
 
 struct ChapterInfo {
@@ -69,6 +73,13 @@ public:
     // External subtitle file (path or URI) used by the next open(); empty = none.
     // chosenByViewer: picked by hand for this video (it is then shown whatever the language preference says).
     void setExternalSubtitle(const QString& pathOrUri, bool chosenByViewer = false);
+    // ... while a video is open: true when it is in effect without opening the video again
+    bool changeExternalSubtitle(const QString& pathOrUri, bool chosenByViewer);
+    // 2.16: a video that is not a file on this computer: the lines of one of its own subtitle tracks, as a
+    // file (asked for with embeddedSubtitleFileWanted when such a track is shown; until it is given, and if it
+    // never is, the track is drawn by the playback library, as before).
+    void setEmbeddedSubtitleFile(int textIndex, const QString& fileUri);
+    int embeddedTextCount() const { return m_nEmbeddedText; }
     QString externalSubtitle() const { return m_subUri; }
     // Playback speed (0.25 .. 4.0). Voices keep their pitch (scaletempo).
     void setRate(double rate);
@@ -145,6 +156,8 @@ public:
     int decoderThreads() const;   // worker threads of the software video decoder (0: unknown / hardware)
     // (for the checks) the delays as the sinks hold them, ms: sound, picture, subtitles; and the sound level going out (dB)
     void appliedOffsets(int* audioSinkMs, int* videoSinkMs, int* textMs) const;
+    // 2.16: the subtitle lines the player keeps itself (SubtitleFeed.h), for the report.
+    QJsonObject subtitleFeedReport() const;
     float soundLevelDb() const { return crtTapeLevelDb(m_tape); }
     float soundPitchHz() const { return crtTapePitchHz(m_tape); }
 
@@ -173,6 +186,7 @@ public:
     bool frameLateness(GstSample* s, qint64* latenessNs) const;
 
 signals:
+    void embeddedSubtitleFileWanted(int textIndex);
     void chaptersChanged();
     void frameReady();
     void stateChanged(Player::State s);
@@ -242,7 +256,31 @@ private:
     int m_audioDelayMs = 0, m_subDelayMs = 0;
     SubtitleStyle m_subStyle;
     bool m_deinterlace = true;
-    GstElement* m_textOverlay = nullptr;   // the element drawing subtitle text (a reference); guarded by m_mutex
+    QVector<GstElement*> m_textOverlays;   // the elements drawing subtitle text (references); guarded by m_mutex
+    // 2.16: text subtitles come from lines the player keeps itself; drawn by an overlay in the video sink.
+    SubtitleFeed m_feed;
+    bool m_feedOn = false;                 // this pipeline has the feed's overlay
+    QHash<int, QString> m_trackFiles;      // (this video) subtitle tracks whose lines were given as files
+    int m_trackFileAsked = -1;
+    bool m_trackFileWaiting = false;       // ... asked for, not answered yet
+    bool m_playbinText = true;             // playbin's own subtitle path is switched on (for this opening of the video)
+    QSet<QString> m_playbinTextFor;        // videos that need it (picture subtitles), found out in this session
+    bool m_textReopenPending = false;
+    int m_carrySel = -1;                   // the subtitle track showing when the player opened the video again by itself
+    bool m_carryPicked = false;
+    void reopenWithPlaybinText();
+    bool playbinDraws() const;
+    int m_lateRefreshes = 0;               // pictures fetched again in a row because a line came after them
+    bool m_refreshing = false;
+    bool m_refreshWanted = false;          // the picture is to be fetched again with its lines, once the jump under way is over
+    int m_subSel = -1;                     // the subtitle track chosen (the file's own, then the subtitle file)
+    int m_nEmbeddedText = 0;               // how many of m_textTracks are the file's own
+    QTimer m_feedTimer, m_feedRefresh;
+    int selectedText() const;
+    void selectText(int idx);
+    void updateSubtitleFeed();
+    void onFeedNotify();
+    void refreshSubtitles();
     GstElement* m_subOverlay = nullptr;    // playbin's subtitle overlay bin (a reference); guarded by m_mutex
     bool m_subShown = false;               // subtitles are being shown in this video
     void applySubtitleShown();

@@ -282,6 +282,8 @@ void JellyfinClient::signIn(const QString& input, const QString& user, const QSt
 void JellyfinClient::signOut()
 {
     if (!m_token.isEmpty()) {
+        // (a conversion still running for the video on screen is ended first: after this the server no longer knows us)
+        if (m_playMethod == QLatin1String("Transcode") && !m_playSession.isEmpty()) stopTranscode(m_playSession);
         QNetworkReply* r = post(QStringLiteral("/Sessions/Logout"), {});   // revokes the token on the server
         connect(r, &QNetworkReply::finished, r, &QObject::deleteLater);
     }
@@ -546,6 +548,17 @@ void JellyfinClient::requestPlayback(const QString& itemId, qint64 maxBitrate, b
         for (const QJsonValue& v : src.value("MediaStreams").toArray()) {
             const QJsonObject st = v.toObject();
             if (st.value("Type").toString() != QLatin1String("Subtitle")) continue;
+            if (!pb.transcode && !st.value("IsExternal").toBool()) {
+                // One of the file's own: text subtitles the server also hands out as a file (the player takes the
+                // lines from there, so that it knows them all, wherever in the video it jumps to).
+                static const QStringList text{"subrip", "srt", "ass", "ssa", "mov_text", "webvtt", "vtt", "text", "subviewer", "microdvd", "sami", "smi"};
+                const QString codec = st.value("Codec").toString().toLower();
+                QUrl u;
+                if (text.contains(codec) && !pb.mediaSourceId.isEmpty())
+                    u = url(QStringLiteral("/Videos/%1/%2/Subtitles/%3/0/Stream.%4")
+                                .arg(itemId, pb.mediaSourceId).arg(st.value("Index").toInt()).arg((codec == "ass" || codec == "ssa") ? "ass" : "srt"));
+                pb.ownSubtitles.append(u);
+            }
             QString label = st.value("DisplayTitle").toString();
             if (label.isEmpty()) label = st.value("Language").toString(tr("Subtitle"));
             const QString delivery = st.value("DeliveryUrl").toString();

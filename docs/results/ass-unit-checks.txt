@@ -1,0 +1,16 @@
+PASS  a plain script is recognised, as ASS: ok 1 ssa 0
+PASS  its two lines are found (not the comment, not what follows the lines): 2 lines
+PASS  times: 2 s to 6.5 s: 2000000000 - 6500000000 ns
+PASS  times beyond an hour, hundredths: 3723450000000
+PASS  a line as Matroska stores it; commas in the text stay: 0,0,Default,Anna,0,0,0,,Hello, world, again
+PASS  layer, margins, effect and override tags are kept; the lines are counted: 1,3,Sign,,10,20,30,fx,{\an8}Up top
+PASS  the head holds the styles and ends with the lines' format: 238 bytes
+PASS  Windows line ends and a UTF-8 mark at the start: 2 lines
+PASS  a UTF-16 script comes out as UTF-8: 0,0,Default,Anna,0,0,0,,Grüße 日本, world, again
+PASS  a script that is not UTF-8 is taken letter for letter: 0,0,Default,Anna,0,0,0,,Grüße, world, again
+PASS  an SSA script (the older kind): 0,0,Default,NTP,0000,0000,0000,!Effect,Old style
+PASS  fields in an order of the script's own; lines without sense are left out: 2 lines
+PASS  a SubRip file is not taken for a script: left to GStreamer
+PASS  an empty file, and a head without lines: not scripts
+PASS  a script without any line is a script with no lines: ok 1
+all checks passed

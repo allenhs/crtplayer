@@ -1,14 +1,14 @@
 PASS  the sweeping fly-in lands on the exact fullscreen frame: max diff 0
 PASS  palettes: teal workstation, orange sunset, dark space: workstation [ 34. 116. 134.], sunset [221. 122.  86.], space [13. 15. 29.]
-PASS  the neon grid floor differs from the checkerboard: mean difference 61.1
-PASS  the objects can be turned off: 6.9% of the view changes
-PASS  the plinth differs from the pedestal: mean difference 38.4
-PASS  hard shadows (quality medium vs low): floor difference 7.53
+PASS  the neon grid floor differs from the checkerboard: mean difference 61.7
+PASS  the objects can be turned off: 6.6% of the view changes
+PASS  the plinth differs from the pedestal: mean difference 38.7
+PASS  hard shadows (quality medium vs low): floor difference 7.32
 PASS  the camera stays above the floor: 0.15 above it (asked for pitch -40)
 PASS  an open world: the camera goes all the way round: yaw 170.0
-PASS  demo-reel orbit: not while briefly paused, seeking, or playing: paused (5.6 s idle) +0.0 deg; scrubbing while paused (28 seeks, then 0.7 s idle) +0.0 deg; playing +0.0 deg
-PASS  demo-reel orbit once stopped and untouched for 10 s: +6.0 deg over the next 10.5 s
-PASS  the picture is reflected in the scene: 35150 pixels outside the screen turn red
+PASS  demo-reel orbit: not while briefly paused, seeking, or playing: paused (5.3 s idle) +0.0 deg; scrubbing while paused (30 seeks, then 0.6 s idle) +0.0 deg; playing +0.0 deg
+PASS  demo-reel orbit once stopped and untouched for 10 s: +4.0 deg over the next 10.5 s
+PASS  the picture is reflected in the scene: 40474 pixels outside the screen turn red
 PASS  tile reveal: starts when playback starts, and completes: 0.20 just after starting, then 1
 PASS  no tile reveal for skipping forward or back, scrubbing, or a short pause: seek-fwd 1.00, seek-back 1.00, scrubbed 1.00, short-pause 1.00
 PASS  the tile reveal again after a long pause (10 s or more): 0.20 just after resuming

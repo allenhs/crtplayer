@@ -1,23 +1,24 @@
 PASS  [10.10.3] wrong password is rejected and leaves the player signed out: 1 rejected attempt(s)
-PASS  [10.10.3] correct password signs in: home shows 4 entries
-PASS  [10.10.3] every authenticated request carries the Authorization header (except HLS segments): 1375 requests, 66 HLS playlist/segment requests by address
-PASS  [10.10.3] the token appears in no address except a conversion's (HLS) and its subtitle files: 73 such requests, all HLS or its subtitles
+PASS  [10.10.3] correct password signs in: home shows 5 entries
+PASS  [10.10.3] every authenticated request carries the Authorization header (except HLS segments): 1487 requests, 128 HLS playlist/segment requests by address
+PASS  [10.10.3] the token appears in no address except a conversion's (HLS) and its subtitle files: 136 such requests, all HLS or its subtitles
 PASS  [10.10.3] original-file streams never carry the token: header only
-PASS  [10.10.3] no request failed: all 2xx (2 stream(s) closed by the player when switching videos)
-PASS  [10.10.3] closed streams had started successfully first: 2 closed
+PASS  [10.10.3] no request failed: all 2xx
+PASS  [10.10.3] closed streams had started successfully first: 0 closed
 PASS  [10.10.3] uses the route set matching the server version: ['/UserViews']
-PASS  [10.10.3] streams the original file and seeks with HTTP ranges: 14 stream requests, 5 mid-file range requests
+PASS  [10.10.3] streams the original file and seeks with HTTP ranges: 42 stream requests, 32 mid-file range requests
 PASS  [10.10.3] stream request marks the file as static (no server transcoding): static=true
-PASS  [10.10.3] seek moved playback to ~12 s: 12000 ms
-PASS  [10.10.3] continue-watching item resumed at its saved position: 12457 ms (saved: 12000)
-PASS  [10.10.3] playback start reported: 10 start reports
-PASS  [10.10.3] pause/unpause reported: 21 progress reports
-PASS  [10.10.3] stop reports the position (resume point) for the first movie: 20.0 s
+PASS  [10.10.3] seek moved playback to ~12 s: 15004 ms
+PASS  [10.10.3] continue-watching item resumed at its saved position: 13133 ms (saved: 12000)
+PASS  [10.10.3] playback start reported: 13 start reports
+PASS  [10.10.3] pause/unpause reported: 74 progress reports
+PASS  [10.10.3] stop reports the position (resume point) for the first movie: 16.5 s
 PASS  [10.10.3] TV show navigation reaches episodes: S01E01 · Pilot
-PASS  [10.10.3] external subtitle fetched from the server, authenticated: 4 subtitle request(s): /Videos/m1/m1/Subtitles/2/0/Stream.srt
+PASS  [10.10.3] external subtitle fetched from the server, authenticated: 11 subtitle request(s): /Videos/m1/m1/Subtitles/2/0/Stream.srt
 PASS  [10.10.3] with subtitles on, a video without its own gets the server's subtitle file by itself: English (SRT, external); playing
+PASS  [10.10.3] ... and the video still starts where it was left (15 s), not from its beginning: at 16.8 s
 PASS  [10.10.3] session restored on the next launch: signed in without the password
-PASS  [10.10.3] signing out revokes the token on the server: 2 logout request(s)
+PASS  [10.10.3] signing out revokes the token on the server: 3 logout request(s)
 PASS  [10.10.3] no password is ever written to the automation logs: checked
 PASS  [10.10.3] session file is private (0600): 0o600
 PASS  [10.10.3] session file never holds a password: no password field or value
@@ -26,18 +27,18 @@ PASS  [10.10.3] the paging and conversion script ran without a failed step: all 
 PASS  [10.10.3] a big library (1,234 items) opens with its first page only: 100 shown of 1234
 PASS  [10.10.3] scrolling loads the rest a page at a time, each page once: 1234 items from 13 requests (StartIndex 0..1200)
 PASS  [10.10.3] the last item of the big library plays (beyond the old 500 limit): Clip 1234 (2009)
-PASS  [10.10.3] every play asks the server how (PlaybackInfo) with this computer's formats: 11 requests; video codecs: h264,hevc,vp8,vp9,av1,mpeg2video,mpeg1video,mpeg4,msmpeg4v3,vc1,wmv3,mjpeg,theora,h263
+PASS  [10.10.3] every play asks the server how (PlaybackInfo) with this computer's formats: 14 requests; video codecs: h264,hevc,vp8,vp9,av1,mpeg2video,mpeg1video,mpeg4,msmpeg4v3,vc1,wmv3,mjpeg,theora,h263
 PASS  [10.10.3] a codec this computer can't decode is converted by the server: Transcode, ['VideoCodecNotSupported']
-PASS  [10.10.3] the conversion streams as HLS segments, authenticated by their address: 60 segments, all 200
-PASS  [10.10.3] seeking works in a converted video: 15401 ms
+PASS  [10.10.3] the conversion streams as HLS segments, authenticated by their address: 123 segments, none refused (0 given up by the player on a jump)
+PASS  [10.10.3] seeking works in a converted video: 15276 ms
 PASS  [10.10.3] an original that fails here is retried converted, once: converted by the server: the original didn't play here; 1 conversion request(s)
 PASS  [10.10.3] over the quality limit is converted; the limit reaches the server: ['ContainerBitrateExceedsLimit'], MaxStreamingBitrate 4000000
-PASS  [10.10.3] a converted video resumes at its saved position: 16983 ms (saved: 12000)
+PASS  [10.10.3] a converted video resumes at its saved position: 16321 ms (saved: 12000)
 PASS  [10.10.3] its embedded subtitle is offered as a file from the server: English (embedded)
 PASS  [10.10.3] "Play converted by the server" converts a playable file: converted by the server
 PASS  [10.10.3] back at the original quality, the same file plays directly again: original file
-PASS  [10.10.3] converted playback is reported as such, with the server's play session: 4 'Transcode' start reports
-PASS  [10.10.3] each conversion is ended on the server when playback moves on: 4 ended, for 4 converted plays
+PASS  [10.10.3] converted playback is reported as such, with the server's play session: 5 'Transcode' start reports
+PASS  [10.10.3] each conversion is ended on the server when playback moves on: 5 ended, for 5 converted plays
 PASS  [10.10.3] the token is never written to the logs: automation log and output checked
 
 All Jellyfin checks passed

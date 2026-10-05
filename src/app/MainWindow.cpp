@@ -111,6 +111,25 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent)
     });
     connect(m_player, &Player::durationChanged, this, [this](qint64 ns) { m_controls->setDuration(ns > 0 ? ns / 1000000 : 0); });
     connect(m_player, &Player::tracksChanged, this, [this] { rebuildAudioMenu(); rebuildSubtitleMenu(); });
+    // 2.16: a subtitle track of a video played from the server: its lines are fetched as a file, which the server
+    // makes of it (the player then knows them all, wherever in the video it jumps to; a second reading of the
+    // video itself, over the network, would fetch everything twice).
+    connect(m_player, &Player::embeddedSubtitleFileWanted, this, [this](int track) {
+        // (only when the server and the player count the same subtitle tracks)
+        if (m_jfItemId.isEmpty() || m_jfTranscoding || track < 0 || track >= m_jfOwnSubs.size() || m_jfOwnSubs.size() != m_player->embeddedTextCount() ||
+            m_jfOwnSubs[track].isEmpty()) {
+            m_player->setEmbeddedSubtitleFile(track, QString());   // (not to be had: the playback library draws the track)
+            return;
+        }
+        const QString item = m_jfItemId;
+        const QUrl u = m_jfOwnSubs[track];
+        m_jf->fetchBytes(u, [this, item, track, u](const QByteArray& data, const QString& err) {
+            if (item != m_jfItemId || m_jfTranscoding) return;   // (another video by now)
+            const bool ok = err.isEmpty() && !data.trimmed().isEmpty();
+            if (!ok) qWarning() << "Jellyfin: no subtitle file for track" << track << ":" << err;
+            m_player->setEmbeddedSubtitleFile(track, ok ? stageSubtitle(data, u.toString(QUrl::RemoveQuery)) : QString());
+        });
+    });
     // Subtitles wanted, none in the video, but the server offers some: load them (once the tracks are known).
     connect(m_player, &Player::mediaLoaded, this, [this] { QTimer::singleShot(400, this, [this] { maybeLoadOfferedSubtitle(); }); });
     m_subRefresh.setSingleShot(true);
@@ -467,6 +486,7 @@ MainWindow::~MainWindow()
     // (the docks are destroyed after this, with the window's other children, and say so: nobody is listening by then)
     if (m_settingsDock) m_settingsDock->disconnect(this);
     if (m_playlistDock) m_playlistDock->disconnect(this);
+    if (m_jfDock) m_jfDock->disconnect(this);
     delete m_desk;
 }
 
@@ -784,6 +804,7 @@ void MainWindow::playSource(const QString& path, int i)
     if (m_jfTranscoding && !m_jfPlaySession.isEmpty()) { m_jf->stopTranscode(m_jfPlaySession); m_jfPlaySession.clear(); }
     m_extSubs.clear();
     m_extSubLabel.clear();
+    m_jfOwnSubs.clear();
     m_player->setExternalSubtitle(QString());
     setLoop(-1, -1);
     if (m_player->subtitleDelay() != 0) setSubtitleDelay(0, false);   // (a subtitle delay belongs to one video)
@@ -850,6 +871,7 @@ void MainWindow::playSource(const QString& path, int i)
                 m_jf->setPlayMethod(pb.transcode ? QStringLiteral("Transcode") : QStringLiteral("DirectPlay"),
                                     pb.playSessionId, pb.mediaSourceId);
                 for (const auto& s : pb.subtitles) m_extSubs.append({s.first, s.second.toString(QUrl::FullyEncoded)});
+                m_jfOwnSubs = pb.ownSubtitles;
                 rebuildSubtitleMenu();
                 if (pb.transcode) note = tr("converted by the server");
             }
@@ -1436,19 +1458,19 @@ void MainWindow::setExternalSubtitleFile(const QString& uri, const QString& labe
 
 void MainWindow::applyExternalSubtitle(const QString& uri, const QString& label)
 {
-    // playbin reads a subtitle file only when a stream opens: reopen where we are.
     const qint64 pos = m_player->position();
     const bool playing = m_player->isPlaying();
     const QString cur = m_player->currentUri();
     if (cur.isEmpty()) return;
-    m_player->setExternalSubtitle(uri, true);
     m_extSubLabel = label;
     if (!label.isEmpty()) {   // picking a subtitle file is asking for subtitles
         m_settings.subtitlesOn = true;
         m_player->setSubtitlesWanted(true);
         m_playbackPanel->setSubtitlesWanted(true);
     }
-    m_player->open(cur, playing, pos);
+    // The player hands the file's lines over itself and the video goes on as it is. (Without that, where the
+    // playback library reads the file, it does so only when a video opens: the video is opened again, here.)
+    if (!m_player->changeExternalSubtitle(uri, true)) m_player->open(cur, playing, pos);
     showOsd(label.isEmpty() ? tr("Subtitle file off") : tr("Subtitles: %1").arg(label));
 }
 
@@ -2498,6 +2520,7 @@ QJsonObject MainWindow::stateReport() const
     o["subtitleTracks"] = st;
     o["currentAudio"] = m_player->currentAudioTrack();
     o["currentSubtitle"] = m_player->currentSubtitleTrack();
+    o["subtitleFeed"] = m_player->subtitleFeedReport();
     o["everyday"] = everydayReport();
     o["profile"] = m_video->profileReport();
     o["videoPath"] = videoPathReport();

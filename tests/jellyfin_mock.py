@@ -60,6 +60,31 @@ def items_db():
                "IndexNumber": 2, "ParentIndexNumber": 1, "RunTimeTicks": 10 * TICKS, "File": "anamorphic_dvd_mpeg2.mkv",
                "Codecs": ("mkv", "mpeg2video", "ac3", 400_000)},
         "lib-big": {"Id": "lib-big", "Name": "Big Library", "Type": "CollectionFolder", "CollectionType": "movies", "IsFolder": True},
+        # 2.16: subtitles after jumps (the jump_* clips of scripts/make-test-media.sh). "SubtitleFiles": what the
+        # server sends for a subtitle stream asked for as a file (name without its ending: .srt, .ass or .vtt as asked).
+        "lib-subs": {"Id": "lib-subs", "Name": "Subtitle Tests", "Type": "CollectionFolder", "CollectionType": "movies", "IsFolder": True},
+        "j1": {"Id": "j1", "Name": "Jump Own Tracks", "Type": "Movie", "MediaType": "Video", "ProductionYear": 2026,
+               "RunTimeTicks": 120 * TICKS, "Parent": "lib-subs", "File": "jump_srt.mkv", "Codecs": ("mkv", "h264", "aac", 1_000_000),
+               "SubtitleFiles": {2: "jump_a", 3: "jump_b"},
+               "MediaSources": [{"Id": "j1", "MediaStreams": [
+                   {"Type": "Video", "Index": 0}, {"Type": "Audio", "Index": 1},
+                   {"Type": "Subtitle", "Index": 2, "Codec": "subrip", "Language": "eng", "DisplayTitle": "English (embedded)"},
+                   {"Type": "Subtitle", "Index": 3, "Codec": "subrip", "Language": "fre", "DisplayTitle": "French (embedded)"}]}]},
+        "j2": {"Id": "j2", "Name": "Jump Server Files", "Type": "Movie", "MediaType": "Video", "ProductionYear": 2026,
+               "RunTimeTicks": 120 * TICKS, "Parent": "lib-subs", "File": "jump_side.mp4", "Codecs": ("mp4", "h264", "aac", 1_000_000),
+               "SubtitleFiles": {2: "jump_a", 3: "jump_b", 4: "jump_a"},
+               "MediaSources": [{"Id": "j2", "MediaStreams": [
+                   {"Type": "Video", "Index": 0}, {"Type": "Audio", "Index": 1},
+                   {"Type": "Subtitle", "Index": 2, "IsExternal": True, "Codec": "subrip", "Language": "eng", "DisplayTitle": "English (SRT, external)"},
+                   {"Type": "Subtitle", "Index": 3, "IsExternal": True, "Codec": "ass", "Language": "fre", "DisplayTitle": "French (ASS, external)"},
+                   {"Type": "Subtitle", "Index": 4, "IsExternal": True, "Codec": "webvtt", "Language": "eng", "DisplayTitle": "English (VTT, external)"}]}]},
+        "j3": {"Id": "j3", "Name": "Jump Converted", "Type": "Movie", "MediaType": "Video", "ProductionYear": 2026,
+               "RunTimeTicks": 120 * TICKS, "Parent": "lib-subs", "File": "jump_srt.mkv", "Codecs": ("mov", "prores", "pcm_s24le", 150_000_000),
+               "SubtitleFiles": {2: "jump_a", 3: "jump_b"},
+               "MediaSources": [{"Id": "j3", "MediaStreams": [
+                   {"Type": "Video", "Index": 0}, {"Type": "Audio", "Index": 1},
+                   {"Type": "Subtitle", "Index": 2, "Codec": "subrip", "Language": "eng", "DisplayTitle": "English (embedded)"},
+                   {"Type": "Subtitle", "Index": 3, "Codec": "ass", "Language": "fre", "DisplayTitle": "French (embedded)"}]}]},
     }
 
 BIG = 1234   # items in "Big Library": more than a page, more than the old 500 limit
@@ -82,6 +107,9 @@ class State:
             f.write(b"\x00\x00\x00\x18ftypmp42\x00\x00\x00\x00mp42isom" + os.urandom(200_000))
         self.tokens = set()
         self.lock = threading.Lock()
+        # (the two-minute clip takes a while to convert: begun now, so that it is ready when it is asked for)
+        if os.path.exists(os.path.join(args.media, "jump_srt.mkv")):
+            threading.Thread(target=lambda: Handler.hls_dir(None, self.items["j3"], self), daemon=True).start()
         v = [int(x) for x in args.version.split('.')[:2]]
         self.modern = v >= [10, 9]
 
@@ -203,7 +231,7 @@ class Handler(BaseHTTPRequestHandler):
         if method == "GET" and path == f"/Users/{uid}":
             return self.send_json(USER)
         if method == "GET" and path == r["views"]:
-            return self.listing([st.items["lib-movies"], st.items["lib-shows"], st.items["lib-big"]])
+            return self.listing([st.items["lib-movies"], st.items["lib-shows"], st.items["lib-big"], st.items["lib-subs"]])
         if method == "GET" and path == r["resume"]:
             return self.listing([i for i in st.items.values() if i.get("Resume", 0) > 0 and not i.get("Played")])
         if method == "GET" and path == r["items"]:
@@ -231,6 +259,11 @@ class Handler(BaseHTTPRequestHandler):
         m = re.fullmatch(r"/Videos/(\w+)/(\w+)/Subtitles/(\d+)/0/Stream\.(\w+)", path)
         if method == "GET" and m and m.group(1) in st.items:
             body = b"1\n00:00:00,000 --> 00:10:00,000\nJELLYFIN EXTERNAL SUBTITLE\n"
+            named = st.items[m.group(1)].get("SubtitleFiles", {}).get(int(m.group(3)))
+            if named:
+                fmt = m.group(4).lower()
+                with open(os.path.join(st.args.media, named + ('.ass' if fmt in ('ass', 'ssa') else '.vtt' if fmt in ('vtt', 'webvtt') else '.srt')), 'rb') as f:
+                    body = f.read()
             self.send_response(200)
             self.send_header("Content-Type", "text/plain; charset=utf-8")
             self.send_header("Content-Length", str(len(body)))
@@ -284,7 +317,8 @@ class Handler(BaseHTTPRequestHandler):
             if s2.get("Type") == "Subtitle" and not direct and not s2.get("IsExternal"):
                 # Embedded text subtitles leave the conversion; the server offers them as files.
                 s2["DeliveryMethod"] = "External"
-                s2["DeliveryUrl"] = f"/Videos/{it['Id']}/{it['Id']}/Subtitles/{s2['Index']}/0/Stream.srt?api_key={tok}"
+                fmt = "ass" if s2.get("Codec") in ("ass", "ssa") else "srt"   # (as asked for in the SubtitleProfiles)
+                s2["DeliveryUrl"] = f"/Videos/{it['Id']}/{it['Id']}/Subtitles/{s2['Index']}/0/Stream.{fmt}?api_key={tok}"
             src["MediaStreams"].append(s2)
         if not direct:
             tp = (prof.get("TranscodingProfiles") or [{}])[0]
@@ -298,8 +332,8 @@ class Handler(BaseHTTPRequestHandler):
                 src["TranscodeReasons"] = reasons   # 10.9+: also on the source (10.8: only in the URL)
         return self.send_json({"MediaSources": [src], "PlaySessionId": ps})
 
-    def hls_dir(self, it):
-        st = self.server.state
+    def hls_dir(self, it, state=None):
+        st = state or self.server.state
         with st.hls_lock:
             if it["Id"] in st.hls:
                 return st.hls[it["Id"]]

@@ -311,6 +311,9 @@ wait 1800
 report tv-3-off
 subs on
 wait 800
+# (the channel's programme may just be starting over: its tracks are known once it plays)
+waitstate playing 20000
+wait 600
 report tv-3-on
 sleep seconds 9
 wait 11500

@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(CRTPlayer VERSION 2.15.0 LANGUAGES C CXX)
+project(CRTPlayer VERSION 2.16.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -56,6 +56,7 @@ add_executable(crtplayer
   src/app/Automation.cpp      src/app/Automation.h
   src/app/DeskWindow.cpp      src/app/DeskWindow.h
   src/playback/Player.cpp     src/playback/Player.h
+  src/playback/SubtitleFeed.cpp src/playback/SubtitleFeed.h src/playback/AssScript.cpp src/playback/AssScript.h
   src/render/CrtRenderer.cpp
     src/render/Enhance.cpp  src/render/CrtRenderer.h
   src/render/NvEnhancer.cpp   src/render/NvEnhancer.h
@@ -142,6 +143,10 @@ if(CRTPLAYER_BUILD_TESTS)
   target_include_directories(test_tape PRIVATE src)
   target_link_libraries(test_tape PRIVATE PkgConfig::GST)
   add_test(NAME tape COMMAND test_tape)
+  add_executable(test_ass tests/test_ass.cpp src/playback/AssScript.cpp)
+  target_include_directories(test_ass PRIVATE src)
+  target_link_libraries(test_ass PRIVATE Qt6::Core)
+  add_test(NAME ass COMMAND test_ass)
   add_executable(test_tv tests/test_tv.cpp)
   target_link_libraries(test_tv PRIVATE crtcore)
   add_test(NAME tv COMMAND test_tv)

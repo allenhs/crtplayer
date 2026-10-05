@@ -8,6 +8,10 @@ buttons and shortcuts use.
 - Every command is appended to the JSON log with a timestamp.
 - `report` also includes `rate`, `loopA`/`loopB`, `chapterCount`, `externalSubtitle`,
   `externalSubtitleOffers`, `resumeMs` and `recentFiles` (1.8).
+- `report` has `subtitleFeed` (2.16): the subtitle lines the player keeps itself: what kind the showing
+  track is (`text`, `unsupported` for picture subtitles, `reading`, `failed`, `none`), how many lines are
+  known and for which stretches of the video, how often the first picture after a jump waited for its
+  lines and for how long, and how often the video was opened (`videoOpens`).
 - `report` adds a full state snapshot: geometry, decoders, clock, sync statistics,
   tracks, fullscreen/controls state, and in desk mode the phase, flight progress,
   pivot/shape, set rectangle and input-mask rectangle.
@@ -91,6 +95,7 @@ buttons and shortcuts use.
 | `gifopts WIDTH FPS LOOK` | GIF options: width in pixels (320–1024; 1280, 1920, 2560 and 3840 are the HD, Full HD, 1440p and 4K frames), frames a second, 1 = with the CRT look, 0 = original picture |
 | `gif [OUT_PATH]` | Save A–B (or the next 5 s) as a GIF; waits, and logs the result (size, frames, frames a second, how long it took) |
 | `waitpos MS [TIMEOUT_MS]` | Wait until the video has played to MS |
+| `waitshown SECONDS [TIMEOUT_MS]` | Wait until no jump is under way and the picture delivered last is the one of that place (2.16) |
 | `subs on\|off` | Subtitles wanted or not (the V key): it holds from video to video |
 | `subtrack N` / `audiotrack N` | Pick a subtitle track (−1: off) or a sound track as the menus do: its language is remembered |
 | `subdelay MS` / `audiodelay MS` | Subtitle delay (this video) / sound delay (remembered) |

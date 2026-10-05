@@ -1,6 +1,6 @@
 # Verification report
 
-This report covers the build delivered alongside it (CRT Player 2.15.0).
+This report covers the build delivered alongside it (CRT Player 2.16.0).
 
 The final X11 and Wayland suites were run against the exact stripped `crtplayer` binary
 that is delivered, and **again against the AppImage with the system's Qt libraries
@@ -289,6 +289,306 @@ was **not measured**, because there is no GPU in this environment.
 - GPU performance;
 - the interlaced style's look at real refresh rates (only its field alternation was
   measured).
+
+## 2.16: the right subtitle line after every jump (videos on this computer, subtitle files, Jellyfin)
+
+Asked for: subtitles that work on local videos even after skipping around, and for
+Jellyfin as well.
+
+### What was wrong (found with the released 2.15)
+
+- **Subtitles inside the video** (Matroska, MP4): after a jump, the line already in force
+  at that place was missing until the next line began. A video file hands out each line
+  once, where it begins, and GStreamer's demuxers do not hand it out again.
+- **A subtitle file beside the video** (and so every Jellyfin subtitle file): after a jump
+  back while paused, the picture kept a stale line. GStreamer reads the file with a second
+  reader that does not land where the video lands, and compares subtitle and picture by
+  the time since the jump.
+- **An ASS / SSA file** beside the video, or from a Jellyfin server, showed nothing at
+  all, in any version: GStreamer reads such scripts only out of a Matroska file.
+- **The picture stood still for seconds after a jump** in Matroska files whose subtitle
+  lines are stored well ahead of the picture (fifteen seconds ahead in the test clip, as
+  ffmpeg wrote it). On reading such a line GStreamer's Matroska demuxer takes picture and
+  sound to be lagging and sends them a "nothing for this stretch" notice; the video
+  decoder, on getting one, throws away what it holds; nothing decodes until the next
+  keyframe (ten seconds apart in the clip).
+- **The player froze for good after a jump at another speed** in an MPEG-TS recording:
+  the speed filter (`scaletempo`) recalculated the time of such a notice into one
+  hundreds of years ahead, the sound output waited for that time, and GStreamer's clock
+  could not be interrupted in that wait, so the next jump never returned.
+- **Picking a subtitle file opened the video again**, from wherever the player stood at
+  that moment. For a Jellyfin video opened with subtitles on, that moment is while it is
+  still opening: the video then started from its beginning instead of its resume point.
+  (Most likely also behind the one unexplained Jellyfin resume failure noted under 2.15.)
+
+### What was built
+
+**The player keeps the subtitle lines itself** (`src/playback/SubtitleFeed.*`).
+
+- **A reader of its own:** a small second pipeline that takes only the chosen subtitle
+  stream out of the video (Matroska and MP4 by their demuxers alone, nothing is decoded),
+  or reads the subtitle file. It runs three minutes ahead of the picture and then waits.
+  After a jump to a place it has not read, it goes there too: eighty seconds before the
+  place (sixty for lines long in force, twenty more because files store lines ahead of
+  their time), or reads on if it is nearly there.
+- **A store:** every line with its times, and which stretches of the video are known
+  without a gap.
+- **A source in the playing pipeline** (`appsrc`) feeding **an overlay** (GStreamer's
+  `subtitleoverlay`, so the drawing is the same as before: pango text, libass for ASS)
+  that sits in the player's video sink, before anything else is done to the picture.
+- **After every jump** the source is started anew at the very place the video landed on
+  (which a jump to the nearest keyframe only knows afterwards) and hands over the lines
+  in force there and those that follow. A line already in force is handed over as
+  beginning at that place and lasting what is left of it (GStreamer's ASS renderer
+  otherwise shows it for its whole length again).
+- **The first picture after a jump waits at the overlay's door** until its lines are in:
+  until the source has started anew and there is no line in force, or the line in force
+  has been taken in. A quarter of a second at the very most, counted from the picture's
+  arrival; then it goes through, and if a line turns up for a picture that stands
+  (paused), the picture is fetched again with it.
+- **ASS / SSA files** are read by the player (`src/playback/AssScript.*`) and brought
+  into the form Matroska stores them in: the head with the styles once, each line by
+  itself. UTF-8, UTF-16 and older one-byte files; fields in any order.
+- **GStreamer's own subtitle path is switched off** while the player feeds the lines:
+  nothing of the video's subtitle streams flows through the playing pipeline then. (With
+  it on, switching tracks while paused and jumping could lock the pipeline: seen in the
+  tests, in an MP4 with two subtitle tracks.) **Picture subtitles** (DVD, Blu-ray) are drawn by GStreamer as before, and so
+  is any track whose lines the player cannot read: a video that needs GStreamer's path
+  is opened again, where it stands, with that path set up from the start (and opens with
+  it from then on). It is never switched on while the pipeline runs.
+- **A subtitle file takes effect while the video plays on**; it is not opened again.
+
+**Jellyfin.** For the original file ("direct play"), the lines of a text subtitle track
+in the file are fetched from the server as a file (`/Videos/…/Subtitles/N/0/Stream.srt`
+or `.ass`, with the session's token in the header), when that track is shown. Reading
+the video a second time over the network, as is done for a file on this computer, would
+fetch everything twice. Until the file is there (and if the server gives none, after
+five seconds at most) the track is drawn by GStreamer as before. The server's subtitle
+files and the files a conversion hands out go the same way as a file beside a video.
+
+**Two notices that are no longer passed on** (`Player.cpp`): the Matroska demuxer's
+"nothing for this stretch" on the video stream, and any such notice that leaves the speed
+filter with a time more than a thousand hours away.
+
+**For the checks:** `scripts/make-test-media.sh` makes the `jump_*` clips: two minutes of
+a plain picture with a bar along the top that grows five pixels a second, ten seconds
+between keyframes, and subtitle lines that can be counted (line N is N letters set wide
+apart), as SubRip and ASS inside Matroska, as timed text inside MP4, as files (SubRip,
+ASS, WebVTT), with a recording whose times begin at ten minutes, and with a Blu-ray
+picture-subtitle track (`scripts/make-pgs.py` writes that stream). **Every screenshot is
+judged by itself**: where in the video it is, read off the bar; which line it shows,
+counted; the two compared with the subtitle file (`scripts/check-subtitles.py`). A new
+automation command, `waitshown`, waits for the picture of a place instead of a fixed
+time. The mock Jellyfin server got three such videos (the original with its own tracks,
+one with the server's subtitle files, one that is converted).
+
+### Results
+
+All on this machine (no graphics card: Mesa llvmpipe; GStreamer 1.24.2; Qt 6.4). The
+check outputs are in `docs/results/` (`subtitles-checks*.txt`,
+`jellyfin-*-subtitles-checks.txt`, `ass-unit-checks.txt`).
+
+**The right line after a jump** (`subs-jump.txt`, 15 checks for each of six videos: SubRip
+in Matroska, ASS in Matroska, timed text in MP4, a SubRip file and an ASS file beside the
+video, a recording whose times begin at ten minutes with a SubRip file). 32 screenshots a
+video, each judged by itself:
+
+| What is done | Pictures | Result (all six videos) |
+|---|---|---|
+| the first line comes on as the video plays | 1 | right |
+| jumps while playing: forwards, back, into a line 30 s in force, between lines, to a keyframe | 6 | right line, or none between lines |
+| the same jumps while paused | 7 | the picture that stands has its line |
+| played on from a paused jump | 2 | the line ends when it should, the next one comes |
+| frame by frame over the beginning of a line, and back | 3 | none at 9.88 s, the line at 10.04 s, none at 9.84 s |
+| hidden and shown again, paused and playing | 4 | gone, and back at once |
+| double and half speed, jumps at both | 4 | right |
+| round an A-B loop | 2 | the line is there after every turn |
+| dragged along the seek bar (thirty jumps 40 ms apart), playing and paused | 2 | right line where it is let go |
+| near the end | 1 | right |
+
+- With the released 2.15, six jumps of this kind gave: for SubRip in Matroska, the
+  line missing after four and the picture standing still after one; for the ASS file, no
+  line at all, anywhere; for ASS in Matroska, the picture standing still after three.
+- **How long the first picture after a jump waited for its lines:** it waited at all in
+  15 to 50 of about 100 jumps a video (in the others the lines were in before the
+  picture); under 1 ms on average, 6 ms the longest; none was given up. On the path a
+  graphics card takes: 16 to 57 waits, 9 ms the longest.
+- **The window while the seek bar is dragged:** the longest stall of its event loop was
+  0.2 to 0.4 s, the same with 2.15 on this machine (measured side by side).
+
+**Other tracks, delays** (`subs-tracks.txt`, 7 checks for each of the three videos with
+two subtitle tracks, 16 screenshots each): the other track picked while paused and while
+playing, subtitles off and on, jumps after each; lines three seconds later and two
+seconds earlier, another track with the same delay, no delay again. All right.
+
+**Subtitle files** (`subs-files.txt`, 11 checks, 17 screenshots): the file beside the
+video; a SubRip, an ASS and a WebVTT file picked one after another while the video is
+open, with jumps after each; the file put away; a file picked for a video that has
+tracks of its own, back to its own track, the file again; a video left in the middle and
+opened again starts there with its line. Picking a file left the video playing: opened
+once, 1.8 s of video in 1.9 s.
+
+**Picture subtitles** (`subs-pictures.txt`, 9 checks, 44 screenshots): a Blu-ray
+picture-subtitle track comes up as the video plays and, after a jump, from the next line
+on; the text track of the same video has its line at once after a jump; back to the
+picture track; subtitles off. The video is opened again once (for GStreamer's subtitle
+path) and not again after that.
+
+**No video is opened again on the way** in any of the other runs (a check in each): not
+by hiding and showing subtitles, other speeds, a loop, other tracks or delays.
+
+**Jellyfin** (`subs-jellyfin.txt`, 16 checks for each of the two server versions, 22
+screenshots): the original file with its own two tracks (the lines fetched as files,
+with the token in the header only; jumps playing and paused, the other track); the
+server's subtitle files (SubRip loaded by itself, then ASS and WebVTT picked, the video
+not opened again); a conversion (jumps playing and paused, the other track's file, the
+conversion not started anew).
+
+**ASS / SSA files** (ctest `ass`, 15 checks): times, commas in the text, layers and
+margins, comments and what follows the lines left out, Windows line ends, UTF-8 with a
+mark, UTF-16, a one-byte file, an SSA script, fields in another order, lines without
+sense, a SubRip file not taken for a script.
+
+**The two standstills** are part of the runs above: the ASS-in-Matroska clip (subtitle
+lines stored fifteen seconds ahead, keyframes ten seconds apart) and the recording at
+double and half speed. With 2.15 the first leaves the picture standing after a jump and
+the second never returns from one.
+
+**Sanitizers** (address and undefined behaviour, the final code): the whole subtitle suite (131 checks) and the
+Jellyfin subtitle run passed with nothing reported by either; so did four starts of the
+picture-subtitle video on the path a graphics card takes. (An earlier such run found the
+fault at exit listed below.)
+
+**The whole verification, with the final build:**
+
+| Run | Passed | Failed |
+|---|---|---|
+| unit tests (ctest) | 9 of 9 | |
+| native, X11 (no graphics card: frames converted on the CPU) | 646 | 2 |
+| native, X11, the path a graphics card takes (OpenGL widget, frames as decoded) | 648 | 0 |
+| native, Wayland | 18 | 0 |
+| AppImage, X11, no Qt installed on the system | 647 | 1 |
+| AppImage, Wayland, no Qt installed on the system | 18 | 0 |
+
+Of the 648 checks of an X11 run, 131 are the subtitle suite and 32 the Jellyfin
+subtitle checks (16 for each server version); all of those passed in all three runs but
+for the one below.
+
+- **The three failures:**
+  - *4K at 30 frames a second: 16.9 frames a second* (first run): this machine's speed.
+    One or more of these speed checks have failed in every release's runs here.
+  - *tracks-text: no picture waited for its lines longer than a quarter of a second: 1
+    wait, 250 ms, 1 given up* (first run): after a track is picked far into a video and
+    the viewer then jumps back to near its start, the reader starts over, and here it
+    was not done within the quarter second. The picture then goes through without its
+    line and is fetched again with it: the picture checks of that run passed. The check
+    asked for no wait to run out at all; for the runs that switch tracks it now asks
+    only that none lasts longer (changed before the two later runs, which passed it).
+  - *It comes on partway through, where the broadcast is: the broadcast is 21.8 s in,
+    the player 16.8 s* (AppImage run): the very first tune after the TV is switched on
+    for the first time, 5.0 s behind where 5 are allowed. How far behind that first tune
+    is depends on how this machine brings up its first picture, and comes out at either
+    about half a second or about five: 4.6, 0.5 and 0.6 s in 2.15's three runs; 4.7, 0.6
+    and 5.0 s here.
+- **Earlier full runs, of builds before the last corrections** (each correction is listed
+  under the faults below, and each was followed by a full run from the start): besides
+  what those corrections were for, they failed *subtitles on again on a channel* twice,
+  when the report fell on the moment the channel's programme started over (the script
+  now waits until the programme plays), and speed checks.
+- Measured against 2.15 side by side: where a Jellyfin video stands when its first
+  picture is shown (0 to 0.3 s in both, with subtitles on and off).
+
+### Faults found on the way, and fixed
+
+- **A line handed over before the overlay had built what draws** ended the source of the
+  lines with "not linked", and the video with it (one start in three with a subtitle
+  file). The overlay is told to keep quiet only once it has built its drawing chain; and
+  an error from the source of the lines no longer stops the video.
+- **A picture fetched again "with its lines" could send the video back** to where it had
+  been before a jump still under way (the picture on screen is then not where the video
+  is going). Such a refresh now waits for the jump to finish.
+- **The quarter of a second was counted from the jump**, not from the picture's arrival:
+  a slow jump used it up before there was anything to wait for.
+- **Having read a video to its end was taken for having read all of it.** A reader
+  started in the middle (after a track was picked late in the video) left the earlier
+  part unknown for good.
+- **A jump of the reader to the very start lost the first line** when the file stores it
+  before the first place its index knows. The reader starts over instead.
+- **The overlay rebuilding for another kind of subtitle** (text, then ASS) waited for a
+  picture while the picture waited for its lines: a quarter of a second each time.
+- **In GStreamer's ASS renderer a line in force at the place jumped to stayed on screen
+  too long** by as much as it had already been shown (it moves the beginning and leaves
+  the length). The player hands such a line over already cut.
+- **Switching GStreamer's subtitle path on while the pipeline was running** (the first
+  way picture subtitles were handed back to it) now and again left the video without a
+  picture for good: two starts in twelve with the Blu-ray subtitle clip, and one Jellyfin
+  video in a full run, both only on the path a graphics card takes. The video is opened
+  again with that path instead (fourteen starts in fourteen, for both).
+- **Hiding subtitles and showing them again opened the video again** (with GStreamer's
+  subtitle path on), in the first version of the above: for an instant after "show", no
+  source of lines is set yet, which was taken for "the player cannot have this track's
+  lines". Seen when the slow sanitizer build showed a picture from the start of the video
+  after "show"; in the normal build the video came back where it was and every picture
+  check passed. A check on how often each video is opened was added to every run.
+- **Switching subtitle tracks while paused, then jumping, locked the pipeline** in an MP4
+  with two subtitle tracks (GStreamer's own subtitle path full of waiting lines, and a
+  flush that does not reach them). That path is now off while the player feeds the lines.
+- **Opening a Jellyfin video with subtitles on started it from its beginning** instead of
+  its resume point (see "What was wrong"). The existing check passed because of it: its
+  wait was longer than what was left of the clip from the resume point.
+- **Signing out while a converted video played** left the conversion running on the mock
+  server. It is ended first now.
+- **A screenshot taken right after the programme guide went and a banner came showed the
+  guide** (Cable TV; since 2.10): a changed overlay was given to the renderer at the next
+  paint, and a screenshot in between drew the one before. Only the screenshot was wrong,
+  not the screen. It showed in the *W shows the guide* check twice, when that screenshot
+  happened to fall on a change of programme; reproduced by timing with the build before
+  the fix (the guide in the screenshot) and after it (the banner).
+- **Asking the server for a subtitle track's file before the video had opened** could get
+  "no such track" for an answer (its list of tracks still incomplete), and the video was
+  then opened again for GStreamer's subtitle path: once in a full run, caught by the new
+  check on how often videos are opened. It is asked once the video has opened.
+- **Undefined behaviour at exit** (found by the sanitizer run): the Jellyfin panel's
+  "visibility changed" reaching the window while it was being destroyed, as fixed for the
+  two other panels in 2.15.
+
+### Known limits and what was not tested
+
+- **None of this ran on the user's machine or with a real Jellyfin server.** GStreamer
+  here is 1.24.2 (Ubuntu 24.04); Bazzite's is newer. What depends on GStreamer's
+  subtitle elements behaving as they do here (the overlay's rebuilding, the ASS renderer's
+  timing) was measured on this version only. The server is `tests/jellyfin_mock.py`: it
+  answers as Jellyfin 10.8 and 10.10 do for the calls the player makes, and hands out
+  subtitle files as fast as a file can be read. A real server extracts a subtitle track
+  from a large video the first time it is asked, which can take longer than the five
+  seconds the player waits before it lets GStreamer draw the track; the file is still
+  used when it arrives.
+- **Picture subtitles (DVD, Blu-ray) are as before:** after a jump they return with the
+  next one. On this GStreamer they are also drawn about two seconds early, and a video
+  with such a track selected takes some seconds to show its first picture; both were the
+  same in 2.15 and were not looked into.
+- **When the reader has to start over** (another track picked far into a video, then a
+  jump back to near its start) the lines may come later than the quarter second the
+  picture waits: a playing video then shows the line a moment late, a paused one is
+  fetched again with it. Seen once in the full runs (above).
+- **A line in force for more than a minute** at the place jumped to is missed (subtitles
+  inside a video). **Lines stored more than twenty seconds ahead** of their time in the
+  file can be missed after a jump (seen: fifteen).
+- **Animated ASS lines** restart their movement at the place jumped to.
+- **Other videos over the network** (not Jellyfin) get their own subtitle tracks drawn by
+  GStreamer, as before, because their lines are not read a second time over the network.
+- **A jump to the nearest keyframe** (while the seek bar is dragged) in an MP4 with
+  subtitle tracks lands at the start of the subtitle line before that keyframe, which can
+  be much earlier: GStreamer's MP4 demuxer counts subtitle lines as keyframes. Letting go
+  of the seek bar jumps exactly, so the picture ends up right. The same in 2.15; not
+  changed.
+- **MPEG-TS:** a subtitle file is timed from the recording's clock, which in recordings
+  made by ffmpeg starts about a second before the first picture; lines then come a
+  second early. The same in 2.15.
+- **The test clips are synthetic** (a plain picture, seven lines). No real film with
+  thousands of lines, karaoke or typeset signs was played.
+- **Windows:** the same code is compiled there; subtitles after jumps were not tested on
+  Windows.
 
 ## 2.15: NVIDIA AI for Enhance (Video Super Resolution, Video Frame Generation); an A-B loop that stopped at the video's end
 

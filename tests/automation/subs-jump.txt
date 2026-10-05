@@ -1,0 +1,157 @@
+# 2.16: the right subtitle line after every jump. One video (@F@), its first subtitle track.
+# Every picture says by itself where in the video it is (the bar along its top) and which line it shows
+# (line N is N letters): scripts/check-subtitles.py reads both. The names: LINES_NUMBER_SECONDS, where
+# LINES is a (the first track's), b (the second's), n (none) ... and SECONDS the place meant (x: not told).
+subs on
+open @M@/@F@
+waitstate playing 20000
+waitshown 3 8000
+screenshot original @O@/@N@/a_01_3.png
+# ---- jumps while it plays: forwards, backwards, into a line long in force, between lines, to the nearest keyframe
+seek 12
+waitshown 12 8000
+wait 300
+screenshot original @O@/@N@/a_02_12.png
+seek 90
+waitshown 90 8000
+wait 300
+screenshot original @O@/@N@/a_03_90.png
+seek 8
+waitshown 8 8000
+wait 300
+screenshot original @O@/@N@/a_04_8.png
+seek 35 @FAST@
+wait 1100
+screenshot original @O@/@N@/a_05_x.png
+seek 115
+waitshown 115 8000
+wait 300
+screenshot original @O@/@N@/a_06_115.png
+seek 26
+waitshown 26 8000
+wait 300
+screenshot original @O@/@N@/a_07_26.png
+# ---- the same with the video paused: the picture that then stands must carry its line
+pause
+seek 15
+waitshown 15 8000
+wait 300
+screenshot original @O@/@N@/a_08_15.png
+seek 100
+waitshown 100 8000
+wait 300
+screenshot original @O@/@N@/a_09_100.png
+seek 8
+waitshown 8 8000
+wait 300
+screenshot original @O@/@N@/a_10_8.png
+seek 27
+waitshown 27 8000
+wait 300
+screenshot original @O@/@N@/a_11_27.png
+seek 52 @FAST@
+wait 900
+screenshot original @O@/@N@/a_12_x.png
+seek 44 @FAST@
+wait 900
+screenshot original @O@/@N@/a_13_x.png
+seek 4
+waitshown 4 8000
+wait 300
+screenshot original @O@/@N@/a_14_4.png
+report paused-jumps
+# ---- on from a paused jump: the line ends when it should and the next one comes
+play
+waitpos 7500 9000
+screenshot original @O@/@N@/a_15_x.png
+waitpos 11000 9000
+screenshot original @O@/@N@/a_16_x.png
+# ---- frame by frame over the beginning of a line, and back
+pause
+seek 9.9
+waitshown 9.9 8000
+wait 300
+screenshot original @O@/@N@/a_17_x.png
+step fwd
+wait 500
+step fwd
+wait 500
+step fwd
+wait 500
+step fwd
+wait 500
+screenshot original @O@/@N@/a_18_x.png
+step back
+wait 700
+step back
+wait 700
+step back
+wait 700
+step back
+wait 700
+step back
+wait 700
+screenshot original @O@/@N@/a_19_x.png
+# ---- hidden and shown again, paused and playing
+seek 15
+waitshown 15 8000
+wait 300
+subs off
+wait 900
+screenshot original @O@/@N@/n_20_15.png
+subs on
+wait 900
+screenshot original @O@/@N@/a_21_15.png
+play
+seek 32
+waitshown 32 8000
+wait 300
+subs off
+wait 900
+screenshot original @O@/@N@/n_22_x.png
+subs on
+wait 900
+screenshot original @O@/@N@/a_23_x.png
+# ---- at another speed
+rate 2
+wait 900
+screenshot original @O@/@N@/a_24_x.png
+seek 62
+waitshown 62 8000
+wait 300
+screenshot original @O@/@N@/a_25_x.png
+rate 0.5
+wait 900
+screenshot original @O@/@N@/a_26_x.png
+seek 51
+waitshown 51 8000
+wait 300
+screenshot original @O@/@N@/a_27_x.png
+rate 1
+wait 600
+# ---- round a loop: every time it jumps back, the line is there
+loop 26500 27500
+seek 26.6
+wait 2700
+screenshot original @O@/@N@/a_28_x.png
+wait 700
+screenshot original @O@/@N@/a_29_x.png
+loop off
+# ---- dragged along the seek bar (thirty quick jumps), let go in the middle of a line; and dragged while paused
+scrub 5 100 30 40
+waitshown 100 9000
+wait 300
+screenshot original @O@/@N@/a_30_100.png
+pause
+scrub 110 13 30 40
+waitshown 13 9000
+wait 300
+screenshot original @O@/@N@/a_31_13.png
+play
+# ---- near the end of the video
+seek 116
+waitshown 116 8000
+wait 300
+screenshot original @O@/@N@/a_32_116.png
+report end
+quit

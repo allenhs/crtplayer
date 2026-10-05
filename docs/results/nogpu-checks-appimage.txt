@@ -4,15 +4,15 @@ PASS  the window surface is the one asked for: raster
 PASS  the video sink asks the decoder for frames in ordinary memory only: 0 other kinds of memory offered
 PASS  software OpenGL is recognised: llvmpipe (LLVM 20.1.2, 256 bits) | 4.5 (Core Profile) Mesa 2
 PASS  effects off: frames arrive converted, at exactly the size they are shown at: 1262 × 710 for a picture of 1262 × 710 (the video is 1920 × 1080)
-PASS  1080p at 30 frames a second plays at full rate: 30.0 frames a second (12.9 the old way)
-PASS  drawing a frame takes a fraction of the time: 1.0 ms a frame against 73.1 ms the old way
+PASS  1080p at 30 frames a second plays at full rate: 30.0 frames a second (14.0 the old way)
+PASS  drawing a frame takes a fraction of the time: 0.9 ms a frame against 67.6 ms the old way
 PASS  no OpenGL is used at all with effects off: 0 OpenGL draws
-PASS  it also costs less CPU: 0.57 cores busy against 1.82, of 2
+PASS  it also costs less CPU: 0.61 cores busy against 1.82, of 2
 PASS  the picture is the same as the old way shows (same frame, paused): mean difference 1.65 of 255, 0.08% of areas differ visibly
 PASS  an original-frame screenshot is still the full video frame, identical either way: 1920 × 1080, largest difference 0
 PASS  after the screenshot the fast frames are asked for again: rgb scaled
 PASS  with the fast path set to Never, frames stay as decoded: as decoded, 1920 × 1080
-PASS  4K at 30 frames a second: 30.0 frames a second (2.8 the old way), scaled to 1262 × 710 on the CPU
+PASS  4K at 30 frames a second: 30.0 frames a second (3.2 the old way), scaled to 1262 × 710 on the CPU
 PASS  4K shrunk on the CPU shows the same picture: mean difference 1.87 from the old way, 0.25% of areas differ visibly
 PASS  and it is shrunk properly (every pixel averaged in: no jagged, noisy fine detail): fine detail 2.08; the 4K frame averaged down has 1.74 (the old way showed 1.42)
 PASS  the decoder uses every CPU thread: 2 decoder threads, 2 CPU threads
@@ -26,25 +26,25 @@ PASS  twelve changes of size and look in five seconds, while playing: the stream
 PASS  a rotated phone video is drawn the old way, upright: as decoded, picture aspect 0.562, difference 0.00
 PASS  with a look, frames are converted on the CPU at the video's own size (no conversion pass in OpenGL): rgb, 1920 × 1080, conversion 0.0 ms
 PASS  the look shows the same picture as the old way: mean difference 1.11
-PASS  Look detail: Half draws the look at half size and is faster for it: 13.4 frames a second against 8.2 at full size (fullscreen, 1080p)
+PASS  Look detail: Half draws the look at half size and is faster for it: 21.2 frames a second against 10.9 at full size (fullscreen, 1080p)
 PASS  the half-size look is the same picture, softer: mean difference 5.49; fine detail 8.20 against 19.32
 PASS  Automatic: half in a large window, full in a small one: fullscreen (1080 high) 0.5, window (710 high) 1
 PASS  desk mode gets frames converted on the CPU, at the video's own size: rgb, 1920 × 1080
-PASS  4K with a look: frames come scaled to the picture: 1262 × 710, 8.4 frames a second
-PASS  Cable TV with effects off: the channel number is painted over the picture: 3475 pixels of the channel number's green in the top right corner
+PASS  4K with a look: frames come scaled to the picture: 1262 × 710, 12.8 frames a second
+PASS  Cable TV with effects off: the channel number is painted over the picture: 4228 pixels of the channel number's green in the top right corner
 -- OpenGL widget (what a graphics card gets), forced onto software OpenGL
 PASS  the script ran without a failed step: all ok
 PASS  the window surface is the one asked for: gl widget
 PASS  the video sink asks the decoder for frames in ordinary memory only: 0 other kinds of memory offered
 PASS  software OpenGL is recognised: llvmpipe (LLVM 20.1.2, 256 bits) | 4.5 (Core Profile) Mesa 2
 PASS  effects off: frames arrive converted, at exactly the size they are shown at: 1262 × 710 for a picture of 1262 × 710 (the video is 1920 × 1080)
-FAIL  1080p at 30 frames a second plays at full rate: 20.5 frames a second (9.9 the old way)
-PASS  drawing a frame takes a fraction of the time: 18.0 ms a frame against 74.6 ms the old way
+PASS  1080p at 30 frames a second plays at full rate: 27.7 frames a second (11.1 the old way)
+PASS  drawing a frame takes a fraction of the time: 13.7 ms a frame against 70.9 ms the old way
 PASS  the picture is the same as the old way shows (same frame, paused): mean difference 1.66 of 255, 0.08% of areas differ visibly
 PASS  an original-frame screenshot is still the full video frame, identical either way: 1920 × 1080, largest difference 0
 PASS  after the screenshot the fast frames are asked for again: rgb scaled
 PASS  with the fast path set to Never, frames stay as decoded: as decoded, 1920 × 1080
-FAIL  4K at 30 frames a second: 15.1 frames a second (2.9 the old way), scaled to 1262 × 710 on the CPU
+PASS  4K at 30 frames a second: 20.9 frames a second (3.2 the old way), scaled to 1262 × 710 on the CPU
 PASS  4K shrunk on the CPU shows the same picture: mean difference 1.88 from the old way, 0.25% of areas differ visibly
 PASS  and it is shrunk properly (every pixel averaged in: no jagged, noisy fine detail): fine detail 2.02; the 4K frame averaged down has 1.74 (the old way showed 1.42)
 PASS  the decoder uses every CPU thread: 2 decoder threads, 2 CPU threads
@@ -52,15 +52,15 @@ PASS  an anamorphic DVD keeps its 16:9 shape: 1.778; frames 853 × 480 with squa
 PASS  and shows the same picture as the old way: mean difference 2.01
 PASS  zoomed to fill the window (the cropped part of the frame is shown): mean difference 2.08; picture 1280 × 710
 PASS  going fullscreen and back, the frames follow the size of the picture: 1262 × 710 → 1920 × 1080 → 1262 × 710
-FAIL  fullscreen 1080p plays at full rate: 11.2 frames a second
+PASS  fullscreen 1080p plays at full rate: 18.4 frames a second
 PASS  going fullscreen while paused, the frame scaled for the window gives way to the full frame: 1920 × 1080, paused
-FAIL  twelve changes of size and look in five seconds, while playing: the stream carries on: playing, 22.6 frames a second, at 9.2 s, no error
+PASS  twelve changes of size and look in five seconds, while playing: the stream carries on: playing, 29.8 frames a second, at 9.2 s, no error
 PASS  a rotated phone video is drawn the old way, upright: as decoded, picture aspect 0.562, difference 0.00
 PASS  with a look, frames are converted on the CPU at the video's own size (no conversion pass in OpenGL): rgb, 1920 × 1080, conversion 0.0 ms
 PASS  the look shows the same picture as the old way: mean difference 1.11
 PASS  on the OpenGL widget the look is always drawn at full size: 1
 PASS  desk mode gets frames converted on the CPU, at the video's own size: rgb, 1920 × 1080
-PASS  4K with a look: frames come scaled to the picture: 1262 × 710, 6.6 frames a second
-PASS  Cable TV with effects off: the channel number is painted over the picture: 3588 pixels of the channel number's green in the top right corner
+PASS  4K with a look: frames come scaled to the picture: 1262 × 710, 9.3 frames a second
+PASS  Cable TV with effects off: the channel number is painted over the picture: 5392 pixels of the channel number's green in the top right corner
 
-4 check(s) failed
+All no-GPU checks passed

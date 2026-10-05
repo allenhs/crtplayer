@@ -5,7 +5,7 @@ PASS  sconce light fades smoothly (no hard cut-off below the lamps): largest ste
 PASS  closed curtains cover the screen (red velvet): centre [53.  4.  4.]
 PASS  the curtains open while it plays, house lights down: curtain 1, house 0
 PASS  open: the picture shows: colourfulness at the centre 96
-PASS  haze: the projector's light shows in the air above the screen: 2.3 -> 33.0
+PASS  haze: the projector's light shows in the air above the screen: 2.3 -> 32.8
 PASS  back: the camera sits in the rows, eye at seated height: row 17.2, eye 1.05 (seated 1.05)
 PASS  middle: the camera sits in the rows, eye at seated height: row 11.6, eye 0.66 (seated 0.66)
 PASS  front: the camera sits in the rows, eye at seated height: row 3.0, eye 0.06 (seated 0.06)

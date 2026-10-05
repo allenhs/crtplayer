@@ -7,9 +7,9 @@ PASS  portrait video gives a tall (pivoted) set: cabinet w/h 0.71
 PASS  16:9 follow-video set is wider than the classic 4:3 set: 1.31 vs 1.08
 PASS  flat panel: landing frame equals the regular fullscreen frame: max diff 0
 PASS  flat panel is a slimmer set than the CRT (less opaque area at the same angle): opaque 11.4% vs CRT 15.3%
-PASS  flat-face CRT differs from the curved-glass CRT (flat glass): mean difference 0.75
+PASS  flat-face CRT differs from the curved-glass CRT (flat glass): mean difference 0.76
 PASS  beige monitor: landing frame equals the regular fullscreen frame: max diff 0
-PASS  all six sets look different from each other: smallest mean difference 0.75 (crt/flat-crt)
+PASS  all six sets look different from each other: smallest mean difference 0.76 (crt/flat-crt)
 PASS  every set is transparent around itself: crt 77%, flat-crt 77%, flat-panel 78%, wood 82%, pvm 76%, beige 74%
 PASS  wood console legs meet the cabinet (no floating legs): 0 pixel columns with a gap
 PASS  shadow is solid under a set on legs (no hole under the middle): lowest opacity under the set 0.46 (darkest 0.55)

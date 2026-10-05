@@ -1,6 +1,6 @@
 PASS  rainbow crosstalk adds false colour to grey stripes: 16.7 -> 26.0
 PASS  dot crawl / rainbow animate on a paused frame: pixels changed between moments: 8.1%, 10.6%, 9.6%, 9.6%, 12.1%, 8.1%
-PASS  head switching disturbs only the bottom of the picture: bottom diff 4.5 vs mid 0.8
+PASS  head switching disturbs only the bottom of the picture: bottom diff 4.5 vs mid 0.7
 PASS  laser rot adds sparse speckles: 0.07% pixels
 PASS  scanline styles differ: scan_0_soft vs scan_1_sharp: mean row diff 25.2
 PASS  scanline styles differ: scan_0_soft vs scan_2_dynamic: mean row diff 6.4

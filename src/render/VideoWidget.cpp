@@ -647,6 +647,9 @@ QImage VideoWidget::grabFilteredFrame()
     uploadCurrent();
     CrtRenderer::DrawParams dp = makeDrawParams(vp, QRectF(QPointF(0, 0), area.size()));
     decorate(dp);
+    // (An overlay or VCR text changed since the last paint is drawn from its own picture, not from the one before:
+    // a screenshot taken right after the guide went and a banner came showed the guide.)
+    if (m_osdUploaded != m_osdVersion && !osdImage().isNull()) { m_renderer.setOsdImage(osdImage()); m_osdUploaded = m_osdVersion; }
     QImage img = m_renderer.renderToImage(dp);
     doneCurrent();
     img.setDevicePixelRatio(1.0);

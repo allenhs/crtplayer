@@ -37,6 +37,9 @@ struct JfPlayback {
     QString playSessionId, mediaSourceId;
     QStringList transcodeReasons;   // e.g. VideoCodecNotSupported, ContainerBitrateExceedsLimit
     QList<QPair<QString, QUrl>> subtitles;   // subtitle files the server offers for this playback
+    // 2.16: the original file's own subtitle streams, in the file's order: where the server hands each one out
+    // as a file (text subtitles; empty for picture subtitles). Only for the original file (not a conversion).
+    QList<QUrl> ownSubtitles;
     QString error;                  // PlaybackInfo failed (the caller falls back to the original file)
 };
 

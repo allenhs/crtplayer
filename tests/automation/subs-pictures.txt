@@ -1,0 +1,120 @@
+# 2.16: picture subtitles (Blu-ray's, DVD's) are still drawn by the playback library, as before: the first track of
+# this video is one (line N is N white blocks), the second is text. The library is not exact about when a picture
+# subtitle comes and goes (it draws these about two seconds early), so for the picture track the checks only ask
+# that the lines show up in turn; with the text track, the right line must be there at once after every jump.
+subs on
+open @M@/jump_pgs.mkv
+waitstate playing 20000
+seek 6
+waitshown 6 8000
+screenshot original @O@/@N@/p_01_x.png
+wait 500
+screenshot original @O@/@N@/p_02_x.png
+wait 500
+screenshot original @O@/@N@/p_03_x.png
+wait 500
+screenshot original @O@/@N@/p_04_x.png
+wait 500
+screenshot original @O@/@N@/p_05_x.png
+wait 500
+screenshot original @O@/@N@/p_06_x.png
+wait 500
+screenshot original @O@/@N@/p_07_x.png
+wait 500
+screenshot original @O@/@N@/p_08_x.png
+wait 500
+report pictures
+seek 21
+waitshown 21 8000
+screenshot original @O@/@N@/p_09_x.png
+wait 500
+screenshot original @O@/@N@/p_10_x.png
+wait 500
+screenshot original @O@/@N@/p_11_x.png
+wait 500
+screenshot original @O@/@N@/p_12_x.png
+wait 500
+screenshot original @O@/@N@/p_13_x.png
+wait 500
+screenshot original @O@/@N@/p_14_x.png
+wait 500
+screenshot original @O@/@N@/p_15_x.png
+wait 500
+screenshot original @O@/@N@/p_16_x.png
+wait 500
+screenshot original @O@/@N@/p_17_x.png
+wait 500
+screenshot original @O@/@N@/p_18_x.png
+wait 500
+screenshot original @O@/@N@/p_19_x.png
+wait 500
+screenshot original @O@/@N@/p_20_x.png
+wait 500
+# ---- over to the text track (the player's own lines), and jumps
+pause
+subtrack 1
+wait 1200
+seek 35
+waitshown 35 8000
+wait 300
+screenshot original @O@/@N@/a_21_35.png
+seek 100
+waitshown 100 8000
+wait 300
+screenshot original @O@/@N@/a_22_100.png
+report text
+# ---- and back to the pictures
+subtrack 0
+wait 1200
+play
+seek 46
+waitshown 46 8000
+screenshot original @O@/@N@/p_23_x.png
+wait 500
+screenshot original @O@/@N@/p_24_x.png
+wait 500
+screenshot original @O@/@N@/p_25_x.png
+wait 500
+screenshot original @O@/@N@/p_26_x.png
+wait 500
+screenshot original @O@/@N@/p_27_x.png
+wait 500
+screenshot original @O@/@N@/p_28_x.png
+wait 500
+screenshot original @O@/@N@/p_29_x.png
+wait 500
+screenshot original @O@/@N@/p_30_x.png
+wait 500
+screenshot original @O@/@N@/p_31_x.png
+wait 500
+screenshot original @O@/@N@/p_32_x.png
+wait 500
+screenshot original @O@/@N@/p_33_x.png
+wait 500
+screenshot original @O@/@N@/p_34_x.png
+wait 500
+screenshot original @O@/@N@/p_35_x.png
+wait 500
+screenshot original @O@/@N@/p_36_x.png
+wait 500
+subs off
+seek 57
+waitshown 57 8000
+screenshot original @O@/@N@/n_37_x.png
+wait 500
+screenshot original @O@/@N@/n_38_x.png
+wait 500
+screenshot original @O@/@N@/n_39_x.png
+wait 500
+screenshot original @O@/@N@/n_40_x.png
+wait 500
+screenshot original @O@/@N@/n_41_x.png
+wait 500
+screenshot original @O@/@N@/n_42_x.png
+wait 500
+screenshot original @O@/@N@/n_43_x.png
+wait 500
+screenshot original @O@/@N@/n_44_x.png
+wait 500
+report end
+quit

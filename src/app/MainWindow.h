@@ -325,6 +325,7 @@ private:
     qint64 m_previewMs = -1;
     QString m_currentLocal;                     // absolute path of the playing local file
     QList<QPair<QString, QString>> m_extSubs;   // external subtitles on offer: label, URI
+    QList<QUrl> m_jfOwnSubs;   // (Jellyfin, the original file) where the server hands out each of its own subtitle tracks as a file
     QString m_extSubLabel;                      // the one loaded, if any
     qint64 m_loopA = -1, m_loopB = -1;          // ns
     CutDialog* m_cutDialog = nullptr;

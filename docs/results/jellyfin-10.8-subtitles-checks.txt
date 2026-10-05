@@ -1,0 +1,16 @@
+PASS  Jellyfin 10.8.13 subtitles: the original file, its own tracks: jumps playing and paused, the other track: at 3.2 s line 1, at 90.4 s line 6, at 12.4 s line 2, at 34.8 s line 4, at 100.0 s line 6, at 8.0 s line 0, at 8.0 s line 8, at 70.4 s line 9
+PASS  Jellyfin 10.8.13 subtitles: the original file is played as it is; the lines of its own tracks come from the server as files, signed in (token in the header only): DirectPlay, 2 lines in the player's store, 2 subtitle file request(s)
+PASS  Jellyfin 10.8.13 subtitles: subtitle files from the server (SubRip by itself, then ASS and WebVTT picked): jumps playing and paused: at 2.8 s line 1, at 33.2 s line 4, at 100.0 s line 6, at 100.0 s line 9, at 60.0 s line 0, at 60.0 s line 6, at 52.4 s line 5
+PASS  Jellyfin 10.8.13 subtitles: picking another of the server's files leaves the video as it is: not opened again
+PASS  Jellyfin 10.8.13 subtitles: converted by the server: jumps playing and paused, the other track's file: at 2.4 s line 1, at 90.0 s line 6, at 12.0 s line 2, at 99.2 s line 6, at 7.2 s line 0, at 7.2 s line 8, at 69.6 s line 9
+PASS  Jellyfin 10.8.13 subtitles: it is a conversion, and picking the other file does not start it anew: Transcode; not opened again
+PASS  Jellyfin 10.8.13 subtitles: each of the three videos is opened once: opened 3 times in all
+PASS  jellyfin (own): the lines come from the player's own store: text, 2 lines (application/x-subtitle)
+PASS  jellyfin (own): no picture waited for its lines longer than a quarter of a second: 0 waits, 0 ms on average, 0 ms the longest, 0 given up
+PASS  jellyfin (own): the source of the lines never failed: 0 errors; no error shown
+PASS  jellyfin (files): the lines come from the player's own store: text, 7 lines (application/x-subtitle-vtt)
+PASS  jellyfin (files): no picture waited for its lines longer than a quarter of a second: 0 waits, 0 ms on average, 0 ms the longest, 0 given up
+PASS  jellyfin (files): the source of the lines never failed: 0 errors; no error shown
+PASS  jellyfin (converted): the lines come from the player's own store: text, 2 lines (application/x-ass (file))
+PASS  jellyfin (converted): no picture waited for its lines longer than a quarter of a second: 2 waits, 0 ms on average, 0 ms the longest, 0 given up
+PASS  jellyfin (converted): the source of the lines never failed: 0 errors; no error shown

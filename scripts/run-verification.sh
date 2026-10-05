@@ -141,6 +141,36 @@ polish_suite() {
   echo "== polish checks"
   checker "$O/polish-checks.txt" python3 "$HERE/scripts/check-polish.py" "$O" "$M"
 }
+# 2.16: the right subtitle line after every jump: subtitles in the video (Matroska with SubRip and with ASS,
+# MP4), subtitle files beside it (SubRip, ASS), a recording whose times do not begin at zero; other tracks,
+# delays, files picked while the video plays. Every picture is read by scripts/check-subtitles.py.
+subtitles_suite() {
+  if [[ ! -f "$M/jump_srt.mkv" ]]; then echo "== subtitle checks skipped: no jump_* clips in $M (scripts/make-test-media.sh)"; return; fi
+  local runs=() spec tag file fast dir
+  sub_run() { # script tag [file [fast]]
+    dir=$1${2:+-$2}
+    rm -rf "$XDG_CONFIG_HOME" "$XDG_DATA_HOME" "$O/$dir"; mkdir -p "$O/$dir"
+    sed -e "s#@N@#$dir#g" -e "s#@F@#${3:-}#g" -e "s#@FAST@#${4-fast}#g" -e "s#@M@#$M#g" -e "s#@O@#$O#g" "$HERE/tests/automation/subs-$1.txt" > "$O/subs-$dir.txt"
+    echo "== subs-$dir"
+    timeout 600 "$BIN" --automation "$O/subs-$dir.txt" --automation-log "$O/subs-$dir.json" > "$O/subs-$dir.log" 2>&1
+    echo "   exit code $?"
+    runs+=("$dir")
+  }
+  # (a jump "to the nearest keyframe" is left out for the recording: MPEG-TS has no list of its keyframes, and with
+  # ten seconds between them the picture after such a jump is grey until the next one)
+  for spec in srt:jump_srt.mkv:fast ass:jump_ass.mkv:fast text:jump_text.mp4:fast side:jump_side.mp4:fast sideass:jump_sideass.mkv:fast offset:jump_offset.ts:; do
+    IFS=: read -r tag file fast <<< "$spec"
+    sub_run jump "$tag" "$file" "$fast"
+  done
+  for spec in srt:jump_srt.mkv ass:jump_ass.mkv text:jump_text.mp4; do
+    IFS=: read -r tag file <<< "$spec"
+    sub_run tracks "$tag" "$file"
+  done
+  sub_run files
+  sub_run pictures
+  echo "== subtitle checks"
+  checker "$O/subtitles-checks.txt" python3 "$HERE/scripts/check-subtitles.py" "$O" "${runs[@]}"
+}
 # 2.15: NVIDIA's AI methods for Enhance, with a stand-in for NVIDIA's SDK (build/nvfx-mock-sdk,
 # or NVFX_MOCK_SDK): the player, its helper program and everything between them are the real
 # ones; only the AI models are not. Then the ways it can fail.
@@ -242,6 +272,7 @@ else
   if python3 -c "import PIL" 2>/dev/null; then nogpu_suite; fi
   if python3 -c "import PIL" 2>/dev/null; then enhance_suite; fi
   if python3 -c "import PIL" 2>/dev/null; then nvidia_suite; fi
+  if python3 -c "import PIL" 2>/dev/null; then subtitles_suite; fi
   rm -rf "$XDG_CONFIG_HOME"
   run sound sound.txt
   echo "== sound checks"

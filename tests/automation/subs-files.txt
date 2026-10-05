@@ -1,0 +1,80 @@
+# 2.16: subtitle files: beside the video, picked by hand while it plays (SubRip, ASS, WebVTT), put away again;
+# a file picked for a video that has subtitle tracks of its own.
+subs on
+open @M@/jump_side.mp4
+waitstate playing 20000
+waitshown 3 8000
+screenshot original @O@/@N@/a_01_3.png
+seek 33
+waitshown 33 8000
+wait 300
+screenshot original @O@/@N@/a_02_x.png
+report side-before
+subfile @M@/jump_b.srt
+wait 1500
+screenshot original @O@/@N@/b_03_x.png
+report side-picked
+pause
+subfile @M@/jump_a.ass
+wait 1500
+screenshot original @O@/@N@/a_04_x.png
+seek 100
+waitshown 100 8000
+wait 300
+screenshot original @O@/@N@/a_05_100.png
+subfile @M@/jump_b.vtt
+wait 1500
+screenshot original @O@/@N@/b_06_100.png
+seek 20
+waitshown 20 8000
+wait 300
+screenshot original @O@/@N@/b_07_20.png
+subfile off
+wait 1500
+screenshot original @O@/@N@/n_08_20.png
+report side-off
+open @M@/jump_srt.mkv
+waitstate playing 20000
+seek 35
+waitshown 35 8000
+wait 300
+screenshot original @O@/@N@/a_09_x.png
+subfile @M@/jump_b.ass
+wait 1500
+screenshot original @O@/@N@/b_10_x.png
+report own-picked
+pause
+subtrack 0
+wait 1000
+screenshot original @O@/@N@/a_11_x.png
+subtrack 2
+wait 1000
+screenshot original @O@/@N@/b_12_x.png
+seek 90
+waitshown 90 8000
+wait 300
+screenshot original @O@/@N@/b_13_90.png
+seek 60
+waitshown 60 8000
+wait 300
+screenshot original @O@/@N@/b_14_60.png
+subfile off
+wait 1500
+screenshot original @O@/@N@/a_15_60.png
+# ---- back to a video that was left in the middle: it starts there, and its line is there with it
+open @M@/jump_ass.mkv
+waitstate playing 20000
+seek 40
+waitshown 40 8000
+open @M@/jump_side.mp4
+waitstate playing 20000
+wait 500
+open @M@/jump_ass.mkv
+waitstate playing 20000
+wait 1200
+screenshot original @O@/@N@/a_16_x.png
+pause
+wait 700
+screenshot original @O@/@N@/a_17_x.png
+report end
+quit

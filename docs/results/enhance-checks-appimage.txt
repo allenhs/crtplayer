@@ -16,7 +16,7 @@ PASS  across a cut nothing is generated: the nearer real frame is shown: at 0.3 
 PASS  while playing, frames are generated between the video's own: 4 pairs of frames, 9 frames generated (software OpenGL here: far from full rate)
 PASS  the picture runs one frame behind, and the sound is held back to match: 33 ms; sound output delayed 33 ms (a 30 a second video)
 PASS  paused, the real frame is shown: phase 1
-PASS  it works with a look too: 1 more frames generated with Clean Broadcast Monitor on
+PASS  it works with a look too: 2 more frames generated with Clean Broadcast Monitor on
 PASS  a video with as many frames a second as the screen shows gets none generated: 60 a second on a 60 Hz screen: generating False, sound delay 0 ms
 PASS  not in desk mode: generating: False, sound delay 0 ms
 PASS  switched off, the sound is not held back: 0 ms

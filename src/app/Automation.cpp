@@ -104,6 +104,26 @@ void Automation::next()
         });
         poll->start();
         return;
+    } else if (cmd == "waitshown") {
+        // waitshown SECONDS [TIMEOUT_MS] : until no jump is under way and the picture last delivered is the one of
+        // that place (or, playing on, up to three seconds after it)
+        const double want = a.value(1).toDouble() * 1000.0;
+        const int timeout = a.value(2, "8000").toInt();
+        const qint64 t0 = m_clock.elapsed();
+        auto* poll = new QTimer(this);
+        poll->setInterval(10);
+        connect(poll, &QTimer::timeout, this, [=] {
+            const double shown = p->lastFrameStreamTime() / 1e6;
+            const bool ok = !p->isSeeking() && shown >= want - 200.0 && shown <= want + 3000.0;
+            if (ok || m_clock.elapsed() - t0 > timeout) {
+                poll->deleteLater();
+                if (!ok) ++m_failures;
+                log(line, {{"ok", ok}, {"shownMs", shown}, {"waitedMs", double(m_clock.elapsed() - t0)}});
+                QTimer::singleShot(0, this, &Automation::next);
+            }
+        });
+        poll->start();
+        return;
     } else if (cmd == "waitstate") {
         const QString want = a.value(1);
         const int timeout = a.value(2, "10000").toInt();

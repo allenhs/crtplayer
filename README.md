@@ -22,7 +22,8 @@ configurable, GPU-rendered CRT presentation that respects every aspect ratio:
 - **Everyday playback:** resume where you left off, recent files, external subtitle
   files, playback speed (pitch preserved), A–B loop, chapters, and preview thumbnails on
   the seek bar. Subtitles are off until you ask for them and then stay as you set them,
-  in the language you picked, from video to video and channel to channel. Also: sound
+  in the language you picked, from video to video and channel to channel; after a jump
+  the line that belongs to the place is on screen at once. Also: sound
   and subtitle delay, subtitle size and colour, night mode, deinterlacing, shuffle and
   repeat, playlist files, carrying on with the next video in a folder, and a sleep
   timer.
@@ -859,21 +860,42 @@ them off and they stay off the same way.
   the sound: pick the Japanese track and videos with Japanese sound play it. A video
   without that language plays its own first track.
 - **Picking by hand always wins** for the video you are watching.
-- **Turning subtitles on in the middle of a line** shows the line straight away. After
-  a jump, a line that was already on screen appears with the next one (video files don't
-  repeat it).
+- **Turning subtitles on in the middle of a line** shows the line straight away.
+
+**After a jump, the right line is on screen at once** (2.16). Skip forwards or back, drag
+the seek bar, jump while paused, change the speed, loop a section: the picture you land on
+carries the subtitle line that belongs to it, also when that line began before the place
+you jumped to. This holds for subtitles inside the video (Matroska, MP4), for subtitle
+files, and for Jellyfin.
+
+- **How:** a video file hands out each subtitle line once, at the moment it begins, so
+  the playback library (GStreamer) used to have nothing to show after a jump until the
+  next line began. The player now reads the subtitle lines itself, keeps them, and gives
+  the right ones to the drawing after every jump. The first picture after a jump waits
+  for its lines: a few thousandths of a second, a quarter of a second at the very most.
+- **Picture subtitles** (DVD, Blu-ray) are still drawn by GStreamer, as before: after a
+  jump they return with the next line. The first time a picture-subtitle track is shown
+  in a video, the video is opened again where it stands (a short pause).
+- **A line that has been on screen for more than a minute** at the place you jump to (a
+  sign that stays up for minutes) returns with the next line, when the subtitles are
+  inside the video. A subtitle file is known as a whole, so there it is shown.
+- **Moving and fading ASS lines** begin their movement at the place you jumped to.
 
 **Subtitle files.** Subtitle files next to the video are loaded automatically:
 `Movie.srt` first, then others such as `Movie.en.srt`. They show when subtitles are on.
 The subtitle button's menu lists them, along with *Load subtitle file…* and *No subtitle
 file*; picking one turns subtitles on.
 
+- **Picking a file takes effect at once** (2.16): the video plays on, it is not opened
+  again.
 - For Jellyfin videos, the server's external subtitle files appear in the same menu.
   When subtitles are on and the video has none of its own, the server's file in your
   language (or its first) is loaded by itself.
 - Subtitles are drawn into the picture, so they get the CRT look (and appear in desk
   mode).
-- SRT, ASS/SSA, WebVTT and SUB are supported.
+- SRT, ASS/SSA, WebVTT and SUB are supported. ASS/SSA files keep their styles
+  (GStreamer cannot read these as files; since 2.16 the player reads them itself. Before,
+  an `.ass` file next to a video, or one from a Jellyfin server, showed nothing).
 - Short SRT files are handled too. GStreamer can't recognise very short SRT files on its
   own, so the player plays subtitles from a padded local copy.
 
@@ -890,8 +912,9 @@ These apply to text subtitles. Picture subtitles (DVD, Blu-ray) are drawn as the
 made them.
 
 **Subtitles out of step?** **H** shows them 0.1 s later, **Shift+H** earlier (or type a
-value under *Subtitles → Delay*). The new timing holds from the next line on. It belongs
-to the video you are watching: the next one starts without it.
+value under *Subtitles → Delay*). The new timing holds at once (a quarter of a second
+after the last key press). It belongs to the video you are watching: the next one starts
+without it.
 
 **Sound out of step with the lips?** **Ctrl+=** plays the sound 50 ms later, **Ctrl+−**
 earlier (or *Sound → Sound delay*). This one is remembered, because the usual cause is
@@ -1733,6 +1756,10 @@ and decode.
 - **Original file** ("direct play") whenever this computer can decode it. Everything
   works on it: every CRT effect, lower resolution, desk mode, screenshots, all audio and
   subtitle tracks in the file, and seeking (via HTTP range requests).
+  - The lines of a text subtitle track in the file are fetched from the server as a
+    file (2.16), so that the right line is there after every jump without reading the
+    video a second time. If the server does not hand the track out, it is drawn as
+    before (after a jump, from the next line on).
 - **Converted by the server** when this computer can't decode the file (a codec it
   lacks), or when the file is over the **Quality** limit at the bottom of the Jellyfin
   panel. The server sends H.264 video with AAC audio as HLS, which plays and seeks
@@ -1797,7 +1824,24 @@ Settings are saved whenever the player exits: window close, Ctrl+Q, or logout.
 
 - Subtitles are off until you turn them on: press **V**, or pick a track from the
   subtitle button. From then on they stay on, in every video.
-- After a jump, a line that was already on screen comes back with the next line.
+- After a jump the line is there at once (2.16). Picture subtitles (DVD, Blu-ray) are
+  the exception: they come back with the next line.
+- To see what the player does with a video's subtitle lines, start it from a terminal
+  with `CRTPLAYER_SUBTITLE_TRACE=1` (every step is printed). `CRTPLAYER_SUBTITLE_FEED_OFF=1`
+  switches back to how 2.15 drew subtitles.
+
+**After a jump the picture stood still for seconds, while the sound went on** (before 2.16)
+
+- Fixed in 2.16. It happened in Matroska files whose subtitle lines are stored well
+  ahead of the picture (files written by programs other than mkvmerge often are), most
+  visibly with ten seconds between keyframes: on meeting such a line, GStreamer told the
+  video decoder that the picture was lagging, and the decoder threw away what it held.
+
+**The player froze after a jump at another playback speed** (before 2.16)
+
+- Fixed in 2.16. Seen with MPEG-TS recordings at 2× or 0.5×: a timing notice passing
+  through the speed filter came out with a time hundreds of years ahead, the sound
+  output waited for it, and the next jump could not interrupt that wait.
 - *This video has none* in the message means the file carries no subtitle track and no
   subtitle file sits next to it.
 
@@ -1998,6 +2042,9 @@ This keeps your user presets.
 src/
   main.cpp                 entry point, OpenGL format, CLI
   playback/Player.*        GStreamer playbin + appsink, seeking, tracks, decoder policy, errors
+  playback/SubtitleFeed.*  the subtitle lines the player keeps itself: reads them out of the video or a
+                           subtitle file, hands the right ones to the overlay after every jump
+  playback/AssScript.*     reads an ASS / SSA subtitle file (unit-tested)
   render/Geometry.*        pure aspect/scaling/orientation math (unit-tested)
   render/CrtRenderer.*     GL resources: frame upload, conversion, blur, CRT pass, offscreen capture
   render/Enhance.cpp       Enhance: the upscaling passes, the motion search and the generated in-between

@@ -71,6 +71,8 @@ check('external subtitle fetched from the server, authenticated', subreq and all
 a = rep.get('jf-auto-subs')
 check('with subtitles on, a video without its own gets the server\'s subtitle file by itself', a is not None and a['externalSubtitle'] == 'English (SRT, external)'
       and a['currentSubtitle'] >= 0 and a['state'] == 'playing', f"{a['externalSubtitle'] if a else 'missing'}; {a['state'] if a else ''}")
+# (2.16: before, the video was opened a second time for the file, from wherever the player stood then: the start)
+check('... and the video still starts where it was left (15 s), not from its beginning', a is not None and 14000 <= a['positionMs'] <= 19500, f"at {a['positionMs'] / 1000:.1f} s" if a else 'missing')
 check('session restored on the next launch', rep['jf-restored']['jellyfinSignedIn'], 'signed in without the password')
 logout = [r for r in reqs if r['path'] == '/Sessions/Logout']
 check('signing out revokes the token on the server', logout and logout[0]['status'] == 204 and not rep['jf-signed-out']['jellyfinSignedIn'],
@@ -108,8 +110,9 @@ if run3:
     check('a codec this computer can\'t decode is converted by the server', cc['state'] == 'playing' and cc['jellyfinPlayMethod'] == 'Transcode'
           and 'VideoCodecNotSupported' in cc['jellyfinTranscodeReasons'], f"{cc['jellyfinPlayMethod']}, {cc['jellyfinTranscodeReasons']}")
     segs = [r for r in reqs if '/hls1/' in r['path']]
-    check('the conversion streams as HLS segments, authenticated by their address', segs and all(r['status'] == 200 for r in segs),
-          f"{len(segs)} segments, all 200")
+    # (499: the player went away in the middle of a segment, as it does when it jumps elsewhere: not a refusal)
+    check('the conversion streams as HLS segments, authenticated by their address', segs and all(r['status'] in (200, 499) for r in segs),
+          f"{len(segs)} segments, none refused ({sum(1 for r in segs if r['status'] == 499)} given up by the player on a jump)")
     check('seeking works in a converted video', rep['jf-converted-seek']['positionMs'] >= 11500, f"{rep['jf-converted-seek']['positionMs']:.0f} ms")
     fb = rep['jf-fallback']
     forced = [r for r in pinfo if '/m5/' in r['path'] and r['body'].get('EnableDirectPlay') is False]

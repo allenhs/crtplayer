@@ -1,0 +1,119 @@
+# 2.16: the right subtitle line after every jump, for videos from a Jellyfin server (tests/jellyfin_mock.py):
+# the original file with its own subtitle tracks, subtitle files from the server, a conversion by the server.
+# The pictures are read by scripts/check-subtitles.py (see tests/automation/subs-jump.txt for their names).
+jfsignin @JF@ demo crt
+jfwait signedin 8000
+jfwait listing 8000
+jfopen Subtitle Tests
+jfwait listing 8000
+subs on
+# ---- the original file, its own tracks
+jfopen Jump Own Tracks
+waitstate playing 30000
+seek 3
+waitshown 3 9000
+wait 300
+screenshot original @O@/@N@/a_01_3.png
+seek 90
+waitshown 90 8000
+wait 300
+screenshot original @O@/@N@/a_02_90.png
+seek 12
+waitshown 12 8000
+wait 300
+screenshot original @O@/@N@/a_03_12.png
+pause
+seek 35
+waitshown 35 8000
+wait 300
+screenshot original @O@/@N@/a_04_35.png
+seek 100
+waitshown 100 8000
+wait 300
+screenshot original @O@/@N@/a_05_100.png
+seek 8
+waitshown 8 8000
+wait 300
+screenshot original @O@/@N@/a_06_8.png
+subtrack 1
+wait 1500
+screenshot original @O@/@N@/b_07_8.png
+play
+seek 70
+waitshown 70 8000
+wait 300
+screenshot original @O@/@N@/b_08_70.png
+report jf-own
+# (the first track again: the language picked is remembered for the videos that follow)
+subtrack 0
+wait 800
+# ---- subtitle files from the server: the first loads by itself (subtitles are on), the others are picked
+jfopen Jump Server Files
+waitstate playing 30000
+seek 3
+waitshown 3 9000
+wait 300
+screenshot original @O@/@N@/a_09_3.png
+seek 33
+waitshown 33 8000
+wait 300
+screenshot original @O@/@N@/a_10_33.png
+pause
+seek 100
+waitshown 100 8000
+wait 300
+screenshot original @O@/@N@/a_11_100.png
+report jf-files-before
+subfile offer 1
+wait 2500
+screenshot original @O@/@N@/b_12_100.png
+seek 60
+waitshown 60 8000
+wait 300
+screenshot original @O@/@N@/b_13_60.png
+subfile offer 2
+wait 2500
+screenshot original @O@/@N@/a_14_60.png
+play
+seek 52
+waitshown 52 8000
+wait 300
+screenshot original @O@/@N@/a_15_52.png
+report jf-files
+# ---- converted by the server: its subtitle tracks come as files
+jfopen Jump Converted
+waitstate playing 90000
+seek 3
+waitshown 3 12000
+wait 300
+screenshot original @O@/@N@/a_16_3.png
+seek 90
+waitshown 90 8000
+wait 300
+screenshot original @O@/@N@/a_17_90.png
+pause
+seek 12
+waitshown 12 8000
+wait 300
+screenshot original @O@/@N@/a_18_12.png
+seek 100
+waitshown 100 8000
+wait 300
+screenshot original @O@/@N@/a_19_100.png
+seek 8
+waitshown 8 8000
+wait 300
+screenshot original @O@/@N@/a_20_8.png
+report jf-converted-before
+subfile offer 1
+wait 2500
+screenshot original @O@/@N@/b_21_8.png
+play
+seek 70
+waitshown 70 8000
+wait 300
+screenshot original @O@/@N@/b_22_70.png
+report jf-converted
+jfsignout
+jfwait signedout 3000
+quit

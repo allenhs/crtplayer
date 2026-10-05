@@ -133,6 +133,51 @@ e = Image.new('RGB', (900, 540), (170, 30, 140)); d = ImageDraw.Draw(e)
 for x in range(0, 900, 60): d.rectangle([x, 0, x + 28, 540], fill=(210, 70, 180))
 e.save('pictures/stripes.png')
 PY
+# 2.16: subtitles after jumps. Two minutes of a plain picture with a white bar along the top that grows with the time
+# (5 pixels a second: the picture itself says where in the video it is), sparse keyframes, and subtitle lines
+# that can be told apart by counting: line N is N letters "O" set wide apart.
+python3 - <<'PY'
+cues = [(2, 6, 1), (10, 20, 2), (25, 28, 3), (30, 45, 4), (50, 55, 5), (60, 110, 6), (112, 118, 7)]
+other = [(0, 58, 8), (62, 119, 9)]
+def text(n): return '     '.join('O' * 1 for _ in range(n))
+def ts(s, sep): return '%02d:%02d:%02d%s000' % (s // 3600, s // 60 % 60, s % 60, sep)
+for name, lines in (('jump_a', cues), ('jump_b', other)):
+    with open(name + '.srt', 'w') as f:
+        for i, (a, b, n) in enumerate(lines):
+            f.write('%d\n%s --> %s\n%s\n\n' % (i + 1, ts(a, ','), ts(b, ','), text(n)))
+    with open(name + '.vtt', 'w') as f:
+        f.write('WEBVTT\n\n')
+        for i, (a, b, n) in enumerate(lines):
+            f.write('%s --> %s\n%s\n\n' % (ts(a, '.'), ts(b, '.'), text(n)))
+    with open(name + '.ass', 'w') as f:
+        f.write('[Script Info]\nScriptType: v4.00+\nPlayResX: 640\nPlayResY: 360\n\n[V4+ Styles]\n'
+                'Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, '
+                'ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\n'
+                'Style: Default,DejaVu Sans,26,&H0000FFFF,&H000000FF,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,1,0,2,10,10,20,1\n\n'
+                '[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n')
+        for a, b, n in lines:
+            f.write('Dialogue: 0,%d:%02d:%02d.00,%d:%02d:%02d.00,Default,,0,0,0,,%s\n' % (a // 3600, a // 60 % 60, a % 60, b // 3600, b // 60 % 60, b % 60, text(n)))
+PY
+ffmpeg $F -f lavfi -i "color=c=0x203860:size=640x360:rate=25:duration=120" -f lavfi -i "color=c=white:size=600x16:rate=25:duration=120" \
+  -f lavfi -i "sine=f=330:duration=120" -i jump_a.srt -i jump_b.srt -filter_complex "[0:v][1:v]overlay=x='t*5-600':y=0,format=yuv420p[v]" \
+  -map "[v]" -map 2:a -map 3 -map 4 -c:v libx264 -g 250 -c:a aac -b:a 64k -c:s srt \
+  -metadata:s:s:0 language=eng -metadata:s:s:1 language=fre jump_srt.mkv
+ffmpeg $F -i jump_srt.mkv -i jump_a.ass -i jump_b.ass -map 0:v -map 0:a -map 1 -map 2 -c:v copy -c:a copy -c:s ass \
+  -metadata:s:s:0 language=eng -metadata:s:s:1 language=fre jump_ass.mkv
+ffmpeg $F -i jump_srt.mkv -i jump_a.srt -i jump_b.srt -map 0:v -map 0:a -map 1 -map 2 -c:v copy -c:a copy -c:s mov_text \
+  -metadata:s:s:0 language=eng -metadata:s:s:1 language=fre jump_text.mp4
+# ... and beside the video: a SubRip file, an ASS file, and loose files for picking by hand (the WebVTT one as a server would send it).
+ffmpeg $F -i jump_srt.mkv -map 0:v -map 0:a -c copy jump_side.mp4
+cp jump_a.srt jump_side.srt
+ffmpeg $F -i jump_srt.mkv -map 0:v -map 0:a -c copy jump_sideass.mkv
+cp jump_a.ass jump_sideass.ass
+# The same video with its times not beginning at zero (a broadcast recording).
+ffmpeg $F -i jump_srt.mkv -map 0:v -map 0:a -c copy -output_ts_offset 600 -muxdelay 0 -muxpreload 0 -f mpegts jump_offset.ts
+cp jump_a.srt jump_offset.srt
+# ... and with picture subtitles (Blu-ray's kind) as its first subtitle track: line N is N white blocks.
+python3 "$HERE/scripts/make-pgs.py" jump_pgs.sup
+ffmpeg $F -i jump_srt.mkv -i jump_pgs.sup -map 0:v -map 0:a -map 1 -map 0:s:0 -c copy -metadata:s:s:0 language=eng jump_pgs.mkv
+rm -f jump_pgs.sup
 # 3D models for the 90s CG room: OBJ, STL, PLY, GLB / glTF and FBX; Z-up files, point
 # clouds, very large models, damaged files (models, models-upright, -scenes, -large, -single).
 python3 "$HERE/scripts/make-test-models.py" models

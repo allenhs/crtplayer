@@ -1,0 +1,131 @@
+PASS  jump-srt: the first line comes on as the video plays: at 2.8 s line 1
+PASS  jump-srt: jumps while playing (forwards, back, into a line long in force, between lines, to a keyframe): at 12.4 s line 2, at 90.4 s line 6, at 8.4 s line 0, at 31.2 s line 4, at 115.6 s line 7, at 26.4 s line 3
+PASS  jump-srt: jumps while paused: the picture that stands has its line: at 14.8 s line 2, at 100.0 s line 6, at 8.0 s line 0, at 26.8 s line 3, at 50.0 s line 5, at 40.0 s line 4, at 4.0 s line 1
+PASS  jump-srt: played on from a paused jump: the line ends, the next one comes: at 7.2 s line 0, at 10.8 s line 2
+PASS  jump-srt: frame by frame over the beginning of a line, and back: lines in the three pictures: [0, 2, 0] (should be none, line 2, none)
+PASS  jump-srt: hidden and shown again, paused and playing: at 14.8 s line 0, at 14.8 s line 2, at 33.6 s line 0, at 34.8 s line 4
+PASS  jump-srt: at double and at half speed: at 37.2 s line 4, at 63.2 s line 6, at 64.0 s line 6, at 51.2 s line 5
+PASS  jump-srt: round an A-B loop: at 26.8 s line 3, at 26.8 s line 3
+PASS  jump-srt: dragged along the seek bar, playing and paused: at 100.4 s line 6, at 12.8 s line 2
+PASS  jump-srt: ... and the window stays responsive meanwhile: longest stall 336 ms (the same as before the change, on this machine)
+PASS  jump-srt: near the end: at 116.4 s line 7
+PASS  jump-srt: the video is never opened again on the way (hiding and showing subtitles, other speeds, the loop): opened 1 time(s) in this run
+PASS  jump-srt: the lines come from the player's own store: text, 7 lines (text/x-raw)
+PASS  jump-srt: no picture waited for its lines longer than a quarter of a second: 34 waits, 1 ms on average, 4 ms the longest, 0 given up
+PASS  jump-srt: the source of the lines never failed: 0 errors; no error shown
+PASS  jump-ass: the first line comes on as the video plays: at 2.8 s line 1
+PASS  jump-ass: jumps while playing (forwards, back, into a line long in force, between lines, to a keyframe): at 12.4 s line 2, at 90.4 s line 6, at 8.4 s line 0, at 31.2 s line 4, at 115.6 s line 7, at 26.4 s line 3
+PASS  jump-ass: jumps while paused: the picture that stands has its line: at 14.8 s line 2, at 100.0 s line 6, at 8.0 s line 0, at 26.8 s line 3, at 50.0 s line 5, at 40.0 s line 4, at 4.0 s line 1
+PASS  jump-ass: played on from a paused jump: the line ends, the next one comes: at 7.6 s line 0, at 10.8 s line 2
+PASS  jump-ass: frame by frame over the beginning of a line, and back: lines in the three pictures: [0, 2, 0] (should be none, line 2, none)
+PASS  jump-ass: hidden and shown again, paused and playing: at 14.8 s line 0, at 14.8 s line 2, at 33.6 s line 0, at 34.8 s line 4
+PASS  jump-ass: at double and at half speed: at 36.8 s line 4, at 63.2 s line 6, at 64.4 s line 6, at 51.2 s line 5
+PASS  jump-ass: round an A-B loop: at 27.2 s line 3, at 26.8 s line 3
+PASS  jump-ass: dragged along the seek bar, playing and paused: at 100.8 s line 6, at 12.8 s line 2
+PASS  jump-ass: ... and the window stays responsive meanwhile: longest stall 235 ms (the same as before the change, on this machine)
+PASS  jump-ass: near the end: at 116.4 s line 7
+PASS  jump-ass: the video is never opened again on the way (hiding and showing subtitles, other speeds, the loop): opened 1 time(s) in this run
+PASS  jump-ass: the lines come from the player's own store: text, 7 lines (application/x-ass)
+PASS  jump-ass: no picture waited for its lines longer than a quarter of a second: 48 waits, 1 ms on average, 3 ms the longest, 0 given up
+PASS  jump-ass: the source of the lines never failed: 0 errors; no error shown
+PASS  jump-text: the first line comes on as the video plays: at 2.8 s line 1
+PASS  jump-text: jumps while playing (forwards, back, into a line long in force, between lines, to a keyframe): at 12.4 s line 2, at 90.4 s line 6, at 8.4 s line 0, at 1.2 s line 0, at 115.6 s line 7, at 26.4 s line 3
+PASS  jump-text: jumps while paused: the picture that stands has its line: at 14.8 s line 2, at 100.0 s line 6, at 8.0 s line 0, at 26.8 s line 3, at 0.0 s line 0, at 0.0 s line 0, at 4.0 s line 1
+PASS  jump-text: played on from a paused jump: the line ends, the next one comes: at 7.2 s line 0, at 10.8 s line 2
+PASS  jump-text: frame by frame over the beginning of a line, and back: lines in the three pictures: [0, 2, 0] (should be none, line 2, none)
+PASS  jump-text: hidden and shown again, paused and playing: at 14.8 s line 0, at 14.8 s line 2, at 33.6 s line 0, at 34.4 s line 4
+PASS  jump-text: at double and at half speed: at 36.8 s line 4, at 63.2 s line 6, at 64.0 s line 6, at 51.2 s line 5
+PASS  jump-text: round an A-B loop: at 26.8 s line 3, at 26.4 s line 3
+PASS  jump-text: dragged along the seek bar, playing and paused: at 100.4 s line 6, at 12.8 s line 2
+PASS  jump-text: ... and the window stays responsive meanwhile: longest stall 280 ms (the same as before the change, on this machine)
+PASS  jump-text: near the end: at 116.4 s line 7
+PASS  jump-text: the video is never opened again on the way (hiding and showing subtitles, other speeds, the loop): opened 1 time(s) in this run
+PASS  jump-text: the lines come from the player's own store: text, 7 lines (text/x-raw)
+PASS  jump-text: no picture waited for its lines longer than a quarter of a second: 23 waits, 1 ms on average, 5 ms the longest, 0 given up
+PASS  jump-text: the source of the lines never failed: 0 errors; no error shown
+PASS  jump-side: the first line comes on as the video plays: at 2.8 s line 1
+PASS  jump-side: jumps while playing (forwards, back, into a line long in force, between lines, to a keyframe): at 12.4 s line 2, at 90.4 s line 6, at 8.4 s line 0, at 31.2 s line 4, at 115.6 s line 7, at 26.4 s line 3
+PASS  jump-side: jumps while paused: the picture that stands has its line: at 14.8 s line 2, at 100.0 s line 6, at 8.0 s line 0, at 26.8 s line 3, at 50.0 s line 5, at 40.0 s line 4, at 4.0 s line 1
+PASS  jump-side: played on from a paused jump: the line ends, the next one comes: at 7.2 s line 0, at 10.8 s line 2
+PASS  jump-side: frame by frame over the beginning of a line, and back: lines in the three pictures: [0, 2, 0] (should be none, line 2, none)
+PASS  jump-side: hidden and shown again, paused and playing: at 14.8 s line 0, at 14.8 s line 2, at 33.6 s line 0, at 34.8 s line 4
+PASS  jump-side: at double and at half speed: at 36.8 s line 4, at 63.2 s line 6, at 64.0 s line 6, at 51.2 s line 5
+PASS  jump-side: round an A-B loop: at 27.2 s line 3, at 26.8 s line 3
+PASS  jump-side: dragged along the seek bar, playing and paused: at 100.4 s line 6, at 12.8 s line 2
+PASS  jump-side: ... and the window stays responsive meanwhile: longest stall 214 ms (the same as before the change, on this machine)
+PASS  jump-side: near the end: at 116.4 s line 7
+PASS  jump-side: the video is never opened again on the way (hiding and showing subtitles, other speeds, the loop): opened 1 time(s) in this run
+PASS  jump-side: the lines come from the player's own store: text, 7 lines (application/x-subtitle)
+PASS  jump-side: no picture waited for its lines longer than a quarter of a second: 50 waits, 1 ms on average, 6 ms the longest, 0 given up
+PASS  jump-side: the source of the lines never failed: 0 errors; no error shown
+PASS  jump-sideass: the first line comes on as the video plays: at 2.8 s line 1
+PASS  jump-sideass: jumps while playing (forwards, back, into a line long in force, between lines, to a keyframe): at 12.4 s line 2, at 90.4 s line 6, at 8.4 s line 0, at 31.2 s line 4, at 115.6 s line 7, at 26.4 s line 3
+PASS  jump-sideass: jumps while paused: the picture that stands has its line: at 14.8 s line 2, at 100.0 s line 6, at 8.0 s line 0, at 26.8 s line 3, at 50.0 s line 5, at 40.0 s line 4, at 4.0 s line 1
+PASS  jump-sideass: played on from a paused jump: the line ends, the next one comes: at 7.6 s line 0, at 10.8 s line 2
+PASS  jump-sideass: frame by frame over the beginning of a line, and back: lines in the three pictures: [0, 2, 0] (should be none, line 2, none)
+PASS  jump-sideass: hidden and shown again, paused and playing: at 14.8 s line 0, at 14.8 s line 2, at 33.6 s line 0, at 34.8 s line 4
+PASS  jump-sideass: at double and at half speed: at 36.8 s line 4, at 63.2 s line 6, at 64.0 s line 6, at 51.2 s line 5
+PASS  jump-sideass: round an A-B loop: at 27.2 s line 3, at 26.8 s line 3
+PASS  jump-sideass: dragged along the seek bar, playing and paused: at 100.4 s line 6, at 12.8 s line 2
+PASS  jump-sideass: ... and the window stays responsive meanwhile: longest stall 232 ms (the same as before the change, on this machine)
+PASS  jump-sideass: near the end: at 116.4 s line 7
+PASS  jump-sideass: the video is never opened again on the way (hiding and showing subtitles, other speeds, the loop): opened 1 time(s) in this run
+PASS  jump-sideass: the lines come from the player's own store: text, 7 lines (application/x-ass (file))
+PASS  jump-sideass: no picture waited for its lines longer than a quarter of a second: 17 waits, 0 ms on average, 1 ms the longest, 0 given up
+PASS  jump-sideass: the source of the lines never failed: 0 errors; no error shown
+PASS  jump-offset: the first line comes on as the video plays: at 2.8 s line 1
+PASS  jump-offset: jumps while playing (forwards, back, into a line long in force, between lines, to a keyframe): at 12.4 s line 2, at 90.4 s line 6, at 8.4 s line 0, at 36.0 s line 4, at 115.2 s line 7, at 26.4 s line 3
+PASS  jump-offset: jumps while paused: the picture that stands has its line: at 14.8 s line 2, at 100.0 s line 6, at 8.0 s line 0, at 26.8 s line 3, at 52.0 s line 5, at 44.0 s line 4, at 4.0 s line 1
+PASS  jump-offset: played on from a paused jump: the line ends, the next one comes: at 7.2 s line 0, at 10.8 s line 2
+PASS  jump-offset: frame by frame over the beginning of a line, and back: lines in the three pictures: [0, 2, 0] (should be none, line 2, none)
+PASS  jump-offset: hidden and shown again, paused and playing: at 14.8 s line 0, at 14.8 s line 2, at 33.2 s line 0, at 34.4 s line 4
+PASS  jump-offset: at double and at half speed: at 36.4 s line 4, at 62.4 s line 6, at 63.6 s line 6, at 51.2 s line 5
+PASS  jump-offset: round an A-B loop: at 26.4 s line 3, at 27.6 s line 3
+PASS  jump-offset: dragged along the seek bar, playing and paused: at 100.4 s line 6, at 12.8 s line 2
+PASS  jump-offset: ... and the window stays responsive meanwhile: longest stall 329 ms (the same as before the change, on this machine)
+PASS  jump-offset: near the end: at 116.4 s line 7
+PASS  jump-offset: the video is never opened again on the way (hiding and showing subtitles, other speeds, the loop): opened 1 time(s) in this run
+PASS  jump-offset: the lines come from the player's own store: text, 7 lines (application/x-subtitle)
+PASS  jump-offset: no picture waited for its lines longer than a quarter of a second: 15 waits, 1 ms on average, 6 ms the longest, 0 given up
+PASS  jump-offset: the source of the lines never failed: 0 errors; no error shown
+PASS  tracks-srt: another track picked, paused and playing; subtitles off and on: at 30.0 s line 4, at 30.0 s line 8, at 70.0 s line 9, at 60.0 s line 0, at 60.0 s line 6, at 14.0 s line 8, at 90.4 s line 9, at 91.6 s line 0, at 92.8 s line 6
+PASS  tracks-srt: lines three seconds later: at 22.0 s line 2, at 10.8 s line 0
+PASS  tracks-srt: lines two seconds earlier, then another track with the same delay, then no delay: at 8.4 s line 2, at 18.8 s line 0, at 24.0 s line 3, at 25.2 s line 8, at 26.4 s line 8
+PASS  tracks-srt: the video is never opened again on the way (other tracks, subtitles off and on, delays): opened 1 time(s) in this run
+PASS  tracks-srt: the lines come from the player's own store: text, 2 lines (text/x-raw)
+PASS  tracks-srt: no picture waited for its lines longer than a quarter of a second: 0 waits, 0 ms on average, 0 ms the longest, 0 given up
+PASS  tracks-srt: the source of the lines never failed: 0 errors; no error shown
+PASS  tracks-ass: another track picked, paused and playing; subtitles off and on: at 30.0 s line 4, at 30.0 s line 8, at 70.0 s line 9, at 60.0 s line 0, at 60.0 s line 6, at 13.6 s line 8, at 90.8 s line 9, at 92.0 s line 0, at 93.2 s line 6
+PASS  tracks-ass: lines three seconds later: at 22.0 s line 2, at 10.8 s line 0
+PASS  tracks-ass: lines two seconds earlier, then another track with the same delay, then no delay: at 8.4 s line 2, at 18.8 s line 0, at 24.0 s line 3, at 25.6 s line 8, at 26.8 s line 8
+PASS  tracks-ass: the video is never opened again on the way (other tracks, subtitles off and on, delays): opened 1 time(s) in this run
+PASS  tracks-ass: the lines come from the player's own store: text, 2 lines (application/x-ass)
+PASS  tracks-ass: no picture waited for its lines longer than a quarter of a second: 0 waits, 0 ms on average, 0 ms the longest, 0 given up
+PASS  tracks-ass: the source of the lines never failed: 0 errors; no error shown
+PASS  tracks-text: another track picked, paused and playing; subtitles off and on: at 30.0 s line 4, at 30.0 s line 8, at 70.0 s line 9, at 60.0 s line 0, at 60.0 s line 6, at 13.6 s line 8, at 90.8 s line 9, at 92.0 s line 0, at 93.2 s line 6
+PASS  tracks-text: lines three seconds later: at 22.0 s line 2, at 10.8 s line 0
+PASS  tracks-text: lines two seconds earlier, then another track with the same delay, then no delay: at 8.4 s line 2, at 18.8 s line 0, at 24.0 s line 3, at 25.2 s line 8, at 26.4 s line 8
+PASS  tracks-text: the video is never opened again on the way (other tracks, subtitles off and on, delays): opened 1 time(s) in this run
+PASS  tracks-text: the lines come from the player's own store: text, 2 lines (text/x-raw)
+FAIL  tracks-text: no picture waited for its lines longer than a quarter of a second: 1 waits, 250 ms on average, 250 ms the longest, 1 given up
+PASS  tracks-text: the source of the lines never failed: 0 errors; no error shown
+PASS  files: the subtitle file beside the video: at 2.8 s line 1, at 33.6 s line 4
+PASS  files: files picked while the video is open (SubRip, ASS, WebVTT), jumps after each: at 35.2 s line 8, at 35.6 s line 4, at 100.0 s line 6, at 100.0 s line 9, at 20.0 s line 8
+PASS  files: the file put away: at 20.0 s line 0
+PASS  files: picking a file leaves the video playing (it is not opened again): opened 1 time(s); 1769 ms of video in 1848 ms
+PASS  files: a file picked for a video with subtitle tracks of its own; back to its own track; the file again; put away: at 34.8 s line 4, at 36.4 s line 8, at 36.8 s line 4, at 36.8 s line 8, at 90.0 s line 9, at 60.0 s line 0, at 60.0 s line 6
+PASS  files: a video that was left in the middle starts there with its line: at 40.0 s line 4, at 40.0 s line 4
+PASS  files: ... (it did start where it was left, at 40 s): 40.0 s, 40.0 s
+PASS  files: the picked file is listed after the video's own tracks: 3 tracks, number 2 showing
+PASS  files: the lines come from the player's own store: text, 7 lines (application/x-ass)
+PASS  files: no picture waited for its lines longer than a quarter of a second: 0 waits, 0 ms on average, 0 ms the longest, 0 given up
+PASS  files: the source of the lines never failed: 0 errors; no error shown
+PASS  pictures: a picture-subtitle track is drawn as the video plays (line 2 comes up): 6.0 s: 0, 6.8 s: 0, 7.6 s: 0, 8.4 s: 2, 9.2 s: 2, 10.0 s: 2, 10.8 s: 2, 11.6 s: 2
+PASS  pictures: picture subtitles are left to the playback library: unsupported (subpicture/x-pgs)
+PASS  pictures: ... and after a jump, from the next line on (line 3): 21.2 s: 0, 22.0 s: 0, 22.8 s: 0, 23.6 s: 3, 24.4 s: 3, 25.2 s: 3, 26.0 s: 3, 26.8 s: 0, 27.2 s: 0, 28.0 s: 4, 28.8 s: 4, 29.6 s: 4
+PASS  pictures: the text track of the same video: the line is there right after a jump: at 34.8 s line 4, at 100.0 s line 6
+PASS  pictures: ... from the player's own store: text, 7 lines
+PASS  pictures: back to the picture track (line 5 comes up): 46.0 s: 0, 46.8 s: 0, 47.6 s: 0, 48.4 s: 5, 48.8 s: 5, 49.6 s: 5, 50.8 s: 5, 51.6 s: 5, 52.4 s: 5, 52.8 s: 0, 54.0 s: 0, 54.4 s: 0, 55.2 s: 0, 56.0 s: 0
+PASS  pictures: subtitles off: no picture subtitle either: 57.2 s: 0, 57.6 s: 0, 58.4 s: 0, 59.2 s: 0, 60.0 s: 0, 60.8 s: 0, 61.6 s: 0, 62.8 s: 0
+PASS  pictures: no error on the way: none
+PASS  pictures: the video is opened again once, for its picture subtitles, and not again after that: opened 2 times in this run

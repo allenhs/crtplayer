@@ -1,0 +1,76 @@
+# 2.16: the right subtitle line after a jump, with the track changed, the lines delayed, and both (@F@)
+subs on
+open @M@/@F@
+waitstate playing 20000
+wait 800
+pause
+seek 30
+waitshown 30 8000
+wait 300
+screenshot original @O@/@N@/a_01_30.png
+subtrack 1
+wait 1000
+screenshot original @O@/@N@/b_02_30.png
+seek 70
+waitshown 70 8000
+wait 300
+screenshot original @O@/@N@/b_03_70.png
+seek 60
+waitshown 60 8000
+wait 300
+screenshot original @O@/@N@/b_04_60.png
+subtrack 0
+wait 1000
+screenshot original @O@/@N@/a_05_60.png
+play
+seek 12
+waitshown 12 8000
+wait 300
+subtrack 1
+wait 1000
+screenshot original @O@/@N@/b_06_x.png
+seek 90
+waitshown 90 8000
+wait 300
+screenshot original @O@/@N@/b_07_x.png
+subtrack -1
+wait 900
+screenshot original @O@/@N@/n_08_x.png
+subtrack 0
+wait 1000
+screenshot original @O@/@N@/a_09_x.png
+report tracks
+# ---- the lines three seconds later, then two seconds earlier
+pause
+subdelay 3000
+seek 22
+waitshown 22 8000
+wait 300
+screenshot original @O@/@N@/a+3_10_22.png
+seek 11
+waitshown 11 8000
+wait 300
+screenshot original @O@/@N@/a+3_11_11.png
+seek 8.5
+waitshown 8.5 8000
+wait 300
+subdelay -2000
+wait 1200
+screenshot original @O@/@N@/a-2_12_8.5.png
+seek 19
+waitshown 19 8000
+wait 300
+screenshot original @O@/@N@/a-2_13_19.png
+play
+seek 23.5
+waitshown 23.5 8000
+wait 300
+screenshot original @O@/@N@/a-2_14_x.png
+subtrack 1
+wait 1000
+screenshot original @O@/@N@/b-2_15_x.png
+subdelay 0
+wait 1000
+screenshot original @O@/@N@/b_16_x.png
+report end
+quit
