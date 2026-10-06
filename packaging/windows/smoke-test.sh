@@ -56,3 +56,31 @@ fi
 echo "---- the player's output:"
 cat "$WORK/out/app.log"
 python "$(dirname "$0")/check-smoke.py" "$WORK/out"
+smoke_rc=$?
+
+# What is really on the screen (the build machine has a desktop, composed by Windows as usual):
+# the look selector's list over the video, and desk mode's see-through window. Once as the test
+# machine draws the video by default (no OpenGL window), once with the OpenGL window a graphics
+# card gets.
+HERE=$(cd "$(dirname "$0")/../.." && pwd)
+onscreen() { # name [VARIABLE=VALUE...]
+  local name=$1; shift
+  rm -rf "$WORK/localappdata"; mkdir -p "$WORK/localappdata"
+  sed -e "s#@M@#$M#g" -e "s#@O@#$O#g" -e "s#@V@#test.mkv#g" -e "s#@N@#$name#g" "$HERE/tests/automation/onscreen.txt" > "$WORK/$name.txt"
+  /usr/bin/timeout 240 env PATH="$CLEAN_PATH" QT_OPENGL=software "$@" "$APP" --automation "$(cygpath -m "$WORK/$name.txt")" \
+    --automation-log "$O/$name.json" > "$WORK/out/$name.log" 2>&1
+  echo "on-screen run $name rc=$?"
+}
+onscreen plain CRTPLAYER_VIDEO_SURFACE=raster
+onscreen opengl CRTPLAYER_VIDEO_SURFACE=gl
+ONSCREEN_RUNS="plain opengl"
+if [ -n "${ONSCREEN_EXPERIMENTS:-}" ]; then
+  onscreen opengl-noborder CRTPLAYER_VIDEO_SURFACE=gl CRTPLAYER_FULLSCREEN_BORDER=0
+  onscreen opengl-effects CRTPLAYER_VIDEO_SURFACE=gl CRTPLAYER_POPUP_EFFECTS=1
+  onscreen plain-effects CRTPLAYER_VIDEO_SURFACE=raster CRTPLAYER_POPUP_EFFECTS=1
+  ONSCREEN_RUNS="$ONSCREEN_RUNS opengl-noborder opengl-effects plain-effects"
+fi
+echo "---- on the screen:"
+python "$HERE/scripts/check-onscreen.py" "$WORK/out" $ONSCREEN_RUNS ${ONSCREEN_FLAGS:-} 2>&1 | sed 's/^/ON-SCREEN /'
+onscreen_rc=${PIPESTATUS[0]}
+[ $smoke_rc -eq 0 ] && [ $onscreen_rc -eq 0 ]

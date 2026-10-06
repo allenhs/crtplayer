@@ -55,6 +55,7 @@ add_executable(crtplayer
   src/app/EnhanceUi.cpp
   src/app/Automation.cpp      src/app/Automation.h
   src/app/DeskWindow.cpp      src/app/DeskWindow.h
+  src/app/WinWindow.cpp       src/app/WinWindow.h
   src/playback/Player.cpp     src/playback/Player.h
   src/playback/SubtitleFeed.cpp src/playback/SubtitleFeed.h src/playback/AssScript.cpp src/playback/AssScript.h
   src/render/CrtRenderer.cpp

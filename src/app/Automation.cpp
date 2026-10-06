@@ -21,8 +21,29 @@
 #include <QFile>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QComboBox>
 #include <QMouseEvent>
+#include <QPainter>
+#include <QScreen>
 #include <QTextStream>
+
+namespace {
+// One colour over a whole screen, behind the player: what a see-through window should show.
+class Backdrop : public QWidget {
+public:
+    explicit Backdrop(const QColor& c)
+        : QWidget(nullptr, Qt::Window | Qt::FramelessWindowHint | Qt::WindowDoesNotAcceptFocus), m_colour(c)
+    {
+        setAttribute(Qt::WA_ShowWithoutActivating);
+        setAttribute(Qt::WA_OpaquePaintEvent);
+        setWindowTitle(QStringLiteral("CRT Player test backdrop"));
+    }
+protected:
+    void paintEvent(QPaintEvent*) override { QPainter(this).fillRect(rect(), m_colour); }
+private:
+    QColor m_colour;
+};
+} // namespace
 
 Automation::Automation(MainWindow* w, const QString& script, const QString& logPath, QObject* parent)
     : QObject(parent), m_w(w), m_script(script), m_logPath(logPath)
@@ -35,6 +56,8 @@ Automation::Automation(MainWindow* w, const QString& script, const QString& logP
         m_lastProbe = now;
     });
 }
+
+Automation::~Automation() { delete m_backdrop.data(); }
 
 bool Automation::start()
 {
@@ -624,6 +647,39 @@ void Automation::next()
         bool ok = false;
         if (DeskWindow* d = m_w->deskWindow()) ok = d->view()->grabFramebuffer().save(a.value(1));
         log(line, {{"ok", ok}});
+    } else if (cmd == "deskontop") {
+        // deskontop on|off : "Keep on top of other windows"
+        if (DeskWindow* d = m_w->deskWindow()) d->setKeepOnTop(a.value(1) == "on");
+        log(line);
+        delay = 600;
+    } else if (cmd == "looklist") {
+        // looklist open|close : the look selector's list, on the bar in use
+        QComboBox* c = m_w->lookSelector();
+        if (a.value(1) == "close") c->hidePopup(); else c->showPopup();
+        log(line);
+        delay = 600;
+    } else if (cmd == "screengrab") {
+        // screengrab FILE : the screen as it is shown, with every window on it (X11 and Windows)
+        const DeskWindow* d = m_w->deskWindow();
+        QScreen* s = (d && d->isVisible()) ? d->screen() : m_w->screen();
+        const QPixmap pm = s ? s->grabWindow(0) : QPixmap();
+        const bool ok = !pm.isNull() && pm.save(a.value(1));
+        if (!ok) ++m_failures;
+        log(line, {{"ok", ok}, {"width", pm.width()}, {"height", pm.height()}});
+    } else if (cmd == "backdrop") {
+        // backdrop COLOUR|off : a plain window in one colour over the whole screen, behind the player
+        delete m_backdrop.data();
+        if (a.value(1) != "off") {
+            m_backdrop = new Backdrop(QColor(a.value(1)));
+            QScreen* s = m_w->screen();
+            if (s) m_backdrop->setGeometry(s->geometry());
+            m_backdrop->show();
+            m_backdrop->lower();
+            if (m_w->isVisible()) m_w->raise();
+            if (DeskWindow* d = m_w->deskWindow(); d && d->isVisible()) d->raise();
+        }
+        log(line);
+        delay = 500;
     } else if (cmd == "deskmouse") {
         // deskmouse X Y : synthetic move over the desk view (wakes the control strip)
         if (DeskWindow* d = m_w->deskWindow()) {

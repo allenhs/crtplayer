@@ -24,6 +24,7 @@ class CrtPanel;
 class DisplayPanel;
 class PlaybackPanel;
 class PlaylistPanel;
+class QComboBox;
 class QDockWidget;
 class QLabel;
 class QMenu;
@@ -79,6 +80,7 @@ public:
     void enqueueJellyfin(const JfItem& item);
     void showJellyfin(bool on);
     DeskWindow* deskWindow() const { return m_desk; }
+    QComboBox* lookSelector() const;   // on the bar in use (the desk's in desk mode)
 
     // Editing: A–B section (the R key), lossless cut and GIF clips
     qint64 loopA() const { return m_loopA; }

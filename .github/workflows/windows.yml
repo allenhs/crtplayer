@@ -63,6 +63,9 @@ jobs:
           echo "::notice title=Download::$(ls -la CRT_Player-*.zip | awk '{printf "%s %.0f MB", $NF, $5/1048576}'), crtplayer.exe $(du -h "zipdir/CRT Player/crtplayer.exe" | cut -f1)"
 
       - name: Smoke test (the packaged player on its own)
+        env:
+          ONSCREEN_EXPERIMENTS: "1"
+          ONSCREEN_FLAGS: "--info-see-through"
         run: |
           set +e -o pipefail   # finish reporting even when the test fails
           bash packaging/windows/smoke-test.sh "dist/CRT Player" smoke 2>&1 | tee smoke.log
@@ -70,6 +73,7 @@ jobs:
           bash packaging/windows/ci-annotate.sh notice "Smoke test" smoke.log 'PASS|rc=|CRTPlayer|checks passed|software OpenGL|mesa package'
           sed -n '/---- the player/,/---- under the debugger/p' smoke.log | head -150 | bash packaging/windows/ci-annotate.sh warning "Player output" - '.'
           sed -n '/---- under the debugger/,$p' smoke.log | head -120 | bash packaging/windows/ci-annotate.sh warning "Debugger" - '.'
+          grep '^ON-SCREEN' smoke.log | sed 's/^ON-SCREEN //' | bash packaging/windows/ci-annotate.sh notice "On the screen" - '.'
           bash packaging/windows/ci-annotate.sh error "Smoke test" smoke.log 'FAIL|failed|rror'
           exit $rc
 

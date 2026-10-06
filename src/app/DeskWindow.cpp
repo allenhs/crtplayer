@@ -1,4 +1,5 @@
 #include "DeskWindow.h"
+#include "app/WinWindow.h"
 #include "render/DeskView.h"
 #include "ui/ControlBar.h"
 
@@ -31,6 +32,7 @@ DeskWindow::DeskWindow(Player* player, VideoWidget* flat, QWidget* parent)
         updateMask();
         activity();
     });
+    WinWindow::keepComposed(this);   // (Windows: see there)
 }
 
 void DeskWindow::openOn(QScreen* screen)
@@ -41,6 +43,7 @@ void DeskWindow::openOn(QScreen* screen)
     // Fullscreen from the start: the fly-in then only moves the camera inside this
     // window, and never has to resize or reposition it (Wayland does not allow that).
     showFullScreen();
+    WinWindow::fullScreenShown(this);
     raise();
     activateWindow();
     m_view->setFocus();
@@ -52,7 +55,10 @@ void DeskWindow::setKeepOnTop(bool on)
     m_onTop = on;
     const bool vis = isVisible();
     setWindowFlag(Qt::WindowStaysOnTopHint, on);
-    if (vis) showFullScreen();
+    if (vis) {
+        showFullScreen();
+        WinWindow::fullScreenShown(this);
+    }
 }
 
 void DeskWindow::closeEvent(QCloseEvent* e)
