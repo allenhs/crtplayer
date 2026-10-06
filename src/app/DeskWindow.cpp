@@ -10,8 +10,16 @@
 #include <QResizeEvent>
 #include <QScreen>
 
+// Borderless everywhere. On Windows without the flag for it: the window is only ever shown full
+// screen, where it has no frame anyway, and it needs the pixel of border that Qt gives only
+// to a window without that flag (WinWindow.h).
+static Qt::WindowFlags deskWindowFlags()
+{
+    return WinWindow::borderInFullScreen() ? Qt::WindowFlags(Qt::Window) : Qt::Window | Qt::FramelessWindowHint;
+}
+
 DeskWindow::DeskWindow(Player* player, VideoWidget* flat, QWidget* parent)
-    : QWidget(parent, Qt::Window | Qt::FramelessWindowHint)
+    : QWidget(parent, deskWindowFlags())
 {
     setAttribute(Qt::WA_TranslucentBackground);
     setAttribute(Qt::WA_NoSystemBackground);
@@ -43,7 +51,6 @@ void DeskWindow::openOn(QScreen* screen)
     // Fullscreen from the start: the fly-in then only moves the camera inside this
     // window, and never has to resize or reposition it (Wayland does not allow that).
     showFullScreen();
-    WinWindow::fullScreenShown(this);
     raise();
     activateWindow();
     m_view->setFocus();
@@ -53,12 +60,10 @@ void DeskWindow::openOn(QScreen* screen)
 void DeskWindow::setKeepOnTop(bool on)
 {
     m_onTop = on;
+    if (WinWindow::setTopmost(this, on)) return;   // (Windows, once the window is made)
     const bool vis = isVisible();
     setWindowFlag(Qt::WindowStaysOnTopHint, on);
-    if (vis) {
-        showFullScreen();
-        WinWindow::fullScreenShown(this);
-    }
+    if (vis) showFullScreen();
 }
 
 void DeskWindow::closeEvent(QCloseEvent* e)

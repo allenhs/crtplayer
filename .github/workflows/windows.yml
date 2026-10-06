@@ -64,7 +64,6 @@ jobs:
 
       - name: Smoke test (the packaged player on its own)
         env:
-          ONSCREEN_EXPERIMENTS: "1"
           ONSCREEN_FLAGS: "--info-see-through"
         run: |
           set +e -o pipefail   # finish reporting even when the test fails

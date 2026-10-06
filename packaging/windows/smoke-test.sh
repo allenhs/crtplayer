@@ -73,14 +73,7 @@ onscreen() { # name [VARIABLE=VALUE...]
 }
 onscreen plain CRTPLAYER_VIDEO_SURFACE=raster
 onscreen opengl CRTPLAYER_VIDEO_SURFACE=gl
-ONSCREEN_RUNS="plain opengl"
-if [ -n "${ONSCREEN_EXPERIMENTS:-}" ]; then
-  onscreen opengl-noborder CRTPLAYER_VIDEO_SURFACE=gl CRTPLAYER_FULLSCREEN_BORDER=0
-  onscreen opengl-effects CRTPLAYER_VIDEO_SURFACE=gl CRTPLAYER_POPUP_EFFECTS=1
-  onscreen plain-effects CRTPLAYER_VIDEO_SURFACE=raster CRTPLAYER_POPUP_EFFECTS=1
-  ONSCREEN_RUNS="$ONSCREEN_RUNS opengl-noborder opengl-effects plain-effects"
-fi
 echo "---- on the screen:"
-python "$HERE/scripts/check-onscreen.py" "$WORK/out" $ONSCREEN_RUNS ${ONSCREEN_FLAGS:-} 2>&1 | sed 's/^/ON-SCREEN /'
+python "$HERE/scripts/check-onscreen.py" "$WORK/out" plain opengl ${ONSCREEN_FLAGS:-} 2>&1 | sed 's/^/ON-SCREEN /'
 onscreen_rc=${PIPESTATUS[0]}
 [ $smoke_rc -eq 0 ] && [ $onscreen_rc -eq 0 ]

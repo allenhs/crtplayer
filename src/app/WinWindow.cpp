@@ -8,7 +8,6 @@
 #endif
 #include <windows.h>
 
-#include <QApplication>
 #include <QWidget>
 #include <QWindow>
 
@@ -26,12 +25,7 @@ QJsonObject rectJson(const RECT& r)
 }
 } // namespace
 
-void WinWindow::plainPopups()
-{
-    if (qgetenv("CRTPLAYER_POPUP_EFFECTS") == "1") return;
-    for (Qt::UIEffect e : {Qt::UI_AnimateMenu, Qt::UI_FadeMenu, Qt::UI_AnimateCombo, Qt::UI_AnimateTooltip, Qt::UI_FadeTooltip})
-        QApplication::setEffectEnabled(e, false);
-}
+bool WinWindow::borderInFullScreen() { return borderWanted(); }
 
 void WinWindow::keepComposed(QWidget* w)
 {
@@ -45,19 +39,12 @@ void WinWindow::keepComposed(QWidget* w)
     h->setProperty(kQtBorder, true);
 }
 
-void WinWindow::fullScreenShown(QWidget* w)
+bool WinWindow::setTopmost(QWidget* w, bool on)
 {
-    if (!w || !w->isWindow() || !w->isFullScreen() || !w->internalWinId()) return;
-    QWindow* h = w->windowHandle();
-    // Only where Qt itself counts on the border (otherwise it would take the smaller inside
-    // for a window that has left full screen).
-    if (!h || !h->property(kInTime).toBool()) return;
-    const HWND hwnd = HWND(w->internalWinId());
-    const LONG_PTR style = GetWindowLongPtr(hwnd, GWL_STYLE);
-    if (style & WS_BORDER) return;
-    SetWindowLongPtr(hwnd, GWL_STYLE, style | WS_BORDER);
-    SetWindowPos(hwnd, nullptr, 0, 0, 0, 0,
-                 SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOOWNERZORDER | SWP_NOACTIVATE);
+    if (!w || !w->isWindow() || !w->internalWinId()) return false;
+    SetWindowPos(HWND(w->internalWinId()), on ? HWND_TOPMOST : HWND_NOTOPMOST, 0, 0, 0, 0,
+                 SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+    return true;
 }
 
 QJsonObject WinWindow::report(const QWidget* w)
@@ -116,9 +103,9 @@ QJsonObject WinWindow::report(const QWidget* w)
 
 #else
 
-void WinWindow::plainPopups() {}
+bool WinWindow::borderInFullScreen() { return false; }
 void WinWindow::keepComposed(QWidget*) {}
-void WinWindow::fullScreenShown(QWidget*) {}
+bool WinWindow::setTopmost(QWidget*, bool) { return false; }
 QJsonObject WinWindow::report(const QWidget*) { return {}; }
 
 #endif

@@ -673,8 +673,7 @@ void Automation::next()
             m_backdrop = new Backdrop(QColor(a.value(1)));
             QScreen* s = m_w->screen();
             if (s) m_backdrop->setGeometry(s->geometry());
-            m_backdrop->show();
-            m_backdrop->lower();
+            m_backdrop->show();   // (over other programs' windows, under the player's)
             if (m_w->isVisible()) m_w->raise();
             if (DeskWindow* d = m_w->deskWindow(); d && d->isVisible()) d->raise();
         }

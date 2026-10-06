@@ -2249,7 +2249,6 @@ void MainWindow::setFullscreen(bool on)
         m_playlistDock->hide();
         m_wasMaximized = isMaximized();
         showFullScreen();
-        WinWindow::fullScreenShown(this);
     } else {
         if (m_wasMaximized) showMaximized(); else showNormal();
         m_settingsDock->setVisible(m_dockSettingsBeforeFs);

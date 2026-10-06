@@ -220,6 +220,25 @@ cg_suite() {
   echo "== 90s CG room checks"
   checker "$O/cg-checks.txt" python3 "$HERE/scripts/check-cg.py" "$O"
 }
+# 2.16.1: what is really on the screen (grabs of the screen itself, not of the player's own drawing):
+# the look selector's list over the video, in a window and in full screen, and desk mode's
+# see-through window in front of a plain backdrop. Once on the plain window surface and once on
+# the OpenGL widget. X11 only: a Wayland compositor does not let a program grab the screen.
+onscreen_suite() {
+  local surface flags=""
+  # (a see-through window needs a compositing manager on the test display)
+  pgrep -x picom >/dev/null || pgrep -x xcompmgr >/dev/null || flags="--info-see-through"
+  for surface in raster gl; do
+    rm -rf "$XDG_CONFIG_HOME" "$XDG_DATA_HOME"
+    sed -e "s#@M@#$M#g" -e "s#@O@#$O#g" -e "s#@V@#sd_4x3_h264.mp4#g" -e "s#@N@#onscreen-$surface#g" \
+      "$HERE/tests/automation/onscreen.txt" > "$O/onscreen-$surface.txt"
+    echo "== onscreen-$surface"
+    CRTPLAYER_VIDEO_SURFACE=$surface timeout 300 "$BIN" --automation "$O/onscreen-$surface.txt" --automation-log "$O/onscreen-$surface.json" > "$O/onscreen-$surface.log" 2>&1
+    echo "   exit code $?"
+  done
+  echo "== on-screen checks"
+  checker "$O/onscreen-checks.txt" python3 "$HERE/scripts/check-onscreen.py" "$O" onscreen-raster onscreen-gl $flags
+}
 if [[ -n "${RUN_ONLY:-}" ]]; then   # development: just these suites, e.g. RUN_ONLY="tv console edit"
   for s in $RUN_ONLY; do "${s}_suite"; done
   exit 0
@@ -273,6 +292,7 @@ else
   if python3 -c "import PIL" 2>/dev/null; then enhance_suite; fi
   if python3 -c "import PIL" 2>/dev/null; then nvidia_suite; fi
   if python3 -c "import PIL" 2>/dev/null; then subtitles_suite; fi
+  if python3 -c "import PIL" 2>/dev/null; then onscreen_suite; fi
   rm -rf "$XDG_CONFIG_HOME"
   run sound sound.txt
   echo "== sound checks"

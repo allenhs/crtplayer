@@ -8,6 +8,10 @@ buttons and shortcuts use.
 - Every command is appended to the JSON log with a timestamp.
 - `report` also includes `rate`, `loopA`/`loopB`, `chapterCount`, `externalSubtitle`,
   `externalSubtitleOffers`, `resumeMs` and `recentFiles` (1.8).
+- `report` has `lookListOpen`, and while it is open `lookListRect` (where the look selector's list is on the
+  screen), with `screenRect` and `screenScale` (2.16.1). On Windows it also has `nativeWindow` and, in desk mode,
+  `deskNativeWindow`: the window as Windows has it (`border`, `layered`, `topmost`, `insideRect`, `monitorRect`,
+  `insideIsWholeScreen`, `shaped`, `openGl`, `alphaAsked`, `alphaGot`).
 - `report` has `subtitleFeed` (2.16): the subtitle lines the player keeps itself: what kind the showing
   track is (`text`, `unsupported` for picture subtitles, `reading`, `failed`, `none`), how many lines are
   known and for which stretches of the video, how often the first picture after a jump waited for its
@@ -96,6 +100,10 @@ buttons and shortcuts use.
 | `gif [OUT_PATH]` | Save A–B (or the next 5 s) as a GIF; waits, and logs the result (size, frames, frames a second, how long it took) |
 | `waitpos MS [TIMEOUT_MS]` | Wait until the video has played to MS |
 | `waitshown SECONDS [TIMEOUT_MS]` | Wait until no jump is under way and the picture delivered last is the one of that place (2.16) |
+| `looklist open\|close` | Open or close the look selector's list on the bar in use (the desk's in desk mode) (2.16.1) |
+| `screengrab PATH` | Save the screen as it is shown, with every window on it: what is really seen, not the player's own drawing (X11 and Windows; a Wayland compositor does not allow it) (2.16.1) |
+| `backdrop COLOUR\|off` | A plain window in one colour over the whole screen, behind the player: what a see-through window should show (2.16.1) |
+| `deskontop on\|off` | Desk mode's "Keep on top of other windows" (2.16.1) |
 | `subs on\|off` | Subtitles wanted or not (the V key): it holds from video to video |
 | `subtrack N` / `audiotrack N` | Pick a subtitle track (−1: off) or a sound track as the menus do: its language is remembered |
 | `subdelay MS` / `audiodelay MS` | Subtitle delay (this video) / sound delay (remembered) |

@@ -1,6 +1,5 @@
 #include "app/Automation.h"
 #include "app/MainWindow.h"
-#include "app/WinWindow.h"
 #include "playback/Distro.h"
 #include <QTimer>
 #include "playback/Player.h"
@@ -97,7 +96,6 @@ int main(int argc, char** argv)
     QApplication app(argc, argv);
     QApplication::setApplicationVersion(CRTPLAYER_VERSION);
     Theme::apply(app);
-    WinWindow::plainPopups();   // (Windows)
 
     QCommandLineParser cli;
     cli.setApplicationDescription("Desktop video player with a GPU CRT presentation, using the host's GStreamer codecs.");
