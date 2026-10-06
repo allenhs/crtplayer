@@ -1,4 +1,5 @@
 #include "DeskWindow.h"
+#include "app/WinWindow.h"
 #include "render/DeskView.h"
 #include "ui/ControlBar.h"
 
@@ -9,8 +10,16 @@
 #include <QResizeEvent>
 #include <QScreen>
 
+// Borderless everywhere. On Windows without the flag for it: the window is only ever shown full
+// screen, where it has no frame anyway, and it needs the pixel of border that Qt gives only
+// to a window without that flag (WinWindow.h).
+static Qt::WindowFlags deskWindowFlags()
+{
+    return WinWindow::borderInFullScreen() ? Qt::WindowFlags(Qt::Window) : Qt::Window | Qt::FramelessWindowHint;
+}
+
 DeskWindow::DeskWindow(Player* player, VideoWidget* flat, QWidget* parent)
-    : QWidget(parent, Qt::Window | Qt::FramelessWindowHint)
+    : QWidget(parent, deskWindowFlags())
 {
     setAttribute(Qt::WA_TranslucentBackground);
     setAttribute(Qt::WA_NoSystemBackground);
@@ -31,11 +40,16 @@ DeskWindow::DeskWindow(Player* player, VideoWidget* flat, QWidget* parent)
         updateMask();
         activity();
     });
+    WinWindow::keepComposed(this);   // (Windows: see there)
 }
 
 void DeskWindow::openOn(QScreen* screen)
 {
     if (!screen) screen = QGuiApplication::primaryScreen();
+    // (Windows, with its pixel of border: a geometry given to a window that is already full screen
+    // is taken for its inside, which would then be the whole screen after all. So a window opened
+    // before goes back to an ordinary one first, while it is still hidden.)
+    if (WinWindow::borderInFullScreen() && isFullScreen() && !isVisible()) setWindowState(windowState() & ~Qt::WindowFullScreen);
     setScreen(screen);
     setGeometry(screen->geometry());
     // Fullscreen from the start: the fly-in then only moves the camera inside this
@@ -50,6 +64,7 @@ void DeskWindow::openOn(QScreen* screen)
 void DeskWindow::setKeepOnTop(bool on)
 {
     m_onTop = on;
+    if (WinWindow::setTopmost(this, on)) return;   // (Windows, once the window is made)
     const bool vis = isVisible();
     setWindowFlag(Qt::WindowStaysOnTopHint, on);
     if (vis) showFullScreen();

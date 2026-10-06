@@ -1,0 +1,69 @@
+# What is really on the screen (grabs of the screen itself, not of the player's own drawing):
+# the look selector's list over the video, in a window and in full screen, and desk mode in
+# front of a plain backdrop, which must show around the set.
+#   @M@ media folder, @V@ video, @O@ output folder, @N@ name for the pictures
+open @M@/@V@
+waitstate playing 30000
+wait 1500
+pause
+wait 500
+screengrab @O@/@N@-window-before.png
+looklist open
+wait 800
+report window-list
+screengrab @O@/@N@-window-list.png
+looklist close
+wait 400
+fullscreen on
+wait 1500
+report fullscreen
+screengrab @O@/@N@-full-before.png
+looklist open
+wait 800
+report full-list
+screengrab @O@/@N@-full-list.png
+looklist close
+wait 400
+fullscreen off
+wait 1000
+backdrop #ff00ff
+wait 500
+scene desktop
+desk on
+# (the strip of controls under the set hides itself after 2.5 s: the grabs are of the set alone)
+wait 4000
+report desk
+deskgrab @O@/@N@-desk-scene.png
+screengrab @O@/@N@-desk-screen.png
+deskmouse 400 300
+wait 500
+looklist open
+wait 800
+report desk-list
+screengrab @O@/@N@-desk-list.png
+looklist close
+wait 400
+deskontop on
+wait 4000
+report desk-ontop
+deskgrab @O@/@N@-ontop-scene.png
+screengrab @O@/@N@-ontop-screen.png
+deskontop off
+wait 1000
+report desk-ontop-off
+desk off
+wait 1000
+# Desk mode a second time (its window is kept between visits). The backdrop anew: leaving desk
+# mode can bring another program's window to the front of it.
+backdrop #ff00ff
+wait 500
+desk on
+wait 4000
+report desk-again
+deskgrab @O@/@N@-again-scene.png
+screengrab @O@/@N@-again-screen.png
+desk off
+wait 1000
+backdrop off
+report end
+quit

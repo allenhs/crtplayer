@@ -70,6 +70,7 @@ jobs:
           bash packaging/windows/ci-annotate.sh notice "Smoke test" smoke.log 'PASS|rc=|CRTPlayer|checks passed|software OpenGL|mesa package'
           sed -n '/---- the player/,/---- under the debugger/p' smoke.log | head -150 | bash packaging/windows/ci-annotate.sh warning "Player output" - '.'
           sed -n '/---- under the debugger/,$p' smoke.log | head -120 | bash packaging/windows/ci-annotate.sh warning "Debugger" - '.'
+          grep '^ON-SCREEN' smoke.log | sed 's/^ON-SCREEN //' | bash packaging/windows/ci-annotate.sh notice "On the screen" - '.'
           bash packaging/windows/ci-annotate.sh error "Smoke test" smoke.log 'FAIL|failed|rror'
           exit $rc
 

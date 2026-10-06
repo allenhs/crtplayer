@@ -10,6 +10,10 @@ subs on
 # ---- the original file, its own tracks
 jfopen Jump Own Tracks
 waitstate playing 30000
+# (the lines come from the server as a file of their own, asked for once the video is open: the first jump
+# waits for it. A jump before it has arrived gets its line a moment after the picture, which is not what
+# these pictures are about.)
+wait 1500
 seek 3
 waitshown 3 9000
 wait 300
@@ -50,6 +54,7 @@ wait 800
 # ---- subtitle files from the server: the first loads by itself (subtitles are on), the others are picked
 jfopen Jump Server Files
 waitstate playing 30000
+wait 1500
 seek 3
 waitshown 3 9000
 wait 300
@@ -83,6 +88,7 @@ report jf-files
 # ---- converted by the server: its subtitle tracks come as files
 jfopen Jump Converted
 waitstate playing 90000
+wait 1500
 seek 3
 waitshown 3 12000
 wait 300

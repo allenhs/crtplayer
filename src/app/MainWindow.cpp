@@ -5,6 +5,7 @@
 #include "render/DeskView.h"
 #include "render/DeskRenderer.h"
 #include "app/DeskWindow.h"
+#include "app/WinWindow.h"
 #include "jellyfin/JellyfinClient.h"
 #include "playback/Thumbnailer.h"
 #include "app/Gamepad.h"
@@ -35,6 +36,7 @@
 #include "ui/PlaybackPanel.h"
 #include "ui/PlaylistPanel.h"
 
+#include <QAbstractItemView>
 #include <QAction>
 #include <QActionGroup>
 #include <QApplication>
@@ -478,6 +480,8 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent)
     // Save on every exit path (window close, Ctrl+Q, session logout, automation exit).
     connect(qApp, &QCoreApplication::aboutToQuit, this, &MainWindow::saveSettings);
     updateTitle();
+    // (Windows: a full-screen window drawn with OpenGL, see there. Last, with every child in place.)
+    if (m_video->surfaceMode() == GlSurfaceWidget::Mode::GlWidget) WinWindow::keepComposed(this);
 }
 
 MainWindow::~MainWindow()
@@ -1210,6 +1214,11 @@ void MainWindow::refreshPresetUi()
         }
         dc->setCurrentIndex(dc->findText(m_presetName));
     }
+}
+
+QComboBox* MainWindow::lookSelector() const
+{
+    return (m_deskActive && m_desk) ? m_desk->bar()->presetCombo() : m_controls->presetCombo();
 }
 
 bool MainWindow::selectPreset(const QString& name)
@@ -2534,6 +2543,21 @@ QJsonObject MainWindow::stateReport() const
     o["lastWarning"] = m_lastWarning;
     o["gl"] = m_video->glInfo();
     o["platform"] = QGuiApplication::platformName();
+    {   // The look selector's list on the bar in use, where it is on the screen (tests: is it really shown there?)
+        QComboBox* combo = lookSelector();
+        QWidget* list = combo->view()->window();
+        const bool open = combo->view()->isVisible();
+        o["lookListOpen"] = open;
+        if (open) o["lookListRect"] = rectJson(QRectF(list->mapToGlobal(QPoint(0, 0)), list->size()));
+        if (const QScreen* s = screen()) {
+            o["screenRect"] = rectJson(s->geometry());
+            o["screenScale"] = s->devicePixelRatio();
+        }
+    }
+    if (const QJsonObject nw = WinWindow::report(this); !nw.isEmpty()) o["nativeWindow"] = nw;
+    if (m_desk) {
+        if (const QJsonObject nw = WinWindow::report(m_desk); !nw.isEmpty()) o["deskNativeWindow"] = nw;
+    }
     o["deskMode"] = m_deskActive;
     if (m_desk) {
         DeskView* v = m_desk->view();

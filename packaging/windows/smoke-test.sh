@@ -2,7 +2,8 @@
 # Runs the packaged Windows folder on its own (a stripped PATH: none of MSYS2's libraries
 # or plugins can help), with Mesa's software OpenGL beside it because the build machine has
 # no graphics card. Plays a generated video, applies a look, loads a subtitle file, and opens
-# desk mode on the arcade cabinet; then checks the results.
+# desk mode on the arcade cabinet; then checks the results. Then grabs the screen itself to see
+# what Windows really shows (tests/automation/onscreen.txt, scripts/check-onscreen.py).
 #   smoke-test.sh PACKAGED_DIR WORK_DIR
 set -uo pipefail
 PKG=$(cd "$1" && pwd); WORK=$2
@@ -56,3 +57,28 @@ fi
 echo "---- the player's output:"
 cat "$WORK/out/app.log"
 python "$(dirname "$0")/check-smoke.py" "$WORK/out"
+smoke_rc=$?
+
+# What is really on the screen (the build machine has a desktop, composed by Windows as usual):
+# the look selector's list over the video, and desk mode's see-through window. Once as the test
+# machine draws the video by default (no OpenGL window), once with the OpenGL window a graphics
+# card gets.
+HERE=$(cd "$(dirname "$0")/../.." && pwd)
+onscreen() { # name [VARIABLE=VALUE...]
+  local name=$1; shift
+  rm -rf "$WORK/localappdata"; mkdir -p "$WORK/localappdata"
+  sed -e "s#@M@#$M#g" -e "s#@O@#$O#g" -e "s#@V@#test.mkv#g" -e "s#@N@#$name#g" "$HERE/tests/automation/onscreen.txt" > "$WORK/$name.txt"
+  /usr/bin/timeout 240 env PATH="$CLEAN_PATH" QT_OPENGL=software "$@" "$APP" --automation "$(cygpath -m "$WORK/$name.txt")" \
+    --automation-log "$O/$name.json" > "$WORK/out/$name.log" 2>&1
+  echo "on-screen run $name rc=$?"
+}
+onscreen plain CRTPLAYER_VIDEO_SURFACE=raster
+onscreen opengl CRTPLAYER_VIDEO_SURFACE=gl
+echo "---- on the screen:"
+python "$HERE/scripts/check-onscreen.py" "$WORK/out" plain opengl ${ONSCREEN_FLAGS:-} 2>&1 | sed 's/^/ON-SCREEN /'
+onscreen_rc=${PIPESTATUS[0]}
+if [ -n "${ONSCREEN_OLD_WAY:-}" ]; then   # for comparison: as before 2.16.1 (results do not count)
+  onscreen oldway CRTPLAYER_VIDEO_SURFACE=gl CRTPLAYER_FULLSCREEN_BORDER=0
+  python "$HERE/scripts/check-onscreen.py" "$WORK/out" oldway 2>&1 | sed -e 's/^FAIL/WAS-NO/' -e 's/^PASS/WAS-OK/' -e 's/^/ON-SCREEN /'
+fi
+[ $smoke_rc -eq 0 ] && [ $onscreen_rc -eq 0 ]

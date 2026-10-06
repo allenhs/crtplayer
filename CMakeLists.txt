@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(CRTPlayer VERSION 2.16.0 LANGUAGES C CXX)
+project(CRTPlayer VERSION 2.16.1 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -55,6 +55,7 @@ add_executable(crtplayer
   src/app/EnhanceUi.cpp
   src/app/Automation.cpp      src/app/Automation.h
   src/app/DeskWindow.cpp      src/app/DeskWindow.h
+  src/app/WinWindow.cpp       src/app/WinWindow.h
   src/playback/Player.cpp     src/playback/Player.h
   src/playback/SubtitleFeed.cpp src/playback/SubtitleFeed.h src/playback/AssScript.cpp src/playback/AssScript.h
   src/render/CrtRenderer.cpp
