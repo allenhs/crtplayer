@@ -76,4 +76,8 @@ onscreen opengl CRTPLAYER_VIDEO_SURFACE=gl
 echo "---- on the screen:"
 python "$HERE/scripts/check-onscreen.py" "$WORK/out" plain opengl ${ONSCREEN_FLAGS:-} 2>&1 | sed 's/^/ON-SCREEN /'
 onscreen_rc=${PIPESTATUS[0]}
+if [ -n "${ONSCREEN_OLD_WAY:-}" ]; then   # for comparison: as before 2.16.1 (results do not count)
+  onscreen oldway CRTPLAYER_VIDEO_SURFACE=gl CRTPLAYER_FULLSCREEN_BORDER=0
+  python "$HERE/scripts/check-onscreen.py" "$WORK/out" oldway 2>&1 | sed -e 's/^FAIL/WAS-NO/' -e 's/^PASS/WAS-OK/' -e 's/^/ON-SCREEN /'
+fi
 [ $smoke_rc -eq 0 ] && [ $onscreen_rc -eq 0 ]
