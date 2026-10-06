@@ -119,7 +119,7 @@ for run in names:
     except Exception as e:
         check(f'{run}: the run finished', False, str(e)); continue
     rep = {e['label']: e for e in log if e['cmd'] == 'report'}
-    check(f'{run}: the run finished', 'end' in rep, f"{len(rep)} reports; OpenGL: {rep.get('end', {}).get('gl')}; main window drawn with OpenGL: "
+    check(f'{run}: the run finished', 'end' in rep, f"{len(rep)} reports; Qt {rep.get('end', {}).get('qtVersion')}; OpenGL: {rep.get('end', {}).get('gl')}; main window drawn with OpenGL: "
           f"{(rep.get('end', {}).get('nativeWindow') or {}).get('openGl', 'n/a')}")
     list_on_screen(run, rep, 'window-list', 'window-before', 'window-list', 'in a window')
     list_on_screen(run, rep, 'full-list', 'full-before', 'full-list', 'full screen')

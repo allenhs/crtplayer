@@ -2096,6 +2096,7 @@ src/
                            converted, converted and scaled) and at what size the look is drawn (part of MainWindow)
   app/Automation.*         scripted driver used for verification
   app/DeskWindow.*         desk mode: transparent screen-sized window, input mask, control strip
+  app/WinWindow.*          Windows: full-screen windows drawn with OpenGL stay part of the desktop (a pixel of border)
   jellyfin/JellyfinClient.* Jellyfin API: sign-in, browsing, images, stream URLs, playback reporting
   ui/JellyfinPanel.*       sign-in form and poster browser
   render/DeskRenderer.*    procedural 3D cabinet, projection, silhouette, shading
