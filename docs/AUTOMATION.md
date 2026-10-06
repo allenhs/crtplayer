@@ -131,6 +131,13 @@ buttons and shortcuts use.
 | `jfquality MBPS` | The Jellyfin quality limit in Mbit/s; 0 = the original file |
 | `jfscroll end` | Scroll the Jellyfin listing to its end |
 | `jfhome` / `jfsignout` | Jellyfin home view / sign out (revokes the token) |
+| `governor on\|off` | Leaving pictures out before decoding when the computer cannot keep up (2.17); `report` has `videoPath.governor` and `videoPath.shrink` |
+| `openlink ADDRESS` | Open a link as Ctrl+L does: a page with a video on it (yt-dlp is asked), or a media address (2.17) |
+| `pastelink TEXT` | TEXT goes to the clipboard, then Ctrl+V |
+| `ytdlp path FILE\|-`, `ytdlp fetch`, `ytdlp height N`, `ytdlp dialog get\|cancel` | The yt-dlp to use (`-`: whichever is found); the settings' button; the largest picture asked for (0: the screen's); the buttons of the "yt-dlp is needed" dialog |
+| `waitonline KEY VALUE [TIMEOUT_MS]` | Wait until the `online` part of the report has KEY = VALUE (`*`: anything but empty; a number: at least that) |
+| `closedialogs` | Close whatever message boxes are up |
+| `openpair VIDEO_URL [AUDIO_URL]` | Two addresses played as the picture and the sound of one video, without yt-dlp (2.17) |
 | `quit` | Exit |
 
 **Sync measurement.** For every new frame painted while playing, the player computes:
@@ -166,3 +173,26 @@ Environment, for the checks:
 
 The `nvidia` suite needs the stand-in SDK that the normal build makes (`build/nvfx-mock-sdk`; elsewhere:
 `NVFX_MOCK_SDK=FOLDER`). `tests/nvfx_serve_test.py` (run by `ctest` as `nvfx`) tests the helper alone.
+
+## Videos from web sites (2.17)
+
+`report` carries `online`: the yt-dlp in use (`program`, `ownCopy`, `version`, `jsRuntime`, `lastCommand`, `runs`), what
+the settings show (`status`, `button`), the video (`page`, `site`, `what`, `live`, `title`, `resumeKey`; `player.streams`:
+2 for the picture and the sound as two addresses, 1 for one file, 0 for a manifest GStreamer plays itself), what the site
+offers (`subtitles`, `subtitlesAutomatic`, `subtitleLoaded`, `chapters`), the playlist (`playlist`, `playlistLabels`,
+`playlistIndex`), counts (`resolves`, `askedAgain`: addresses renewed, `failures`, `fetches`, `fetchFailures`), the
+message boxes that are up (`dialogs`), `hint` (the words in the empty picture) and `wallClock`.
+
+The `online` suite (`RUN_ONLY=online`) starts `tests/web_mock.py`, a small video site, and uses `tests/fake_ytdlp.py`
+in place of yt-dlp: it answers the way the real one answers for YouTube. Where the computer has a real yt-dlp, that
+one is run against the mock site's pages too (`ONLINE_NO_REAL=1` leaves that out). The clips say where they are:
+a bar in the picture, and the sound (ten seconds of tone, ten of silence, in turn), so every picture and every
+report is judged by itself (`scripts/check-online.py`).
+
+| Variable | Effect |
+|---|---|
+| `CRTPLAYER_TOOLS_PATH=FOLDERS` | Where yt-dlp and the JavaScript runtimes are looked for (these folders and no others) |
+| `CRTPLAYER_YTDLP_RELEASE=URL`, `CRTPLAYER_DENO_RELEASE=URL` | Where "Get yt-dlp" fetches from |
+| `FAKE_YTDLP_LOG=FILE` | Read by the stand-in: every call is written there |
+| `CRTPLAYER_WEB_CONNECT_DELAY_MS=N` | The decoders are connected to the web source N ms late, when the server's first bytes are long there (the start of a web video must not depend on which comes first) |
+| `CRTPLAYER_SHRINK_OFF=1`, `CRTPLAYER_GOVERNOR_OFF=1` | Without a graphics card: 10-bit pictures are not made 8-bit and smaller in one pass; no pictures are left out before decoding (as before 2.17) |

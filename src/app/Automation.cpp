@@ -18,6 +18,10 @@
 #include "ui/PlaylistPanel.h"
 
 #include <QApplication>
+#include <QAbstractButton>
+#include <QClipboard>
+#include <QMessageBox>
+#include <QTimer>
 #include <QFile>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -647,6 +651,74 @@ void Automation::next()
         bool ok = false;
         if (DeskWindow* d = m_w->deskWindow()) ok = d->view()->grabFramebuffer().save(a.value(1));
         log(line, {{"ok", ok}});
+    } else if (cmd == "openlink") {
+        // openlink ADDRESS : a page with a video on it (yt-dlp is asked), or a media address (2.17)
+        m_w->openLink(rest, true);
+        log(line);
+    } else if (cmd == "pastelink") {
+        // pastelink TEXT : TEXT goes to the clipboard and Ctrl+V is pressed
+        QGuiApplication::clipboard()->setText(rest);
+        const bool ok = m_w->pasteLink();
+        log(line, {{"ok", ok}});
+    } else if (cmd == "ytdlp") {
+        // ytdlp path FILE | fetch | dialog get|cancel | height N : the yt-dlp to use ("-": none set), the
+        // settings' button, the "yt-dlp is needed" dialog's buttons, the largest picture asked for (0: the screen's)
+        const QString what = a.value(1);
+        bool ok = true;
+        if (what == "path") m_w->setYtDlpPath(a.value(2) == "-" ? QString() : line.section(' ', 2).trimmed());
+        else if (what == "fetch") m_w->fetchYtDlp();
+        else if (what == "height") m_w->setOnlineMaxHeight(a.value(2).toInt());
+        else if (what == "dialog") {
+            auto* box = m_w->findChild<QMessageBox*>("ytDlpDialog");
+            ok = box != nullptr;
+            if (box) {
+                for (QAbstractButton* b : box->buttons())
+                    if ((a.value(2) == "get") == (box->buttonRole(b) == QMessageBox::AcceptRole)) { b->click(); break; }
+            }
+        } else ok = false;
+        if (!ok) ++m_failures;
+        log(line, {{"ok", ok}});
+    } else if (cmd == "closedialogs") {
+        // closedialogs : whatever message boxes are up are closed (an error was shown; the next thing is tried)
+        int n = 0;
+        for (QWidget* t : QApplication::topLevelWidgets())
+            if (t->isVisible() && qobject_cast<QMessageBox*>(t)) { t->close(); ++n; }
+        log(line, {{"closed", n}});
+    } else if (cmd == "waitonline") {
+        // waitonline KEY VALUE [TIMEOUT_MS] : until the "online" part of the report has KEY = VALUE
+        // (VALUE "*": anything but empty; numbers: at least VALUE)
+        const QString key = a.value(1), want = a.value(2);
+        const int timeout = a.value(3, "30000").toInt();
+        const qint64 t0 = m_clock.elapsed();
+        auto* poll = new QTimer(this);
+        poll->setInterval(50);
+        connect(poll, &QTimer::timeout, this, [=] {
+            const QJsonValue v = m_w->onlineReport().value(key);
+            const QString got = v.isBool() ? (v.toBool() ? "true" : "false") : v.isDouble() ? QString::number(v.toDouble()) : v.toString();
+            bool isNumber = false;
+            const double num = want.toDouble(&isNumber);
+            const bool ok = want == "*" ? !got.isEmpty() : (isNumber && v.isDouble()) ? v.toDouble() >= num : got == want;
+            if (ok || m_clock.elapsed() - t0 > timeout) {
+                poll->deleteLater();
+                if (!ok) ++m_failures;
+                log(line, {{"ok", ok}, {"got", got}, {"waitedMs", double(m_clock.elapsed() - t0)}});
+                QTimer::singleShot(10, this, &Automation::next);
+            }
+        });
+        poll->start();
+        return;
+    } else if (cmd == "openpair") {
+        // openpair VIDEO_URL [AUDIO_URL] : two addresses played as the picture and the sound of one video (2.17)
+        QList<WebStream> streams;
+        streams.append(WebStream{a.value(1), {}, false});
+        if (a.size() > 2) streams.append(WebStream{a.value(2), {}, true});
+        const bool ok = p->openWeb(streams, true, 0);
+        if (!ok) ++m_failures;
+        log(line, {{"ok", ok}});
+    } else if (cmd == "governor") {
+        // governor on|off : leaving pictures out before decoding when the computer cannot keep up (2.17)
+        p->setGovernorEnabled(a.value(1) != "off");
+        log(line);
     } else if (cmd == "deskontop") {
         // deskontop on|off : "Keep on top of other windows"
         if (DeskWindow* d = m_w->deskWindow()) d->setKeepOnTop(a.value(1) == "on");

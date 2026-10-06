@@ -23,7 +23,7 @@ distrobox enter "$BOX" -- bash -c "
   set -e
   sudo dnf install -y --setopt=install_weak_deps=False \
     cmake gcc-c++ make pkgconf-pkg-config \
-    qt6-qtbase-devel gstreamer1-devel gstreamer1-plugins-base-devel
+    qt6-qtbase-devel gstreamer1-devel gstreamer1-plugins-base-devel zlib-devel
   cmake -S '$HERE' -B '$HERE/build-fedora' -DCMAKE_BUILD_TYPE=Release
   cmake --build '$HERE/build-fedora' -j\$(nproc)
   (cd '$HERE/build-fedora' && ctest --output-on-failure)

@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(CRTPlayer VERSION 2.16.1 LANGUAGES C CXX)
+project(CRTPlayer VERSION 2.17.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -18,6 +18,7 @@ else()
   find_package(Qt6 6.2 REQUIRED COMPONENTS Core Gui Widgets OpenGL OpenGLWidgets Network DBus)
 endif()
 find_package(PkgConfig REQUIRED)
+find_package(ZLIB REQUIRED)   # (2.17: Deno comes as a zip archive)
 pkg_check_modules(GST REQUIRED IMPORTED_TARGET
   gstreamer-1.0>=1.18
   gstreamer-app-1.0
@@ -58,6 +59,11 @@ add_executable(crtplayer
   src/app/WinWindow.cpp       src/app/WinWindow.h
   src/playback/Player.cpp     src/playback/Player.h
   src/playback/SubtitleFeed.cpp src/playback/SubtitleFeed.h src/playback/AssScript.cpp src/playback/AssScript.h
+  src/playback/ShrinkFilter.cpp src/playback/ShrinkFilter.h src/playback/ShrinkKernel.h
+  src/playback/FrameGovernor.cpp src/playback/FrameGovernor.h
+  src/playback/WebSource.cpp src/playback/WebSource.h
+  src/online/OnlineVideo.cpp src/online/OnlineVideo.h
+  src/app/Online.cpp
   src/render/CrtRenderer.cpp
     src/render/Enhance.cpp  src/render/CrtRenderer.h
   src/render/NvEnhancer.cpp   src/render/NvEnhancer.h
@@ -93,7 +99,7 @@ add_executable(crtplayer
   resources.qrc)
 target_include_directories(crtplayer PRIVATE src)
 target_link_libraries(crtplayer PRIVATE crtcore crtmodels
-  Qt6::Core Qt6::Gui Qt6::Widgets Qt6::OpenGL Qt6::OpenGLWidgets Qt6::Network PkgConfig::GST)
+  Qt6::Core Qt6::Gui Qt6::Widgets Qt6::OpenGL Qt6::OpenGLWidgets Qt6::Network PkgConfig::GST ZLIB::ZLIB)
 if(WIN32)
   # A windowed app (no console window); the icon and version details come from the resource file.
   enable_language(RC)
@@ -148,6 +154,14 @@ if(CRTPLAYER_BUILD_TESTS)
   target_include_directories(test_ass PRIVATE src)
   target_link_libraries(test_ass PRIVATE Qt6::Core)
   add_test(NAME ass COMMAND test_ass)
+  add_executable(test_shrink tests/test_shrink.cpp src/playback/FrameGovernor.cpp)
+  target_include_directories(test_shrink PRIVATE src)
+  target_link_libraries(test_shrink PRIVATE Qt6::Core PkgConfig::GST)
+  add_test(NAME shrink COMMAND test_shrink)
+  add_executable(test_online tests/test_online.cpp src/online/OnlineVideo.cpp src/online/OnlineVideo.h)
+  target_include_directories(test_online PRIVATE src)
+  target_link_libraries(test_online PRIVATE Qt6::Core Qt6::Network PkgConfig::GST ZLIB::ZLIB)
+  add_test(NAME online COMMAND test_online)
   add_executable(test_tv tests/test_tv.cpp)
   target_link_libraries(test_tv PRIVATE crtcore)
   add_test(NAME tv COMMAND test_tv)

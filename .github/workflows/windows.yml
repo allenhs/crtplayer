@@ -71,8 +71,15 @@ jobs:
           sed -n '/---- the player/,/---- under the debugger/p' smoke.log | head -150 | bash packaging/windows/ci-annotate.sh warning "Player output" - '.'
           sed -n '/---- under the debugger/,$p' smoke.log | head -120 | bash packaging/windows/ci-annotate.sh warning "Debugger" - '.'
           grep '^ON-SCREEN' smoke.log | sed 's/^ON-SCREEN //' | bash packaging/windows/ci-annotate.sh notice "On the screen" - '.'
-          bash packaging/windows/ci-annotate.sh error "Smoke test" smoke.log 'FAIL|failed|rror'
+          grep -v '^WEB ' smoke.log | bash packaging/windows/ci-annotate.sh error "Smoke test" - 'FAIL|failed|rror'
+          grep '^WEB FAIL' smoke.log | bash packaging/windows/ci-annotate.sh error "Videos from web sites" - '.'
           exit $rc
+
+      # (a step of its own: GitHub shows ten annotations a step)
+      - name: Videos from web sites (what the smoke test found)
+        if: always()
+        run: |
+          grep '^WEB \|^web-video run' smoke.log | sed 's/^WEB //' | bash packaging/windows/ci-annotate.sh notice "Videos from web sites" - '.' || true
 
       - name: Upload the smoke test's results
         if: always()

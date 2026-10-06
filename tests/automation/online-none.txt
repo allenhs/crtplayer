@@ -1,0 +1,31 @@
+# 2.17: no yt-dlp on the computer. Addresses that are media files or streams play as before; a page brings
+# the offer to fetch yt-dlp (and Deno), and the video starts once they are there.
+report none
+openlink @W@/stream
+waitstate playing 20000
+waitshown 2 10000
+screenshot original @O@/@N@/n_01_2.png
+report direct-type
+openlink @W@/media/muxed.mp4
+waitstate playing 20000
+waitshown 2 10000
+report direct-file
+openlink @W@/media/hls/master.m3u8
+waitstate playing 20000
+waitshown 2 10000
+report direct-hls
+openlink @W@/yt/watch?v=pair-h264
+waitonline asked no-program 15000
+wait 600
+grabwindow @O@/@N@/dialog-needed.png dialog
+report asked
+ytdlp dialog get
+waitonline fetches 1 40000
+waitstate playing 30000
+waitshown 3 10000
+screenshot original @O@/@N@/n_02_3.png
+report fetched
+settings playback
+wait 800
+grabwindow @O@/@N@/window-settings-own.png
+quit

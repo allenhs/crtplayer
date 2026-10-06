@@ -13,6 +13,8 @@
 #include <deque>
 #include <gst/gst.h>
 #include "SubtitleFeed.h"
+#include "FrameGovernor.h"
+#include "WebSource.h"
 #include "TapeAudio.h"
 
 struct ChapterInfo {
@@ -67,6 +69,14 @@ public:
     static void localFormats(QStringList* containers, QStringList* videoCodecs, QStringList* audioCodecs);
 
     bool open(const QString& pathOrUri, bool autoplay = true, qint64 startNs = 0);
+    // 2.17: a video from a web site, as one stream or as picture and sound from two addresses.
+    bool openWeb(const QList<WebStream>& streams, bool autoplay = true, qint64 startNs = 0);
+    bool isWeb() const { return m_uri.startsWith(QLatin1String("crtweb://")); }
+    QJsonObject webReport() const;
+    // Chapters that are not in the file itself (a web video's, from its page).
+    void setChapters(const QVector<ChapterInfo>& chapters);
+    // The last error came from the element that reads the video (the network), not from decoding it.
+    bool lastErrorFromSource() const { return m_sourceError; }
     // Extra request headers for http(s) sources (e.g. Jellyfin's Authorization), applied to
     // the next open(). Headers keep credentials out of URLs, logs and window titles.
     void setHttpHeaders(const QList<QPair<QByteArray, QByteArray>>& headers);
@@ -143,6 +153,9 @@ public:
     void setOutput(Output mode, const QSize& size = QSize());
     Output output() const { return m_output; }
     QSize fastOutput() const { return m_output == Output::RgbScaled ? m_fastSize : QSize(); }
+    QJsonObject governorReport() const; // pictures left out before decoding, when the computer cannot keep up (tests)
+    void setGovernorEnabled(bool on) { m_governorOn = on; m_governor.setEnabled(on && !qEnvironmentVariableIsSet("CRTPLAYER_GOVERNOR_OFF")); }
+    QJsonObject shrinkReport() const;   // the player's own shrinking filter: its factor, size and time a frame (tests)
     // The video as decoded (before any such scaling): size, pixel shape, format name. False until known.
     bool nativeFormat(int* width, int* height, int* parN, int* parD, QString* format = nullptr) const;
     int sinkForeignMemoryEntries() const;
@@ -244,6 +257,7 @@ private:
     int m_pictureLatencyMs = 0;
     gint m_textTrackRead = -1;              // the subtitle track that was selected when the file was last read from (opened, or after a jump)
     GstElement* m_capsFilter = nullptr;    // in the video sink bin (owned by the pipeline)
+    GstElement* m_shrink = nullptr;        // the player's own filter, first in the video sink bin (ShrinkFilter.h)
     GstElement* m_videoDec = nullptr;      // the software video decoder (a reference); guarded by m_mutex
     QSize m_fastSize;
     Output m_output = Output::AsDecoded;
@@ -259,6 +273,12 @@ private:
     QVector<GstElement*> m_textOverlays;   // the elements drawing subtitle text (references); guarded by m_mutex
     // 2.16: text subtitles come from lines the player keeps itself; drawn by an overlay in the video sink.
     SubtitleFeed m_feed;
+    FrameGovernor m_governor;              // leaves pictures out before decoding when the computer cannot keep up
+    QString m_webUri;                      // the "crtweb://N" address registered last (WebSource.h)
+    bool m_sourceError = false;
+    bool m_governorOn = true;
+    std::atomic<gint64> m_pictureNs{0};    // how long one picture of the video lasts
+    std::atomic<double> m_rateNow{1.0};    // the playback speed, for the streaming threads
     bool m_feedOn = false;                 // this pipeline has the feed's overlay
     QHash<int, QString> m_trackFiles;      // (this video) subtitle tracks whose lines were given as files
     int m_trackFileAsked = -1;

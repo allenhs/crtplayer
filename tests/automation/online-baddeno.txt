@@ -1,0 +1,9 @@
+# 2.17: yt-dlp arrives, Deno does not (its checksum is wrong): yt-dlp is kept, and it is said
+ytdlp fetch
+waitonline fetches 1 40000
+wait 500
+report baddeno
+openlink @W@/yt/watch?v=pair-h264
+waitstate playing 30000
+report baddeno-plays
+quit

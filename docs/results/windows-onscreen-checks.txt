@@ -1,0 +1,39 @@
+PASS  plain: the run finished: 9 reports; Qt 6.11.2; OpenGL: llvmpipe (LLVM 22.1.8, 256 bits) | 4.6 (Core Profile) Mesa 26.2.4; main window drawn with OpenGL: False
+PASS  plain: in a window: the look list is seen on the screen where the player has it: 87% of its place is the list's own background, 3.9% lettering, 103 levels different from before it opened
+PASS  plain: full screen: the look list is seen on the screen where the player has it: 87% of its place is the list's own background, 3.9% lettering, 95 levels different from before it opened
+PASS  plain: desk mode: the look list is seen on the screen where the player has it: 87% of its place is the list's own background, 3.9% lettering, 92 levels different from before it opened
+PASS  plain: desk mode: the set is on the screen as the player drew it: 10% of the view is the set; 100% of it matches on the screen
+PASS  plain: desk mode: around the set the desktop behind shows (not black): 100.0% of the undrawn part shows the backdrop; average colour there [255.0, 0.0, 255.0]
+PASS  plain: desk mode: the shadow darkens the desktop behind (blended, not black): 2.2% of the view is half see-through; 0 levels from the expected blend
+PASS  plain: desk mode kept on top: the set is on the screen as the player drew it: 10% of the view is the set; 100% of it matches on the screen
+PASS  plain: desk mode kept on top: around the set the desktop behind shows (not black): 100.0% of the undrawn part shows the backdrop; average colour there [255.0, 0.0, 255.0]
+PASS  plain: desk mode kept on top: the shadow darkens the desktop behind (blended, not black): 2.2% of the view is half see-through; 0 levels from the expected blend
+PASS  plain: desk mode, second visit: the set is on the screen as the player drew it: 10% of the view is the set; 100% of it matches on the screen
+PASS  plain: desk mode, second visit: around the set the desktop behind shows (not black): 100.0% of the undrawn part shows the backdrop; average colour there [255.0, 0.0, 255.0]
+PASS  plain: desk mode, second visit: the shadow darkens the desktop behind (blended, not black): 2.2% of the view is half see-through; 0 levels from the expected blend
+PASS  plain: Windows: the full-screen player (not drawn with OpenGL) covers the whole screen: border False, inside {'h': 768, 'w': 1024, 'x': 0, 'y': 0}
+PASS  plain: Windows: desk mode: the see-through window stays in the desktop's composition: border True, inside {'h': 766, 'w': 1022, 'x': 1, 'y': 1}, screen {'h': 768, 'w': 1024, 'x': 0, 'y': 0}, layered False, alpha asked 8 got 8 (pixel format 0: None), shaped True {'h': 414, 'w': 362, 'x': 319, 'y': 218}, topmost False, style 96880000/0
+PASS  plain: Windows: desk mode kept on top: the see-through window stays in the desktop's composition: border True, inside {'h': 766, 'w': 1022, 'x': 1, 'y': 1}, screen {'h': 768, 'w': 1024, 'x': 0, 'y': 0}, layered False, alpha asked 8 got 8 (pixel format 0: None), shaped True {'h': 414, 'w': 362, 'x': 319, 'y': 218}, topmost True, style 96880000/8
+PASS  plain: Windows: desk mode, no longer on top: the see-through window stays in the desktop's composition: border True, inside {'h': 766, 'w': 1022, 'x': 1, 'y': 1}, screen {'h': 768, 'w': 1024, 'x': 0, 'y': 0}, layered False, alpha asked 8 got 8 (pixel format 0: None), shaped True {'h': 414, 'w': 362, 'x': 319, 'y': 218}, topmost False, style 96880000/0
+PASS  plain: Windows: desk mode, second visit: the see-through window stays in the desktop's composition: border True, inside {'h': 766, 'w': 1022, 'x': 1, 'y': 1}, screen {'h': 768, 'w': 1024, 'x': 0, 'y': 0}, layered False, alpha asked 8 got 8 (pixel format 0: None), shaped True {'h': 414, 'w': 362, 'x': 319, 'y': 218}, topmost False, style 96880000/0
+PASS  plain: Windows: "keep on top" is set on the desk window: True
+PASS  opengl: the run finished: 9 reports; Qt 6.11.2; OpenGL: llvmpipe (LLVM 22.1.8, 256 bits) | 4.6 (Core Profile) Mesa 26.2.4; main window drawn with OpenGL: True
+PASS  opengl: in a window: the look list is seen on the screen where the player has it: 87% of its place is the list's own background, 3.9% lettering, 103 levels different from before it opened
+PASS  opengl: full screen: the look list is seen on the screen where the player has it: 87% of its place is the list's own background, 3.9% lettering, 95 levels different from before it opened
+PASS  opengl: desk mode: the look list is seen on the screen where the player has it: 87% of its place is the list's own background, 3.9% lettering, 92 levels different from before it opened
+PASS  opengl: desk mode: the set is on the screen as the player drew it: 10% of the view is the set; 100% of it matches on the screen
+PASS  opengl: desk mode: around the set the desktop behind shows (not black): 100.0% of the undrawn part shows the backdrop; average colour there [255.0, 0.0, 255.0]
+PASS  opengl: desk mode: the shadow darkens the desktop behind (blended, not black): 2.2% of the view is half see-through; 0 levels from the expected blend
+PASS  opengl: desk mode kept on top: the set is on the screen as the player drew it: 10% of the view is the set; 100% of it matches on the screen
+PASS  opengl: desk mode kept on top: around the set the desktop behind shows (not black): 100.0% of the undrawn part shows the backdrop; average colour there [255.0, 0.0, 255.0]
+PASS  opengl: desk mode kept on top: the shadow darkens the desktop behind (blended, not black): 2.2% of the view is half see-through; 0 levels from the expected blend
+PASS  opengl: desk mode, second visit: the set is on the screen as the player drew it: 10% of the view is the set; 100% of it matches on the screen
+PASS  opengl: desk mode, second visit: around the set the desktop behind shows (not black): 100.0% of the undrawn part shows the backdrop; average colour there [255.0, 0.0, 255.0]
+PASS  opengl: desk mode, second visit: the shadow darkens the desktop behind (blended, not black): 2.2% of the view is half see-through; 0 levels from the expected blend
+PASS  opengl: Windows: the full-screen player (drawn with OpenGL) stays in the desktop's composition: border True, inside {'h': 766, 'w': 1022, 'x': 1, 'y': 1}, screen {'h': 768, 'w': 1024, 'x': 0, 'y': 0}, asked in time True
+PASS  opengl: Windows: desk mode: the see-through window stays in the desktop's composition: border True, inside {'h': 766, 'w': 1022, 'x': 1, 'y': 1}, screen {'h': 768, 'w': 1024, 'x': 0, 'y': 0}, layered False, alpha asked 8 got 8 (pixel format 0: None), shaped True {'h': 414, 'w': 362, 'x': 319, 'y': 218}, topmost False, style 96880000/0
+PASS  opengl: Windows: desk mode kept on top: the see-through window stays in the desktop's composition: border True, inside {'h': 766, 'w': 1022, 'x': 1, 'y': 1}, screen {'h': 768, 'w': 1024, 'x': 0, 'y': 0}, layered False, alpha asked 8 got 8 (pixel format 0: None), shaped True {'h': 414, 'w': 362, 'x': 319, 'y': 218}, topmost True, style 96880000/8
+PASS  opengl: Windows: desk mode, no longer on top: the see-through window stays in the desktop's composition: border True, inside {'h': 766, 'w': 1022, 'x': 1, 'y': 1}, screen {'h': 768, 'w': 1024, 'x': 0, 'y': 0}, layered False, alpha asked 8 got 8 (pixel format 0: None), shaped True {'h': 414, 'w': 362, 'x': 319, 'y': 218}, topmost False, style 96880000/0
+PASS  opengl: Windows: desk mode, second visit: the see-through window stays in the desktop's composition: border True, inside {'h': 766, 'w': 1022, 'x': 1, 'y': 1}, screen {'h': 768, 'w': 1024, 'x': 0, 'y': 0}, layered False, alpha asked 8 got 8 (pixel format 0: None), shaped True {'h': 414, 'w': 362, 'x': 319, 'y': 218}, topmost False, style 96880000/0
+PASS  opengl: Windows: "keep on top" is set on the desk window: True
+All on-screen checks passed

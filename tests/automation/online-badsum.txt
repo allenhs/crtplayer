@@ -1,0 +1,10 @@
+# 2.17: a download that does not match its release's checksum is not kept
+openlink @W@/yt/watch?v=pair-h264
+waitonline asked no-program 15000
+ytdlp dialog get
+waitonline fetchFailures 1 40000
+wait 500
+report badsum
+grabwindow @O@/@N@/dialog-badsum.png dialog
+closedialogs
+quit

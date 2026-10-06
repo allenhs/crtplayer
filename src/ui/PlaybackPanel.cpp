@@ -307,6 +307,31 @@ PlaybackPanel::PlaybackPanel(QWidget* parent) : QWidget(parent)
     endF->addRow(tr("Sleep timer"), m_sleepCombo);
     endF->addRow(QString(), m_sleepStatus);
     v->addWidget(endBox);
+    // ---- 2.17: videos from web sites
+    auto* webBox = new QGroupBox(tr("Videos from web sites"), this);
+    auto* webF = new QFormLayout(webBox);
+    webF->setContentsMargins(0, 6, 0, 0);
+    auto* webText = new QLabel(tr("Paste a video page's address into the player (Ctrl+V), or use Open link (Ctrl+L). "
+                                  "The player asks the program yt-dlp where the video is, and plays it from there; nothing is saved to disk."));
+    webText->setWordWrap(true);
+    webText->setObjectName("hint");
+    webF->addRow(webText);
+    m_onlineHeight = new QComboBox;
+    m_onlineHeight->addItem(tr("As large as this screen shows"), 0);
+    for (int h : {2160, 1440, 1080, 720, 480, 360}) m_onlineHeight->addItem(tr("%1p at most").arg(h), h);
+    m_onlineHeight->setToolTip(tr("A larger picture needs a faster connection, and more of the computer to decode it."));
+    connect(m_onlineHeight, &QComboBox::activated, this, [this](int i) { emit onlineHeightChanged(m_onlineHeight->itemData(i).toInt()); });
+    webF->addRow(tr("Picture size"), m_onlineHeight);
+    m_onlineStatus = new QLabel;
+    m_onlineStatus->setObjectName("paramValue");
+    m_onlineStatus->setWordWrap(true);
+    m_onlineStatus->setTextInteractionFlags(Qt::TextSelectableByMouse);
+    webF->addRow(m_onlineStatus);
+    m_onlineGet = new QPushButton(tr("Get yt-dlp"));
+    m_onlineGet->setObjectName("onlineGet");
+    connect(m_onlineGet, &QPushButton::clicked, this, &PlaybackPanel::ytDlpRequested);
+    webF->addRow(m_onlineGet);
+    v->addWidget(webBox);
     auto* diag = new QGroupBox(tr("Help with a problem"), this);
     auto* dl = new QVBoxLayout(diag);
     auto* dtext = new QLabel(tr("Copies a summary of this system (graphics, GStreamer, decoders, the current video's "
@@ -376,6 +401,21 @@ void PlaybackPanel::setNvidiaStatus(bool installed, const QString& status)
     m_nvRows->setEnabled(usable && m_nvOn->isChecked());
     m_nvRows->setVisible(installed);
     if (m_nvStatus->text() != status) m_nvStatus->setText(status);
+}
+void PlaybackPanel::setOnlineHeight(int height)
+{
+    QSignalBlocker b(m_onlineHeight);
+    const int i = m_onlineHeight->findData(height);
+    m_onlineHeight->setCurrentIndex(i < 0 ? 0 : i);
+}
+QString PlaybackPanel::onlineStatus() const { return m_onlineStatus->text(); }
+QString PlaybackPanel::onlineButton() const { return m_onlineGet->isEnabled() ? m_onlineGet->text() : QString(); }
+void PlaybackPanel::setOnlineStatus(const QString& status, const QString& button, bool buttonEnabled)
+{
+    if (m_onlineStatus->text() != status) m_onlineStatus->setText(status);
+    m_onlineGet->setText(button);
+    m_onlineGet->setVisible(!button.isEmpty());
+    m_onlineGet->setEnabled(buttonEnabled);
 }
 void PlaybackPanel::setAutoNext(bool on) { QSignalBlocker b(m_autoNext); m_autoNext->setChecked(on); }
 void PlaybackPanel::setSleepTimer(int minutes, const QString& status)

@@ -120,6 +120,56 @@ for surface, title in (('raster', 'plain window surface (what a machine without 
           f'mean difference {m:.2f} from the old way, {far * 100:.2f}% of areas differ visibly')
     check('and it is shrunk properly (every pixel averaged in: no jagged, noisy fine detail)', fine(a) < fine(ref) * 1.25,
           f'fine detail {fine(a):.2f}; the 4K frame averaged down has {fine(ref):.2f} (the old way showed {fine(b):.2f})')
+    # ---- 2.17: 4K HEVC 10-bit
+    if 'ten-fast' in R:
+        t_fast, t_old = fps('ten-fast'), fps('ten-never')
+        sh = vp('ten-fast').get('shrink', {})
+        check('4K HEVC 10-bit: its pictures are shrunk and brought to 8 bits by the player itself, by a whole factor',
+              sh.get('factor', 0) >= 2 and sh.get('frames', 0) > 30 and sh.get('width', 0) >= shown[0] and size('ten-fast') == shown,
+              f"by {sh.get('factor')} to {sh.get('width')} × {sh.get('height')} in {sh.get('msPerFrame', 0):.1f} ms a frame, then to the picture's {size('ten-fast')[0]} × {size('ten-fast')[1]}")
+        check('4K HEVC 10-bit at 30 frames a second', t_fast >= (22.0 if surface == 'raster' else 15.0) and t_fast > t_old * 2.5,
+              f'{t_fast:.1f} frames a second ({t_old:.1f} the old way)')
+        a, b = picture(img(g('ten-fast')), rect), picture(img(g('ten-never')), rect)
+        m, far = alike(a, b)
+        check('and shows the same picture as the old way (same frame, paused)', m < 5.0 and far < 0.01,
+              f'mean difference {m:.2f} of 255, {far * 100:.2f}% of areas differ visibly')
+        check('8-bit videos are scaled as before (the 4K H.264 video passes the filter untouched)', vp('uhd-fast').get('shrink', {}).get('factor') == 0,
+              f"factor {vp('uhd-fast').get('shrink', {}).get('factor')}")
+        tc = R['ten-changes']
+        check('eight changes of size and look in three seconds on the 10-bit video: the stream carries on',
+              tc['state'] == 'playing' and not tc['lastError'] and fps('ten-changes') >= 10.0 and size('ten-changes') == shown,
+              f"{tc['state']}, {fps('ten-changes'):.1f} frames a second, at {tc['positionMs'] / 1000:.1f} s" + (f", error: {tc['lastError'][:80]}" if tc['lastError'] else ', no error'))
+        tl = vp('ten-look').get('shrink', {})
+        check('with a look, a 10-bit video becomes 8-bit at its own size before it is converted',
+              vp('ten-look')['output'] == 'rgb' and tl.get('factor') == 1 and (tl.get('width'), tl.get('height')) == (1920, 1080) and size('ten-look') == (1920, 1080),
+              f"{vp('ten-look')['output']}, factor {tl.get('factor')}, {tl.get('width')} × {tl.get('height')}, {tl.get('msPerFrame', 0):.1f} ms a frame")
+        a, b = picture(img(g('ten-look-fast')), rect), picture(img(g('ten-look-never')), rect)
+        m, far = alike(a, b)
+        check('and the look shows the same picture as the old way', m < 5.0 and far < 0.01, f'mean difference {m:.2f}, {far * 100:.2f}% of areas differ visibly')
+        gv, gu = vp('heavy-governed')['governor'], vp('heavy-ungoverned')['governor']
+        h_on, h_off = fps('heavy-governed'), fps('heavy-ungoverned')
+        late = R['heavy-governed']['sync']
+        if gv['leftOut'] == 0 and h_on >= 28.5:
+            check('a hard 4K HEVC 10-bit video: this computer decodes it in time, nothing is left out', True, f'{h_on:.1f} frames a second')
+        else:
+            check('a hard 4K HEVC 10-bit video: pictures are left out before decoding, and only ones nothing is built from',
+                  0 < gv['leftOut'] <= gv['unreferenced'] and gv['codec'] == 'h265',
+                  f"{gv['leftOut']} of {gv['unreferenced']} such pictures left out, of {gv['pictures']} in all")
+            # (on the OpenGL widget, drawn by software here, it is the drawing that is late: less late than without, then)
+            check('the pictures that are shown come on time, and there are at least as many as without it',
+                  h_on >= h_off * 0.92 and h_on >= (12.0 if surface == 'raster' else 6.0) and
+                  late['meanMs'] < (15.0 if surface == 'raster' else max(15.0, R['heavy-ungoverned']['sync']['meanMs'])),
+                  f"{h_on:.1f} frames a second, {late['meanMs']:.0f} ms late on average (spread {late['stddevMs']:.0f}); "
+                  f"without: {h_off:.1f}, {R['heavy-ungoverned']['sync']['meanMs']:.0f} ms (spread {R['heavy-ungoverned']['sync']['stddevMs']:.0f})")
+        g0 = vp('heavy-off')['governor']
+        check('switched off, nothing is left out', gu['leftOut'] == g0['leftOut'] and not gu['enabled'] and gu['pictures'] > g0['pictures'] + 60,
+              f"{gu['leftOut'] - g0['leftOut']} of the {gu['pictures'] - g0['pictures']} pictures after that")
+        t = [R[l]['framePtsMs'] for l in ('heavy-paused', 'heavy-step1', 'heavy-step2', 'heavy-step3')]
+        nth = [int((x + 1.0) * 30 / 1000) for x in t]   # which picture of the video (30 a second)
+        check('paused and stepped, every picture is the exact one (none left out)',
+              nth == [75, 76, 77, 78] and vp('heavy-step3')['governor']['leftOut'] == vp('heavy-paused')['governor']['leftOut'],
+              f'paused on picture {nth[0]} (asked for 2.51 s), then stepped to {nth[1:]}')
+
     check('the decoder uses every CPU thread', vp('uhd-fast')['decoderThreads'] in (0, vp('uhd-fast')['cpuThreads']) or vp('uhd-fast')['decoderThreads'] >= vp('uhd-fast')['cpuThreads'],
           f"{vp('uhd-fast')['decoderThreads']} decoder threads, {vp('uhd-fast')['cpuThreads']} CPU threads")
 

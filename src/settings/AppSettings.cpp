@@ -86,6 +86,8 @@ void AppSettings::load()
     keepAwake = s.value("playback/keepAwake", true).toBool();
     lookSound = s.value("playback/lookSound", true).toBool();
     jfMaxBitrateMbps = std::clamp(s.value("jellyfin/maxBitrateMbps", 0).toInt(), 0, 1000);
+    onlineMaxHeight = std::clamp(s.value("online/maxHeight", 0).toInt(), 0, 4320);
+    ytDlpPath = s.value("online/ytDlpPath").toString();
     gifWidth = std::clamp(s.value("gif/width", 480).toInt(), 120, 3840);
     gifFps = std::clamp(s.value("gif/fps", 15).toInt(), 5, 60);
     gifLook = s.value("gif/look", true).toBool();
@@ -185,6 +187,8 @@ void AppSettings::save() const
     s.setValue("playback/keepAwake", keepAwake);
     s.setValue("playback/lookSound", lookSound);
     s.setValue("jellyfin/maxBitrateMbps", jfMaxBitrateMbps);
+    s.setValue("online/maxHeight", onlineMaxHeight);
+    s.setValue("online/ytDlpPath", ytDlpPath);
     s.setValue("gif/width", gifWidth);
     s.setValue("gif/fps", gifFps);
     s.setValue("gif/look", gifLook);

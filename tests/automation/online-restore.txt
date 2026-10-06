@@ -1,0 +1,9 @@
+# 2.17: the second start: the web video that was left is in "Recent", and goes on where it was
+report restore-start
+openlink @W@/yt/watch?v=mixed-a
+waitstate playing 30000
+waitshown 44 12000
+wait 500
+screenshot original @O@/@N@/n_90_44.png
+report restore
+quit

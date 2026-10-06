@@ -2,6 +2,9 @@
 #include "Player.h"
 #include "Distro.h"
 #include "TapeAudio.h"
+#include "ShrinkFilter.h"
+#include "FrameGovernor.h"
+#include "WebSource.h"
 
 #include <QFileInfo>
 #include <cmath>
@@ -145,6 +148,7 @@ Player::~Player()
 {
     m_feed.setNotify(nullptr);
     teardown();
+    if (!m_webUri.isEmpty()) crt_web_forget(m_webUri);
 }
 
 QStringList Player::missingEssentialElements()
@@ -333,12 +337,41 @@ bool Player::open(const QString& in, bool autoplay, qint64 startNs)
     return openInternal(uri, autoplay, startNs, false);
 }
 
+// A video from a web site: one stream, or the picture and the sound as two that belong together (WebSource.h).
+bool Player::openWeb(const QList<WebStream>& streams, bool autoplay, qint64 startNs)
+{
+    if (streams.isEmpty()) return false;
+    const QString before = m_webUri;
+    m_webUri = crt_web_register(streams);
+    const bool ok = open(m_webUri, autoplay, startNs);
+    if (!before.isEmpty()) crt_web_forget(before);   // (the pipeline that read them is gone by now)
+    return ok;
+}
+
+QJsonObject Player::webReport() const
+{
+    QJsonObject o = crt_web_is(m_uri) ? crt_web_report(m_uri) : QJsonObject{{"streams", 0}};
+    o["sourceError"] = m_sourceError;
+    return o;
+}
+
+void Player::setChapters(const QVector<ChapterInfo>& chapters)
+{
+    m_chapters = chapters;
+    std::sort(m_chapters.begin(), m_chapters.end(), [](const ChapterInfo& a, const ChapterInfo& b) { return a.startNs < b.startNs; });
+    emit chaptersChanged();
+}
+
 bool Player::openInternal(const QString& uri, bool autoplay, qint64 startNs, bool isRetry)
 {
     teardown();
     if (!isRetry) applyDecoderPolicy(m_hwEnabled);
     m_uri = uri;
     m_targetPlaying = autoplay;
+    m_governor.reset();
+    m_governor.setEnabled(m_governorOn && !qEnvironmentVariableIsSet("CRTPLAYER_GOVERNOR_OFF"));
+    m_governor.setPlaying(autoplay);
+    m_pictureNs = 0;
     m_startPos = startNs;
     m_loaded = false;
     m_duration = -1;
@@ -360,6 +393,10 @@ bool Player::openInternal(const QString& uri, bool autoplay, qint64 startNs, boo
     // half as fast again as the two in one element for 4K shown at 1080p. Both are multi-threaded.
     GstElement* conv = gst_element_factory_make("videoconvert", nullptr);
     GstElement* scale = gst_element_factory_make("videoscale", nullptr);   // (optional: without it, no fast path)
+    // 2.17: first of all, the player's own filter. When frames are converted on the CPU it shrinks the picture by a
+    // whole factor and to 8 bits a sample in one cheap pass, so that the scaler and the converter get a small
+    // 8-bit picture (ShrinkFilter.h). (CRTPLAYER_SHRINK_OFF: as before 2.17.)
+    GstElement* shrink = qEnvironmentVariableIsSet("CRTPLAYER_SHRINK_OFF") ? nullptr : crt_shrink_new();
     GstElement* capsf = gst_element_factory_make("capsfilter", nullptr);
     // The size and format asked for change while the video plays (the window is resized, a look
     // is switched on). Frames already on their way in the old format must still be let through,
@@ -369,6 +406,7 @@ bool Player::openInternal(const QString& uri, bool autoplay, qint64 startNs, boo
     if (!m_pipe || !conv || !m_appsink || !capsf) {
         if (conv) gst_object_unref(conv);
         if (scale) gst_object_unref(scale);
+        if (shrink) gst_object_unref(shrink);
         if (capsf) gst_object_unref(capsf);
         if (m_appsink) gst_object_unref(m_appsink);
         if (m_pipe) gst_object_unref(m_pipe);
@@ -410,7 +448,14 @@ bool Player::openInternal(const QString& uri, bool autoplay, qint64 startNs, boo
     } else {
         gst_element_link_many(conv, capsf, m_appsink, nullptr);
     }
+    GstElement* head = scale ? scale : conv;   // the first element of the chain: the video as decoded arrives at its sink pad
+    if (shrink) {
+        gst_bin_add(GST_BIN(bin), shrink);
+        gst_element_link(shrink, head);
+        head = shrink;
+    }
     m_capsFilter = capsf;
+    m_shrink = shrink;
     m_canScale = scale != nullptr;
     {
         QMutexLocker lock(&m_mutex);
@@ -418,10 +463,22 @@ bool Player::openInternal(const QString& uri, bool autoplay, qint64 startNs, boo
         m_natFormat.clear();
     }
     applyFastOutput();
-    GstPad* pad = gst_element_get_static_pad(scale ? scale : conv, "sink");
+    GstPad* pad = gst_element_get_static_pad(head, "sink");
     // The video as decoded is seen here, whatever is delivered after conversion and scaling.
     gst_pad_add_probe(pad, GST_PAD_PROBE_TYPE_EVENT_DOWNSTREAM, &Player::onSinkEvent, this, nullptr);
     gst_pad_add_probe(pad, GST_PAD_PROBE_TYPE_BUFFER, &Player::onSinkBuffer, this, nullptr);
+    // What the sink says about each picture it shows (how early it was there) goes to the governor.
+    gst_pad_add_probe(pad, GST_PAD_PROBE_TYPE_EVENT_UPSTREAM, [](GstPad*, GstPadProbeInfo* info, gpointer self) -> GstPadProbeReturn {
+        GstEvent* ev = GST_PAD_PROBE_INFO_EVENT(info);
+        if (GST_EVENT_TYPE(ev) == GST_EVENT_QOS) {
+            auto* p = static_cast<Player*>(self);
+            GstClockTimeDiff late = 0;
+            gst_event_parse_qos(ev, nullptr, nullptr, &late, nullptr);
+            // (at twice the speed a picture has half the time)
+            p->m_governor.arrived(-late, gint64(double(p->m_pictureNs.load()) / std::max(0.25, p->m_rateNow.load())));
+        }
+        return GST_PAD_PROBE_OK;
+    }, this, nullptr);
     // What the sink would like best (RGB at the screen's size, say) is kept from what is upstream:
     // playbin's own converter and scaler would otherwise oblige, on a single thread and at the
     // video's full size. Asked what it accepts, the sink says "any raw video"; it then does the
@@ -453,7 +510,7 @@ bool Player::openInternal(const QString& uri, bool autoplay, qint64 startNs, boo
     // else is done to the picture. (CRTPLAYER_SUBTITLE_FEED_OFF: GStreamer's own subtitle path for everything.)
     GstElement* subs = qEnvironmentVariableIsSet("CRTPLAYER_SUBTITLE_FEED_OFF") ? nullptr : m_feed.build(GST_BIN(bin));
     GstPad* in = subs ? gst_element_get_static_pad(subs, "video_sink") : nullptr;
-    if (subs && in && gst_element_link_pads(subs, "src", scale ? scale : conv, "sink")) {
+    if (subs && in && gst_element_link_pads(subs, "src", head, "sink")) {
         m_feedOn = true;
         m_feed.playedTo(std::max<qint64>(0, m_startPos));   // (where this video is going to start: its lines are read from around there)
         gst_element_add_pad(bin, gst_ghost_pad_new("sink", in));
@@ -548,6 +605,16 @@ bool Player::openInternal(const QString& uri, bool autoplay, qint64 startNs, boo
     g_signal_connect(m_pipe, "text-changed", G_CALLBACK(&Player::onStreamsChanged), this);
     g_signal_connect(m_pipe, "video-changed", G_CALLBACK(&Player::onStreamsChanged), this);
     g_signal_connect(m_pipe, "source-setup", G_CALLBACK(&Player::onSourceSetup), this);
+    // A web video whose picture and sound are two streams has two demuxers, and a jump must reach both.
+    // playbin hands a jump to its picture's sink only (with one demuxer, that moves everything: the
+    // sound's stream would stay where it was, and fall silent until the clock caught up with it;
+    // measured). Its sink is told to hand events to every sink, as any other pipeline does.
+    if (crt_web_is(uri) && crt_web_report(uri).value("streams").toInt() > 1) {
+        if (GstElement* sink = gst_bin_get_by_name(GST_BIN(m_pipe), "playsink")) {
+            if (g_object_class_find_property(G_OBJECT_GET_CLASS(sink), "send-event-mode")) g_object_set(sink, "send-event-mode", 0, nullptr);
+            gst_object_unref(sink);
+        }
+    }
 
     setState(State::Loading);
     const GstStateChangeReturn r = gst_element_set_state(m_pipe, GST_STATE_PAUSED);
@@ -576,6 +643,7 @@ void Player::teardown()
         m_pipe = nullptr;
         m_appsink = nullptr;
         m_capsFilter = nullptr;
+        m_shrink = nullptr;
         m_tape = nullptr;   // it belonged to the pipeline
     }
     QMutexLocker lock(&m_mutex);
@@ -622,7 +690,11 @@ void Player::setState(State s)
 void Player::play()
 {
     if (!m_pipe) return;
+    // (a web video that failed: its addresses are what failed, and starting its pipeline again would only ask
+    // for them again; the window asks yt-dlp for new ones instead)
+    if (m_state == State::Error && crt_web_is(m_uri)) return;
     m_targetPlaying = true;
+    m_governor.setPlaying(true);
     gst_element_set_state(m_pipe, GST_STATE_PLAYING);
 }
 
@@ -630,6 +702,7 @@ void Player::pause()
 {
     if (!m_pipe) return;
     m_targetPlaying = false;
+    m_governor.setPlaying(false);   // (a paused picture is always the exact one)
     gst_element_set_state(m_pipe, GST_STATE_PAUSED);
 }
 
@@ -1012,6 +1085,8 @@ GstPadProbeReturn Player::onSinkEvent(GstPad*, GstPadProbeInfo* info, gpointer s
             p->m_natParD = GST_VIDEO_INFO_PAR_D(&vi) > 0 ? GST_VIDEO_INFO_PAR_D(&vi) : 1;
             p->m_natFormat = QString::fromUtf8(gst_video_format_to_string(GST_VIDEO_INFO_FORMAT(&vi)));
             gst_caps_replace(&p->m_natCaps, caps);
+            p->m_pictureNs = GST_VIDEO_INFO_FPS_N(&vi) > 0 && GST_VIDEO_INFO_FPS_D(&vi) > 0
+                                 ? gint64(gst_util_uint64_scale(GST_SECOND, GST_VIDEO_INFO_FPS_D(&vi), GST_VIDEO_INFO_FPS_N(&vi))) : 0;
         }
     } else if (GST_EVENT_TYPE(ev) == GST_EVENT_FLUSH_STOP) {
         auto* p = static_cast<Player*>(self);
@@ -1123,6 +1198,20 @@ void Player::applyFastOutput()
     }
     g_object_set(m_capsFilter, "caps", caps, nullptr);   // takes effect with the next frame
     gst_caps_unref(caps);
+    // The player's own filter ahead of the scaler: untouched frames for a graphics card; 8 bits a sample when
+    // the CPU converts; and shrunk by a whole factor on the way when the picture is shown much smaller.
+    if (m_output == Output::AsDecoded) crt_shrink_set(m_shrink, ShrinkMode::Off);
+    else if (m_output == Output::Rgb) crt_shrink_set(m_shrink, ShrinkMode::Depth);
+    else crt_shrink_set(m_shrink, ShrinkMode::Fit, m_fastSize.width(), m_fastSize.height());
+}
+
+QJsonObject Player::governorReport() const { return m_governor.report(); }
+
+QJsonObject Player::shrinkReport() const
+{
+    const ShrinkState st = crt_shrink_state(m_shrink);
+    return QJsonObject{{"present", m_shrink != nullptr}, {"frames", double(st.frames)}, {"factor", st.factor},
+                       {"width", st.outWidth}, {"height", st.outHeight}, {"msPerFrame", st.msPerFrame}};
 }
 
 int Player::decoderThreads() const
@@ -1246,6 +1335,7 @@ void Player::setRate(double rate)
     rate = std::clamp(rate, 0.25, 4.0);
     if (std::abs(rate - m_rate) < 1e-6) return;
     m_rate = rate;
+    m_rateNow = rate;
     // A flushing seek to the current position applies the new rate.
     if (m_pipe && m_loaded) doSeek(position(), SeekMode::Accurate);
 }
@@ -1529,6 +1619,7 @@ void Player::onDeepElementAdded(GstBin*, GstBin*, GstElement* el, gpointer self)
             p->m_videoDecoderHw = isHwVideoDecoderFactory(f);
             if (p->m_videoDec) gst_object_unref(p->m_videoDec);
             p->m_videoDec = p->m_videoDecoderHw ? nullptr : GST_ELEMENT(gst_object_ref(el));
+            p->m_governor.attach(el);   // (2.17: leaves pictures out before decoding when the computer cannot keep up)
         }
         else if (klassHas(f, "Audio")) p->m_audioDecoder = name;
         else return;
@@ -1555,8 +1646,15 @@ void Player::onSourceSetup(GstElement*, GstElement* source, gpointer self)
     }
     if (headers.isEmpty() || !g_object_class_find_property(klass, "extra-headers")) return;
     GstStructure* st = gst_structure_new_empty("extra-headers");
-    for (const auto& h : headers) gst_structure_set(st, h.first.constData(), G_TYPE_STRING, h.second.constData(), nullptr);
-    g_object_set(source, "extra-headers", st, nullptr);
+    for (const auto& h : headers) {
+        const QByteArray lower = h.first.toLower();
+        // (a web site's own headers, 2.17: who is asking is a property of the source, and what is the
+        // source's own business is left to it)
+        if (lower == "user-agent") { g_object_set(source, "user-agent", h.second.constData(), nullptr); continue; }
+        if (lower == "range" || lower == "accept-encoding" || lower == "host" || lower == "connection" || lower == "content-length") continue;
+        gst_structure_set(st, h.first.constData(), G_TYPE_STRING, h.second.constData(), nullptr);
+    }
+    if (gst_structure_n_fields(st) > 0) g_object_set(source, "extra-headers", st, nullptr);
     gst_structure_free(st);
 }
 
@@ -1631,10 +1729,16 @@ void Player::handleMessage(GstMessage* m, quint64 generation)
         const QString debug = dbg ? QString::fromUtf8(dbg) : QString();
         g_clear_error(&err);
         g_free(dbg);
+        // One failure brings several messages (the element that failed, then those that waited for it: with
+        // the picture and the sound as two streams, twice over). The first one says what happened.
+        if (m_state == State::Error) { qWarning() << "GStreamer error (after the one reported):" << msg; break; }
         bool hwInvolved = videoDecoderIsHardware();
+        m_sourceError = false;
         if (GST_IS_ELEMENT(GST_MESSAGE_SRC(m))) {
             GstElementFactory* f = gst_element_get_factory(GST_ELEMENT(GST_MESSAGE_SRC(m)));
             if (f && isHwVideoDecoderFactory(f)) hwInvolved = true;
+            // (the element that reads from the network: an address that has run out, a server that refuses)
+            if (f && klassHas(f, "Source")) m_sourceError = true;
         }
         if (m_hwEnabled && hwInvolved && !m_hwRetried) {
             qWarning() << "Hardware decoding error, retrying in software:" << msg;
@@ -1682,6 +1786,7 @@ void Player::handleMessage(GstMessage* m, quint64 generation)
     case GST_MESSAGE_STATE_CHANGED: {
         GstState oldS, newS, pending;
         gst_message_parse_state_changed(m, &oldS, &newS, &pending);
+        if (m_state == State::Error) break;   // (what a pipeline that failed still had to say about its states)
         if (newS == GST_STATE_PLAYING) { setState(State::Playing); switchPendingAudio(); }
         else if (newS == GST_STATE_PAUSED && m_loaded) setState(State::Paused);
         break;

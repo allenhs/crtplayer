@@ -16,6 +16,8 @@
 #include <QFrame>
 #include <QVector>
 #include "jellyfin/JellyfinClient.h"
+#include "playback/WebSource.h"
+#include <QHash>
 
 class Player;
 class VideoWidget;
@@ -186,6 +188,51 @@ private:
     QTimer m_jfTimer;
     QVector<JfItem> m_jfResume;   // Continue watching, for the desk-mode menu
 
+    // 2.17: videos from web sites, found with yt-dlp (Online.cpp)
+public:
+    void openLink(const QString& address, bool playNow = true);   // a page with a video on it, or a media address
+    void promptOpenLink();                                        // asks for the address (Ctrl+L)
+    bool pasteLink();                                             // the address on the clipboard (Ctrl+V)
+    void fetchYtDlp();                                            // what the settings' button does
+    void setOnlineMaxHeight(int height);
+    void setYtDlpPath(const QString& path);
+    class OnlineResolver* online() const { return m_online; }
+    QJsonObject onlineReport() const;
+    static QStringList addressesIn(const QString& text);          // the http(s) addresses in pasted or dropped text
+private:
+    void playWeb(const QString& entry, int index);
+    void askYtDlp(const QString& page, int index, int request);
+    void webResolved(const struct OnlineResult& r, const QString& entry, int index, int request);
+    void webFailed(const QString& title, const QString& text, const QString& details);
+    void offerYtDlp(const QString& entry, int index);
+    void updateOnlineStatus(bool askVersion = true);
+    struct OnlineOptions onlineOptions() const;
+    QString resumeKey() const;            // what the playing video's place is kept under
+    void setHint(const QString& text);    // the words in the empty picture; empty: the usual ones
+    class OnlineResolver* m_online = nullptr;
+    QString m_webPage;                    // the page of the web video that is open
+    QString m_webAsking;                  // the page yt-dlp is being asked about
+    QString m_webSite, m_webWhat;         // "Youtube", "1080p · VP9 + Opus"
+    bool m_webLive = false;
+    QList<QPair<QByteArray, QByteArray>> m_webHeaders;
+    QHash<QString, QPair<QString, bool>> m_webSubs;   // subtitle address → file type, automatic captions?
+    QVector<QPair<qint64, QString>> m_webChapters;   // start (ns), title
+    int m_webRequest = 0;                 // only the latest question's answer is used
+    int m_webDepth = 0;                   // a playlist inside a playlist inside...
+    bool m_webIsPage = true;              // the address being asked about is a page (its server said so, or the playlist did)
+    bool m_webInner = false;              // (the next thing played is an entry of the list just found)
+    bool m_ytAsking = false;              // yt-dlp is being asked for its version
+    bool m_webRetried = false, m_webRetryNext = false;   // the addresses stopped working and were asked for again
+    qint64 m_webStartNs = 0;
+    QElapsedTimer m_webResolvedAt;        // since yt-dlp last named this video's addresses
+    QString m_webFallbackNote;            // yt-dlp found nothing and the address is tried as it is: what yt-dlp said
+    QString m_webPending;                 // waits for yt-dlp to be fetched
+    int m_webPendingIndex = -1;
+    QString m_ytVersion, m_ytStatus, m_onlineAsked;
+    QStringList m_webNotesShown;
+    QPointer<QDialog> m_ytDialog;
+    int m_webResolves = 0, m_webReasks = 0, m_webFailures = 0, m_ytFetches = 0, m_ytFetchFailures = 0;
+
     // 2.12: playback without a graphics card (FastPath.cpp)
 public:
     void setVideoPath(int mode);                // 0 automatic, 1 always the fast path, 2 never
@@ -349,7 +396,7 @@ private:
     double m_gifClockSaved = -1.0;
     QTimer m_resumeTimer;
     void jellyfinStopCurrent(bool waitForServer);
-    void openResolved(int index, const QString& uri, qint64 start, const QString& shown, const QString& note);
+    void openResolved(int index, const QString& uri, qint64 start, const QString& shown, const QString& note, const QList<WebStream>& streams = {});
     void playSource(const QString& path, int index);
     void tvPlay(const QString& source, qint64 offsetNs, const QString& title, bool burst);
     void tvSnow();

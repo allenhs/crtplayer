@@ -1,6 +1,6 @@
 # Verification report
 
-This report covers the build delivered alongside it (CRT Player 2.16.0).
+This report covers the build delivered alongside it (CRT Player 2.16.1).
 
 The final X11 and Wayland suites were run against the exact stripped `crtplayer` binary
 that is delivered, and **again against the AppImage with the system's Qt libraries
@@ -289,6 +289,172 @@ was **not measured**, because there is no GPU in this environment.
 - GPU performance;
 - the interlaced style's look at real refresh rates (only its field alternation was
   measured).
+
+## 2.16.1: Windows: the list of looks in full screen, and desk mode over the desktop (from real use)
+
+**The report** (the Windows preview of 2.16.0, on a PC with a graphics card): videos play.
+In the main player, the list that opens from the look selector on the bottom bar did not
+show, yet clicking where its lines should be picked a look. In desk mode the 3D scene was
+"a little slow and laggy", and there was black behind the set where the Windows desktop
+should be. All of it works on Linux.
+
+### The cause
+
+It was **not seen here**: there is no Windows PC with a graphics card to test on. It was
+worked out from the report, from Qt's documentation and source, and from the same reports
+about other programs.
+
+- **Windows' graphics drivers treat a window that draws with OpenGL and whose inside is
+  exactly the screen as a full-screen game,** and stop mixing it with the rest of the
+  desktop. Qt documents the first symptom (*Qt for Windows – Specific Issues: Fullscreen
+  OpenGL Based Windows*): "other top-level windows are not placed on top of the full
+  screen window when they are made visible. For example, menus may not appear correctly",
+  for any window with a `QOpenGLWidget` in it. The player's video is one, when there is a
+  graphics card. The second symptom is the same thing for a see-through window: without
+  the desktop's mixing there is nothing behind it. GLFW's forum has it for NVIDIA and AMD
+  cards: "transparency won't work if the undecorated window is set to the same size and
+  position as the monitor", because of "the driver switching to a fullscreen mode".
+  Desk mode's window was exactly that: borderless, see-through, the size of the screen.
+- **Why clicking still worked:** while one of its lists or menus is open, Qt hands the
+  clicks in any of the program's windows to it. The list was open, and in its place; it
+  was not shown.
+- **The uneven 3D scene** is taken to come from the same full-screen path. That is an
+  assumption: nothing about speed could be measured here (below).
+
+### The fix (Windows only)
+
+- **Full screen with a one-pixel border,** so that the window's inside is not the whole
+  screen: Qt's own remedy. Qt's Windows plugin does it for a window that carries the
+  property `_q_has_border_in_fullscreen` when its native window is made; the player sets
+  it on the main window when the video is drawn by an OpenGL widget, and on desk mode's
+  window (`src/app/WinWindow.*`).
+- **Desk mode's window no longer has the "frameless" flag on Windows.** Found on the
+  Windows test machine with the first attempt: with that flag Qt answers Windows'
+  question about the window's frame with "none at all", and the border, though set, took
+  nothing from the inside (measured: inside 1024×768 on a 1024×768 screen). The window is
+  only ever shown full screen, where it has no frame either way. Without the flag Qt also
+  no longer makes it a "layered" window; Windows mixes it into the desktop by the
+  see-through channel of its picture alone, which is how other OpenGL programs do it.
+- **"Keep on top of other windows"** is set directly on the made window: a change of Qt's
+  window flags sets the window's styles anew as for an ordinary window, border gone.
+- **A second visit to desk mode:** the kept window goes back to an ordinary one before it
+  is placed and shown full screen again. A position given to a window that is already
+  full screen is taken for its inside, which would then be the whole screen after all.
+- `CRTPLAYER_FULLSCREEN_BORDER=0` switches all of this off (as 2.16.0).
+- **On Linux none of this code runs:** every function in `WinWindow.cpp` is empty there,
+  and desk mode's window keeps its flags.
+
+**What it costs on Windows:** a line one pixel wide at the screen's edge in full screen
+(the border, in the colour Windows gives window frames), and a picture area two pixels
+smaller each way: a 1920×1080 video on a 1920×1080 screen is drawn at 1918×1078. The
+driver's full-screen path, with whatever it brought (presenting without the desktop's
+mixing), is no longer taken.
+
+### What was checked, and where
+
+**New: grabs of the screen itself** (`screengrab`, `tests/automation/onscreen.txt`,
+`scripts/check-onscreen.py`), compared with what the player says it is showing. Until now
+the tests looked at the player's own drawing, where a list that Windows does not show
+looks no different. The script opens the look selector's list in a window, in full screen
+and in desk mode, and opens desk mode in front of a plain magenta window covering the
+screen: the set must be on the screen as drawn, everything around it must be magenta, and
+its shadow the expected mix of the two. Desk mode is also grabbed kept on top, and on a
+second visit. Each run is done twice: on the plain window surface (no OpenGL window for
+the video) and on the OpenGL widget a graphics card gets.
+
+**On the Windows test machine** (GitHub's, Windows Server 2025; **no graphics card**:
+Mesa 26.2.4 software OpenGL; Qt 6.11.2; a real desktop, mixed by Windows as on any PC):
+
+| Check | Result |
+|---|---|
+| Full screen, video drawn with OpenGL: the window has the border, its inside is 1022×766 at 1,1 on the 1024×768 screen; Qt counts it as full screen | PASS |
+| Full screen, video not drawn with OpenGL: no border, the whole screen | PASS |
+| Desk mode: border, inside 1022×766; see-through channel asked for and got (8 bits); shaped to the set; not layered. Both surfaces | PASS |
+| The same with "keep on top" (set: yes), with it off again, and on a second visit | PASS |
+| The look list is seen on the screen where the player has it: in a window, full screen, in desk mode; both surfaces | PASS (87% of its place the list's background, 3.9% lettering) |
+| Desk mode in front of the magenta window: the set on the screen as drawn | PASS (100%) |
+| Around the set the magenta window shows | PASS (100.0% of the undrawn part) |
+| The shadow is the mix of its own colour and the magenta | PASS (0 levels off) |
+| The same three kept on top, and on a second visit | PASS |
+| The packaged player's earlier checks (plays, look, subtitle file, desk mode's arcade cabinet, keep awake) | PASS |
+
+**The same run with the fix switched off** (`CRTPLAYER_FULLSCREEN_BORDER=0`, once, for
+comparison): the list was seen and the desktop showed through there too. **The test
+machine does not reproduce the report,** which fits the cause: its software OpenGL has no
+full-screen path. So these checks show that the remedy is in place as Qt describes it,
+and that the changed window still does everything it did. **They do not show that the
+list appears and the black is gone on a graphics card.** That is known only once the
+reporter has tried it.
+
+**On Linux** (the suite added to `scripts/run-verification.sh`, X11; with picom mixing
+the windows): 26 checks, all passed, on both surfaces. A Wayland compositor does not let
+a program grab the screen; there the earlier check through Weston's screenshooter stays.
+
+**Full suites for 2.16.1:**
+
+| Run | Result |
+|---|---|
+| Native X11 | 674 passed, none failed |
+| Native X11, the path a graphics card takes (`CRTPLAYER_VIDEO_SURFACE=gl CRTPLAYER_FAST_PATH=never`) | 674 passed, **1 failed** (below) |
+| Native Wayland | 18 passed, none failed |
+| AppImage, X11, the system's Qt removed | 674 passed, none failed |
+| AppImage, Wayland, the system's Qt removed | 18 passed, none failed |
+| Unit tests | 9 of 9 passed (Linux), 8 of 8 (Windows) |
+| The new suite under the address and undefined-behaviour sanitizers | no findings |
+
+(674 = the 648 checks of 2.16.0 and the 26 new ones. The Windows build's own checks are in
+the table above: 38 on-screen checks and 9 others, none failed.)
+
+### The one failed check: a test's timing, from 2.16 (the player is as it was)
+
+*Jellyfin 10.8 subtitles: subtitle files from the server: at 2.8 s line 0 instead of 1.*
+The picture grabbed right after the first jump in a video just opened had no subtitle
+line. Nothing of 2.16.1 touches subtitles; the check is one of 2.16's.
+
+- **What happened** (repeated with the subtitle trace on: 2 of 22 further runs on that
+  path, 0 of 10 on the other): a Jellyfin video's subtitle lines come from the server as
+  a file of their own, which the player asks for once the video is open. The test jumped
+  a quarter of a second after the video started. When the file arrived just after that
+  jump, the pictures of the jump were already on their way to the screen without the
+  line. It followed a fraction of a second later, after the test's grab (trace of one
+  such run: the jump's picture at 18.26 s, the lines read at 18.27 s and in the overlay
+  at 18.37 s; the grab is 0.3 s after the jump).
+- **In the player** this is the behaviour described under 2.16: a subtitle file that
+  arrives after the picture is used from then on when playing, and a paused picture is
+  fetched again with it. A line can so be missing for a moment after a
+  jump made in the first half second of a Jellyfin video. Not changed in 2.16.1, which is
+  held to the Windows fix.
+- **In the test:** the first jump now waits a second and a half after the video has
+  started, so that the pictures are about the jump and not about the file's arrival.
+  With that, the Jellyfin subtitle test alone: 20 of 20 runs passed on the path that
+  failed, 19 of 19 on the other; the whole Jellyfin suite, once on each: 116 checks
+  passed, none failed.
+- **A twentieth run on the other path failed for a reason of its own making:** another
+  player had been started beside it by mistake, playing the same video from the same test
+  server. Both keep the subtitle file fetched from the server under the same name in the
+  cache folder (since 2.16), and one read it while the other was writing it: no lines.
+  Two players at once on the same Jellyfin video with subtitles can so get in each
+  other's way. Not changed in 2.16.1.
+
+### Known limits and what was not tested
+
+- **Nothing here ran on Windows with a graphics card.** Whether the list shows in full
+  screen, whether the desktop shows around the set, and whether desk mode runs evenly
+  there, is not tested.
+- **How smoothly desk mode runs was not measured anywhere.** The test machines draw with
+  the processor; their speed says nothing about a graphics card's.
+- **If the main player was in a window, not full screen, when the list failed to show,**
+  this fix does not apply to it: the cause above needs a window that covers the screen.
+  On the test machine the list shows in a window as well.
+- **Other menus and dialogs over the full-screen video** (the track menus, the right-click
+  menu, file dialogs) should have been affected in the same way and be cured by the same
+  border; only the look selector's list is tested.
+- **Leaving desk mode on Windows** hides its window before the main window is shown, as
+  on Linux; for that moment another program's window can come to the front (seen in the
+  test, where it got in front of the test's backdrop). Not changed.
+- **Several screens, screens of different scaling, a change of resolution while in full
+  screen:** not tested on Windows.
+
 
 ## 2.16: the right subtitle line after every jump (videos on this computer, subtitle files, Jellyfin)
 

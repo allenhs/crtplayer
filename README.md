@@ -27,6 +27,10 @@ configurable, GPU-rendered CRT presentation that respects every aspect ratio:
   and subtitle delay, subtitle size and colour, night mode, deinterlacing, shuffle and
   repeat, playlist files, carrying on with the next video in a folder, and a sleep
   timer.
+- **Videos from web sites:** paste a link with **Ctrl+V** (or press **Ctrl+L**) and the
+  video plays in the player, with whatever look is on: YouTube and the many other sites
+  [yt-dlp](https://github.com/yt-dlp/yt-dlp) knows. Subtitles, chapters, playlists and
+  "go on where I left off" work as for files. See [Videos from web sites](#videos-from-web-sites).
 - **Made for Bazzite:** game controllers (Xbox, PlayStation, Switch, Steam Deck), media
   keys and KDE's media widget / KDE Connect (MPRIS), and Steam Game Mode, with a room
   backdrop for desk mode.
@@ -112,10 +116,11 @@ configurable, GPU-rendered CRT presentation that respects every aspect ratio:
 8. [Desk mode: a 3D TV on your desktop](#desk-mode-a-3d-tv-on-your-desktop)
 9. [Cable TV](#cable-tv)
 10. [Jellyfin](#jellyfin)
-11. [Where settings are stored](#where-settings-are-stored)
-12. [Troubleshooting](#troubleshooting)
-13. [Code layout](#code-layout)
-14. [Verification](#verification)
+11. [Videos from web sites](#videos-from-web-sites) (YouTube and others, through yt-dlp)
+12. [Where settings are stored](#where-settings-are-stored)
+13. [Troubleshooting](#troubleshooting)
+14. [Code layout](#code-layout)
+15. [Verification](#verification)
 
 The rendering pipeline is explained in [docs/PIPELINE.md](docs/PIPELINE.md).
 The scripted test driver is documented in [docs/AUTOMATION.md](docs/AUTOMATION.md).
@@ -160,6 +165,9 @@ Qt and GStreamer (with all the usual codecs), so there is nothing else to instal
   ```
   crtplayer.exe
   ```
+- **Videos from web sites** work as on Linux. *Get yt-dlp* fetches `yt-dlp.exe` (and
+  `deno.exe`) into `%APPDATA%\CRTPlayer\CRTPlayer\tools`; a `yt-dlp.exe` you put beside
+  `crtplayer.exe`, or one on the `PATH`, is found too.
 - **Not yet:** media keys and Windows' media overlay (the Linux version uses MPRIS). Steam
   Game Mode is Linux-only.
 
@@ -336,12 +344,13 @@ Requirements:
 - a C++17 compiler
 - Qt 6.2+ (Core, Gui, Widgets, OpenGL, OpenGLWidgets)
 - GStreamer 1.18+ development files (core, app, video, audio, pbutils, tag)
+- zlib's development files
 
 **Fedora / Bazzite distrobox**
 
 ```bash
 sudo dnf install cmake gcc-c++ pkgconf-pkg-config qt6-qtbase-devel SDL2-devel \
-                 gstreamer1-devel gstreamer1-plugins-base-devel
+                 gstreamer1-devel gstreamer1-plugins-base-devel zlib-devel
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build -j
 ctest --test-dir build
@@ -373,6 +382,7 @@ player runs, and is optional: without it, controllers are simply off.
 - `libgstreamer-1.0` (Fedora: `gstreamer1`)
 - `libgstapp`, `libgstvideo`, `libgstaudio`, `libgstpbutils`, `libgsttag`
   (Fedora: `gstreamer1-plugins-base`)
+- `zlib` (on every system already)
 - glib2 and the C/C++ runtimes
 
 **GStreamer plugins used at runtime** (not linked; discovered through the registry):
@@ -396,6 +406,11 @@ X11.
 **Built in** (source in `third_party/`, nothing to install): [ufbx](https://github.com/ufbx/ufbx)
 0.23.1 by Samuli Raivio, which reads FBX models for the 90s CG room. MIT licence or
 public domain, as you prefer; its text is in `third_party/ufbx/LICENSE`.
+
+**Optional, at run time only:** [yt-dlp](https://github.com/yt-dlp/yt-dlp), for
+[videos from web sites](#videos-from-web-sites). It is a program of its own, run as one;
+nothing of it is in the source or the downloads. The player can fetch it for you. GStreamer's
+`souphttpsrc` and `queue2` (plugins-good and core) do the reading.
 
 **Optional, at run time only:** NVIDIA's Video Effects SDK 1.3, for
 [NVIDIA AI](#nvidia-ai-upscaling-and-frame-generation-rtx-cards). Nothing of it is needed
@@ -442,6 +457,8 @@ Hover any button to see its shortcut.
 | Page Down / N | Next playlist item |
 | Page Up / P | Previous playlist item |
 | Ctrl+O | Open files |
+| Ctrl+L | Open a link: a page with a video on it, or a video's or stream's address |
+| Ctrl+V | Play the link that is on the clipboard |
 | E | CRT & picture panel |
 | L | Playlist panel |
 | I | Technical info overlay: codec, decoder, PAR/DAR, rotation, sync |
@@ -462,7 +479,7 @@ Hover any button to see its shortcut.
 **Mouse and drag-and-drop:**
 
 - Drop files or folders anywhere on the window. They are added to the playlist and the
-  first one plays.
+  first one plays. A link dragged out of a browser works the same way.
 - Click anywhere on the seek bar to jump there. Drag it to scrub.
 
 **Fullscreen:** the control bar floats over the video. It fades out after about 2
@@ -1819,14 +1836,141 @@ supported.
 
 ---
 
+## Videos from web sites
+
+Copy a video's link in your browser, switch to the player and press **Ctrl+V**. Or press
+**Ctrl+L** and type or paste the address, drag the link from the browser onto the player,
+or start the player with the link (`crtplayer "https://…"`).
+
+The video plays in the player like any other: with the look that is on, in desk mode,
+with the same keys.
+
+- **Which sites:** YouTube, and every other site that
+  [yt-dlp](https://github.com/yt-dlp/yt-dlp) supports (over a thousand: Vimeo, Twitch,
+  Dailymotion, the Internet Archive, many broadcasters' sites …).
+- **Nothing is downloaded to disk.** The video is streamed. Jumping about in it works:
+  the player fetches the part it needs, and keeps what it has read lately in memory, so
+  short jumps back and forth need no new request.
+- **Picture size:** the largest the site offers that your screen can show, up to 4K.
+  *Settings → Playback → Videos from web sites → Picture size* sets a limit (*1080p at
+  most*, *720p at most* …) for a slow connection or a slow computer. Without a graphics
+  card the player asks for 1080p at most and for H.264 where the site has it, which is
+  the cheapest to decode.
+- **Subtitles:** the subtitle files a site offers are in the subtitle menu (right-click
+  → *Subtitles*, or the control bar's subtitle button): those people wrote, in every
+  language, and the automatic captions in the video's own language, marked
+  *(automatic)*. With subtitles on (**V**), the one in the language you last picked
+  loads by itself. Automatic captions arrive word by word with every line repeated;
+  the player shows each line once, whole.
+- **Chapters** from the page work as chapters do (Shift+PgUp / Shift+PgDn, the marks on
+  the seek bar).
+- **Playlists:** a playlist's link puts all its videos into the playlist panel (**L**),
+  by their names; each is looked up when its turn comes. A saved playlist file
+  (`.m3u8`) holds the pages' plain addresses, so other players can read it too.
+- **Where you left off:** a web video goes on where you stopped it, like a file, and is
+  in *Recent* by its name.
+- **Live streams** play; there is nothing to resume in them.
+- A link that is a **video file or stream itself** (`….mp4`, `….m3u8`, or an address
+  whose server says it is video) plays directly, as before, without yt-dlp.
+
+### yt-dlp
+
+Video sites change how they hand out their videos every few weeks. yt-dlp is the free
+program that follows them, kept up to date by its own project. The player does not
+contain it: it **runs the yt-dlp on your computer**, asks it where the video on a page
+is, and plays what it names.
+
+**If you have none:** the first time you open a page, the player says so and offers to
+fetch it. **Get yt-dlp** downloads the official program from its project
+(`github.com/yt-dlp/yt-dlp`, about 40 MB) into the player's own folder
+(`~/.local/share/CRTPlayer/CRTPlayer/tools/`). Nothing else on the computer is changed,
+and the video you asked for then starts by itself. The download is checked against the
+checksum its release publishes; one that does not match is not kept.
+
+**For YouTube, yt-dlp also needs a JavaScript runtime** (since late 2025; without one,
+YouTube offers it few versions of a video, or none). yt-dlp uses
+[Deno](https://deno.com) for that. When the computer has none, the same button fetches
+Deno too (from `github.com/denoland/deno`, a 42 MB download that unpacks to 95 MB,
+checked against its release's checksum, into the same folder). If Node.js, Bun or QuickJS is installed, the player
+points yt-dlp at that instead and fetches nothing.
+
+**Which one is used:** the yt-dlp the player fetched, if there is one; otherwise the
+one on your system (`PATH`, `~/.local/bin`, Homebrew, `/usr/local/bin`). *Settings →
+Playback → Videos from web sites* shows which it is, its version and age, and which
+JavaScript runtime it will be given. The button there says what it would do:
+
+| The button | When | What it does |
+|---|---|---|
+| **Get yt-dlp** | there is none | fetches yt-dlp (and Deno, if there is no JavaScript runtime) |
+| **Update yt-dlp** | the player has its own copy | fetches the newest one |
+| **Get Deno (for YouTube)** | your system has yt-dlp but no JavaScript runtime | fetches only Deno |
+| **Use the newest yt-dlp instead** | your system has yt-dlp | fetches a copy for the player, which it then uses and can keep current |
+
+**When a site stops working**, the first thing to try is that button: an old yt-dlp is
+by far the most common reason. When yt-dlp fails and is more than two months old, the
+error says so.
+
+To install yt-dlp yourself instead (the player finds it):
+
+```
+brew install yt-dlp deno
+```
+
+or, without Homebrew:
+
+```
+mkdir -p ~/.local/bin && curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_linux -o ~/.local/bin/yt-dlp && chmod +x ~/.local/bin/yt-dlp
+```
+
+### How it is played
+
+YouTube, and most large sites, serve everything above 360p as **two separate streams**:
+the picture at one address, the sound at another. GStreamer's player opens one address.
+The player therefore has a source of its own that reads both and hands them on as the
+picture and the sound of one video: they start together and jump together.
+
+- Each stream is read into a buffer in memory (32 MB for the picture, 4 MB for the
+  sound). A jump to a place outside it asks the server for exactly that part of the
+  file, by byte range: three requests for a jump in a 90 MB test file, whether ahead or
+  back.
+- The streams' addresses **stop working after a few hours** (YouTube: about six). If
+  that happens while a video is paused, the player asks yt-dlp for new ones, once, and
+  goes on at the same place. Only the page's address is ever kept (in the playlist, in
+  *Recent*), never the streams' own.
+- What the site wants sent along (who is asking, the page the request comes from,
+  cookies) goes with every request, for the streams and for subtitle files.
+- Sites that send a video as an **HLS or DASH manifest** are played through GStreamer's
+  own support for those; there the picture size is GStreamer's choice.
+- Press **I**: the *Web* line shows the site, the picture size and the codecs.
+
+### Good to know
+
+- Looking a video up takes yt-dlp a few seconds (YouTube: 3 to 10). The picture area
+  says *yt-dlp is finding the video…* meanwhile. Opening something else in that time
+  simply drops the question.
+- **HDR versions are not asked for** (the player shows standard dynamic range), nor
+  codecs your GStreamer cannot decode.
+- Videos that need you to be **signed in** (age-restricted, members-only, private) do
+  not work: the player gives yt-dlp no browser cookies.
+- Cable TV channels cannot be made of web videos.
+- The player asks yt-dlp one question at a time and downloads nothing through it. What
+  you may watch from a site is between you and that site's terms.
+- For tests: `CRTPLAYER_TOOLS_PATH` (folders, separated by `:`) replaces the places
+  yt-dlp and the JavaScript runtimes are looked for; `CRTPLAYER_YTDLP_RELEASE` and
+  `CRTPLAYER_DENO_RELEASE` replace the addresses the button fetches from. To use a yt-dlp
+  somewhere else, set `ytDlpPath` under `[online]` in `CRTPlayer.conf`.
+
+---
+
 ## Where settings are stored
 
 | What | Where |
 |---|---|
 | Window, volume, scaling, crop, current CRT settings, playlist, screenshot options, desk position | `~/.config/CRTPlayer/CRTPlayer.conf` |
-| User presets | `~/.local/share/CRTPlayer/presets/*.json` |
+| User presets | `~/.local/share/CRTPlayer/CRTPlayer/presets/*.json` |
 | Jellyfin sign-in (server, user, access token, device ID; never the password) | `~/.config/CRTPlayer/CRTPlayer/jellyfin.json` (owner-only) |
-| Resume positions (local files) | `~/.local/share/CRTPlayer/resume.json` |
+| Resume positions (local files; web videos by their page's address) | `~/.local/share/CRTPlayer/CRTPlayer/resume.json` |
+| yt-dlp and Deno, when the player fetched them ([Videos from web sites](#videos-from-web-sites)) | `~/.local/share/CRTPlayer/CRTPlayer/tools/` |
 | Recent files | in `CRTPlayer.conf` |
 | TV channels (folders, names, numbers, video lengths; no sign-in details) | `~/.config/CRTPlayer/CRTPlayer/channels.json` |
 | NVIDIA AI: the SDK you installed (not the player's; listed here so that you can find it) | `~/.local/share/crtplayer/VideoFX` |
@@ -1849,6 +1993,38 @@ its lines should be still picked one; desk mode had black around the set, and ra
   Panel, under *Manage 3D settings*, the setting *Vulkan/OpenGL present method* set to
   *Prefer native* is reported to bring back see-through windows in other programs with the
   same symptom (not tried with this player).
+
+**A link does nothing, or "yt-dlp could not find the video"**
+
+- Press **Ctrl+L** and paste the address there: a link is only taken from the clipboard
+  (**Ctrl+V**) when it begins with `http://` or `https://`.
+- **Update yt-dlp first**: *Settings → Playback → Videos from web sites* has the button.
+  Sites change every few weeks and an older yt-dlp stops finding their videos; the
+  line above the button says how old yours is.
+- **YouTube offers only a small picture, or "Requested format is not available":**
+  yt-dlp has no JavaScript runtime. The same settings line says so, and the button
+  fetches Deno.
+- **"Sign in to confirm you're not a bot"**, age-restricted or members-only videos:
+  the site wants a signed-in browser, which the player does not provide.
+- The error dialog's *Show Details* has everything yt-dlp printed. To ask it yourself
+  (the answer is long; its last lines say what is wrong):
+
+  ```
+  yt-dlp --dump-single-json "https://…" | tail -c 400
+  ```
+
+**"The site would not send the video"**
+
+yt-dlp found the video, the player asked for it, and the site's server refused (the
+dialog names the answer, usually *Forbidden*). The player has by then asked yt-dlp for
+fresh addresses once. Update yt-dlp (above); if it is current, try again later: some
+sites refuse for a while after many requests.
+
+**A web video's picture and sound drifted apart, or the sound stopped after a jump**
+
+Please report it, with the page's address and what **I** shows in its *Web*, *Video*
+and *Audio* lines. As a stopgap, a smaller picture size (*Settings → Playback → Videos
+from web sites*) often makes a site send one file with both.
 
 **No subtitles**
 
@@ -2094,6 +2270,14 @@ src/
   app/EnhanceUi.cpp        Enhance: the settings and the sound's delay (part of MainWindow)
   app/FastPath.cpp         playback without a graphics card: which frames the pipeline delivers (as decoded,
                            converted, converted and scaled) and at what size the look is drawn (part of MainWindow)
+  app/Online.cpp           videos from web sites: links, yt-dlp's answers played, its settings (part of MainWindow)
+  online/OnlineVideo.*     asks yt-dlp what a page holds and reads its answer; fetches yt-dlp and Deno (unit-tested)
+  playback/WebSource.*     a GStreamer source of the player's own: the picture and the sound of a web video,
+                           each from its own address, each through a buffer that can be read at any place
+  playback/ShrinkFilter.*  without a graphics card: 10- and 12-bit pictures to 8 bits, and smaller by a whole
+                           factor, in one pass (ShrinkKernel.h, unit-tested)
+  playback/FrameGovernor.* when the computer cannot decode every picture in time: leaves out, before decoding,
+                           pictures no other picture is built from (unit-tested)
   app/Automation.*         scripted driver used for verification
   app/DeskWindow.*         desk mode: transparent screen-sized window, input mask, control strip
   app/WinWindow.*          Windows: full-screen windows drawn with OpenGL stay part of the desktop (a pixel of border)
@@ -2123,11 +2307,14 @@ tools/nvfx/                crtplayer-nvfx, the helper that runs NVIDIA's Video S
                            NvShm.h), main (--probe, --where)
 tests/                     unit tests + automation scripts
 tests/nvfx_mock/           a stand-in for NVIDIA's SDK (plain arithmetic), for checks without an NVIDIA card
+tests/web_mock.py          a small video site, and tests/fake_ytdlp.py, a stand-in for yt-dlp that answers as the
+                           real one does for YouTube (video sites cannot be reached from where the tests run)
 third_party/ufbx/          the FBX reader (ufbx, unmodified; MIT or public domain)
 third_party/nvidia-vfx/    the NVIDIA Video Effects SDK's three API headers (NVIDIA, MIT)
 scripts/                   build-bazzite.sh, install-local.sh, make-test-media.sh, run-verification.sh,
                            check-effects.py, check-desk.py (measure the captures),
                            run-jellyfin-tests.sh + check-jellyfin.py (with tests/jellyfin_mock.py),
+                           check-online.py (videos from web sites),
                            build-appimage.sh
 ```
 
