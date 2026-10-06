@@ -53,6 +53,14 @@ wait 1000
 report desk-ontop-off
 desk off
 wait 1000
+# Desk mode a second time (its window is kept between visits).
+desk on
+wait 4000
+report desk-again
+deskgrab @O@/@N@-again-scene.png
+screengrab @O@/@N@-again-screen.png
+desk off
+wait 1000
 backdrop off
 report end
 quit

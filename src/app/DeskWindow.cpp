@@ -46,6 +46,10 @@ DeskWindow::DeskWindow(Player* player, VideoWidget* flat, QWidget* parent)
 void DeskWindow::openOn(QScreen* screen)
 {
     if (!screen) screen = QGuiApplication::primaryScreen();
+    // (Windows, with its pixel of border: a geometry given to a window that is already full screen
+    // is taken for its inside, which would then be the whole screen after all. So a window opened
+    // before goes back to an ordinary one first, while it is still hidden.)
+    if (WinWindow::borderInFullScreen() && isFullScreen() && !isVisible()) setWindowState(windowState() & ~Qt::WindowFullScreen);
     setScreen(screen);
     setGeometry(screen->geometry());
     // Fullscreen from the start: the fly-in then only moves the camera inside this

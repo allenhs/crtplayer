@@ -2,7 +2,8 @@
 # Runs the packaged Windows folder on its own (a stripped PATH: none of MSYS2's libraries
 # or plugins can help), with Mesa's software OpenGL beside it because the build machine has
 # no graphics card. Plays a generated video, applies a look, loads a subtitle file, and opens
-# desk mode on the arcade cabinet; then checks the results.
+# desk mode on the arcade cabinet; then checks the results. Then grabs the screen itself to see
+# what Windows really shows (tests/automation/onscreen.txt, scripts/check-onscreen.py).
 #   smoke-test.sh PACKAGED_DIR WORK_DIR
 set -uo pipefail
 PKG=$(cd "$1" && pwd); WORK=$2

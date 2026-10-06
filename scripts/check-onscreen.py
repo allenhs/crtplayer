@@ -101,7 +101,8 @@ def windows_checks(run, rep):
     else:
         check(f'{run}: Windows: the full-screen player (not drawn with OpenGL) covers the whole screen',
               not nw.get('border') and nw.get('insideIsWholeScreen'), f"border {nw.get('border')}, inside {nw.get('insideRect')}")
-    for label, what in (('desk', 'desk mode'), ('desk-ontop', 'desk mode kept on top'), ('desk-ontop-off', 'desk mode, no longer on top')):
+    for label, what in (('desk', 'desk mode'), ('desk-ontop', 'desk mode kept on top'), ('desk-ontop-off', 'desk mode, no longer on top'),
+                        ('desk-again', 'desk mode, second visit')):
         d = rep.get(label, {}).get('deskNativeWindow') or {}
         check(f'{run}: Windows: {what}: the see-through window stays in the desktop\'s composition',
               d.get('border') and not d.get('insideIsWholeScreen') and d.get('openGl') and d.get('alphaAsked', 0) >= 8 and d.get('visible'),
@@ -125,6 +126,7 @@ for run in names:
     list_on_screen(run, rep, 'desk-list', 'desk-screen', 'desk-list', 'desk mode')
     desk_on_screen(run, rep, 'desk', 'desk-scene', 'desk-screen', 'desk mode')
     desk_on_screen(run, rep, 'desk-ontop', 'ontop-scene', 'ontop-screen', 'desk mode kept on top')
+    desk_on_screen(run, rep, 'desk-again', 'again-scene', 'again-screen', 'desk mode, second visit')
     windows_checks(run, rep)
 
 print(f"\n{fails} on-screen check(s) failed" if fails else "\nAll on-screen checks passed")

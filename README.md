@@ -145,6 +145,21 @@ Qt and GStreamer (with all the usual codecs), so there is nothing else to instal
   running on Windows' basic display driver (no graphics driver installed) gets a message
   saying so instead of a picture: install the driver from the card's maker.
 - **No sound device** (no speakers, audio service stopped): the video still plays, silently.
+- **Full screen and desk mode stop one pixel short of the screen's edge** (2.16.1). Windows'
+  graphics drivers treat a window that draws with OpenGL and exactly covers the screen as a
+  full-screen game, and stop mixing it with the rest of the desktop. Lists and menus opened over
+  the video were then there (you could click their lines) but not seen, and desk mode showed
+  black around the set instead of the desktop, and ran unevenly. The one-pixel edge is Qt's
+  own remedy: with it the window stays an ordinary one. To switch it off, should it ever be in
+  the way, start the player from a Command Prompt opened in its folder:
+
+  ```
+  set CRTPLAYER_FULLSCREEN_BORDER=0
+  ```
+
+  ```
+  crtplayer.exe
+  ```
 - **Not yet:** media keys and Windows' media overlay (the Linux version uses MPRIS). Steam
   Game Mode is Linux-only.
 
@@ -152,6 +167,9 @@ Qt and GStreamer (with all the usual codecs), so there is nothing else to instal
 (`.github/workflows/windows.yml`). The packaged folder is then run on its own, with
 software OpenGL because those machines have no graphics card (and no sound device): it
 plays a video, applies a look, draws a subtitle and opens desk mode (`packaging/windows/`).
+It also grabs the screen itself, to see what Windows really shows: the look selector's list
+over the video, in a window and in full screen, and desk mode in front of a plain coloured
+window, which has to show around the set and through its shadow.
 
 ## Run on Bazzite
 
@@ -1819,6 +1837,18 @@ Settings are saved whenever the player exits: window close, Ctrl+Q, or logout.
 ---
 
 ## Troubleshooting
+
+**Windows: in full screen, the list of looks (or a menu) did not appear, though clicking where
+its lines should be still picked one; desk mode had black around the set, and ran unevenly**
+(before 2.16.1)
+
+- Fixed in 2.16.1, as far as that can be said without the graphics card it happened with:
+  see *Full screen and desk mode stop one pixel short of the screen's edge* under
+  [Windows 10 and 11](#windows-10-and-11-preview).
+- Should desk mode still show black around the set on an NVIDIA card: in the NVIDIA Control
+  Panel, under *Manage 3D settings*, the setting *Vulkan/OpenGL present method* set to
+  *Prefer native* is reported to bring back see-through windows in other programs with the
+  same symptom (not tried with this player).
 
 **No subtitles**
 

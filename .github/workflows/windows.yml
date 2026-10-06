@@ -63,8 +63,6 @@ jobs:
           echo "::notice title=Download::$(ls -la CRT_Player-*.zip | awk '{printf "%s %.0f MB", $NF, $5/1048576}'), crtplayer.exe $(du -h "zipdir/CRT Player/crtplayer.exe" | cut -f1)"
 
       - name: Smoke test (the packaged player on its own)
-        env:
-          ONSCREEN_OLD_WAY: "1"
         run: |
           set +e -o pipefail   # finish reporting even when the test fails
           bash packaging/windows/smoke-test.sh "dist/CRT Player" smoke 2>&1 | tee smoke.log
