@@ -7,6 +7,7 @@
 #include <QSize>
 #include <QString>
 #include <QStringList>
+#include <QElapsedTimer>
 #include <QTimer>
 #include <QVector>
 #include <atomic>
@@ -77,6 +78,8 @@ public:
     void setChapters(const QVector<ChapterInfo>& chapters);
     // The last error came from the element that reads the video (the network), not from decoding it.
     bool lastErrorFromSource() const { return m_sourceError; }
+    // A web video, playing, and the network sends nothing: the picture and the clock wait (2.17).
+    bool waitingForData() const { return m_waiting; }
     // Extra request headers for http(s) sources (e.g. Jellyfin's Authorization), applied to
     // the next open(). Headers keep credentials out of URLs, logs and window titles.
     void setHttpHeaders(const QList<QPair<QByteArray, QByteArray>>& headers);
@@ -211,6 +214,7 @@ signals:
     void endOfStream();
     void seekFinished();
     void errorOccurred(const QString& title, const QString& details);
+    void waitingForDataChanged(bool waiting);
     void warningOccurred(const QString& message);
 
 private:
@@ -274,6 +278,16 @@ private:
     // 2.16: text subtitles come from lines the player keeps itself; drawn by an overlay in the video sink.
     SubtitleFeed m_feed;
     FrameGovernor m_governor;              // leaves pictures out before decoding when the computer cannot keep up
+    void watchNetwork();
+    void setWaiting(bool waiting);
+    GstElement* m_webSource = nullptr;     // the source of the web video that is open (WebSource.h)
+    bool m_waiting = false;                // playing, and nothing comes from the network: paused until it does
+    bool m_heldByWait = false;             // the pipeline is paused for that (and until it plays again): not "paused" for the viewer
+    int m_waits = 0;
+    QTimer m_netWatch;
+    QElapsedTimer m_wall;
+    std::atomic<qint64> m_lastSampleMs{0};
+    bool m_twoStreams = false;             // a web video whose picture and sound are two streams, each with its own demuxer
     QString m_webUri;                      // the "crtweb://N" address registered last (WebSource.h)
     bool m_sourceError = false;
     bool m_governorOn = true;

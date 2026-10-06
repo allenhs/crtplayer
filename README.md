@@ -1930,9 +1930,19 @@ The player therefore has a source of its own that reads both and hands them on a
 picture and the sound of one video: they start together and jump together.
 
 - Each stream is read into a buffer in memory (32 MB for the picture, 4 MB for the
-  sound). A jump to a place outside it asks the server for exactly that part of the
-  file, by byte range: three requests for a jump in a 90 MB test file, whether ahead or
-  back.
+  sound): up to 24 MB ahead of the place being played, the rest behind it. A jump to a
+  place outside it asks the server for exactly that part of the file, by byte range:
+  three requests for a jump in a 90 MB test file, whether ahead or back. Playing on
+  needs no further requests.
+- **When the network is slow or away**, the video waits (*Waiting for the network…*)
+  and goes on with the picture it stopped at once about three seconds are at hand
+  again. Nothing is skipped. (Without this, the clock would run on without a picture
+  and the video would go on wherever the clock had got to: in a test with the network
+  away for six seconds, 7.5 seconds of the video were never shown.)
+- Every jump is an exact one in a two-stream video, also while you drag the seek bar. A
+  quick jump "to the nearest keyframe" would take the picture and the sound each to a
+  keyframe of its own (measured: 1.4 seconds apart). Shift+← / Shift+→ move five seconds
+  there.
 - The streams' addresses **stop working after a few hours** (YouTube: about six). If
   that happens while a video is paused, the player asks yt-dlp for new ones, once, and
   goes on at the same place. Only the page's address is ever kept (in the playlist, in

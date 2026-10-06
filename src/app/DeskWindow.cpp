@@ -5,6 +5,7 @@
 
 #include <QApplication>
 #include <QCloseEvent>
+#include <QCursor>
 #include <QEvent>
 #include <QGuiApplication>
 #include <QResizeEvent>
@@ -32,12 +33,13 @@ DeskWindow::DeskWindow(Player* player, VideoWidget* flat, QWidget* parent)
     m_hide.setInterval(2500);
     connect(&m_hide, &QTimer::timeout, this, &DeskWindow::autoHide);
     connect(m_view, &DeskView::silhouetteChanged, this, [this] { placeBar(); updateMask(); });
-    connect(m_view, &DeskView::mouseActivity, this, &DeskWindow::activity);
+    connect(m_view, &DeskView::mouseActivity, this, [this] { ++m_wokenByView; activity(); });
     connect(m_view, &DeskView::phaseChanged, this, [this](DeskView::Phase p) {
         m_bar->setFullscreenIcon(p == DeskView::Phase::Full || p == DeskView::Phase::FlyingIn);
         if (p == DeskView::Phase::Full) m_view->setCursor(Qt::BlankCursor);
         placeBar();
         updateMask();
+        ++m_wokenByPhase;
         activity();
     });
     WinWindow::keepComposed(this);   // (Windows: see there)
@@ -77,6 +79,19 @@ void DeskWindow::closeEvent(QCloseEvent* e)
 }
 
 bool DeskWindow::controlsVisible() const { return m_bar->isVisible(); }
+
+// For the checks: what has kept the strip of controls up.
+QJsonObject DeskWindow::controlsReport() const
+{
+    const QPoint cursor = QCursor::pos();
+    QWidget* popup = QApplication::activePopupWidget();
+    return QJsonObject{{"visible", m_bar->isVisible()}, {"wokenByView", m_wokenByView}, {"wokenByBar", m_wokenByBar}, {"wokenByPhase", m_wokenByPhase},
+                       {"keptByUse", m_keptByUse}, {"barUnderMouse", m_bar->underMouse()}, {"barInUse", m_bar->isInteracting()},
+                       {"popup", popup ? QString::fromLatin1(popup->metaObject()->className()) + QLatin1Char(' ') + popup->objectName() : QString()},
+                       {"cursor", QStringLiteral("%1,%2").arg(cursor.x()).arg(cursor.y())},
+                       {"bar", QStringLiteral("%1,%2 %3x%4").arg(m_bar->mapToGlobal(QPoint(0, 0)).x()).arg(m_bar->mapToGlobal(QPoint(0, 0)).y()).arg(m_bar->width()).arg(m_bar->height())},
+                       {"hideInMs", m_hide.isActive() ? m_hide.remainingTime() : -1}};
+}
 
 void DeskWindow::resizeEvent(QResizeEvent* e)
 {
@@ -136,7 +151,7 @@ void DeskWindow::activity()
 void DeskWindow::autoHide()
 {
     const bool interacting = m_bar->isInteracting() || QApplication::activePopupWidget();
-    if (interacting) { m_hide.start(); return; }
+    if (interacting) { ++m_keptByUse; m_hide.start(); return; }
     m_bar->hide();
     if (m_view->phase() == DeskView::Phase::Full) m_view->setCursor(Qt::BlankCursor);
     updateMask();
@@ -144,6 +159,6 @@ void DeskWindow::autoHide()
 
 bool DeskWindow::eventFilter(QObject* o, QEvent* e)
 {
-    if (o == m_bar && (e->type() == QEvent::Enter || e->type() == QEvent::MouseMove)) activity();
+    if (o == m_bar && (e->type() == QEvent::Enter || e->type() == QEvent::MouseMove)) { ++m_wokenByBar; activity(); }
     return QWidget::eventFilter(o, e);
 }

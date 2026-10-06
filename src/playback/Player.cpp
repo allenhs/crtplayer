@@ -126,6 +126,10 @@ Player::Player(QObject* parent) : QObject(parent)
         }
     });
     m_endWatch.start();
+    m_wall.start();
+    m_netWatch.setInterval(250);
+    connect(&m_netWatch, &QTimer::timeout, this, [this] { watchNetwork(); });
+    m_netWatch.start();
     m_seekWatchdog.setSingleShot(true);
     m_seekWatchdog.setInterval(1500);
     connect(&m_seekWatchdog, &QTimer::timeout, this, [this] {
@@ -352,6 +356,16 @@ QJsonObject Player::webReport() const
 {
     QJsonObject o = crt_web_is(m_uri) ? crt_web_report(m_uri) : QJsonObject{{"streams", 0}};
     o["sourceError"] = m_sourceError;
+    o["waiting"] = m_waiting;
+    o["waits"] = m_waits;
+    if (m_webSource) {
+        const QList<WebLevel> levels = crt_web_levels(m_webSource);
+        if (!levels.isEmpty()) {
+            o["aheadBytes"] = double(levels.first().ahead);
+            o["receivedBytes"] = double(levels.first().received);
+            o["ended"] = levels.first().ended;
+        }
+    }
     return o;
 }
 
@@ -609,7 +623,8 @@ bool Player::openInternal(const QString& uri, bool autoplay, qint64 startNs, boo
     // playbin hands a jump to its picture's sink only (with one demuxer, that moves everything: the
     // sound's stream would stay where it was, and fall silent until the clock caught up with it;
     // measured). Its sink is told to hand events to every sink, as any other pipeline does.
-    if (crt_web_is(uri) && crt_web_report(uri).value("streams").toInt() > 1) {
+    m_twoStreams = crt_web_is(uri) && crt_web_report(uri).value("streams").toInt() > 1;
+    if (m_twoStreams) {
         if (GstElement* sink = gst_bin_get_by_name(GST_BIN(m_pipe), "playsink")) {
             if (g_object_class_find_property(G_OBJECT_GET_CLASS(sink), "send-event-mode")) g_object_set(sink, "send-event-mode", 0, nullptr);
             gst_object_unref(sink);
@@ -646,7 +661,10 @@ void Player::teardown()
         m_shrink = nullptr;
         m_tape = nullptr;   // it belonged to the pipeline
     }
+    if (m_waiting) setWaiting(false);
+    m_heldByWait = false;
     QMutexLocker lock(&m_mutex);
+    if (m_webSource) { gst_object_unref(m_webSource); m_webSource = nullptr; }
     if (m_videoDec) { gst_object_unref(m_videoDec); m_videoDec = nullptr; }
     for (GstElement* e : m_textOverlays) gst_object_unref(e);
     m_textOverlays.clear();
@@ -687,6 +705,50 @@ void Player::setState(State s)
     emit stateChanged(s);
 }
 
+// A web video's reader has run dry (the network is slow, or away): without this the clock ran on while
+// the picture stood, and when the network came back the video went on at the clock's place, with
+// everything in between never shown (measured: a 6 s gap skipped 7.5 s of video). Now the video waits:
+// paused, without being "paused" for the viewer, until there is enough at hand again.
+void Player::watchNetwork()
+{
+    if (!m_pipe || !m_loaded || !m_webSource) { if (m_waiting) setWaiting(false); return; }
+    const QList<WebLevel> levels = crt_web_levels(m_webSource);
+    if (levels.isEmpty()) return;
+    const WebLevel& v = levels.first();   // the picture's stream (or the only one)
+    if (!m_waiting) {
+        // Dry: the server has sent nothing for half a second, though the file has not ended, and less than two
+        // seconds of the video are at hand. (What is at hand then is part of the picture being waited for.)
+        const quint64 little = v.kbps > 0 ? std::max<quint64>(256 * 1024, quint64(v.kbps) * 250) : 512 * 1024;
+        const bool dry = !v.ended && v.quietMs > 500 && v.ahead < std::min<quint64>(v.room / 2, little);
+        const bool still = m_wall.elapsed() - m_lastSampleMs.load() > 700;   // and no new picture has come out either
+        if (dry && still && m_state == State::Playing && m_targetPlaying && !m_seekInFlight && !m_videoDone && !m_endReported) {
+            m_waiting = true;
+            m_heldByWait = true;
+            ++m_waits;
+            gst_element_set_state(m_pipe, GST_STATE_PAUSED);
+            emit waitingForDataChanged(true);
+        }
+        return;
+    }
+    // On again with about three seconds of the video at hand (or all there is).
+    const quint64 want = v.kbps > 0 ? std::clamp<quint64>(quint64(v.kbps) * 125 * 3, 128 * 1024, 2 * 1024 * 1024) : 768 * 1024;
+    if (v.ended || v.ahead >= want) {
+        setWaiting(false);
+        // The clock ran on for a moment after the last picture (until the wait began): back to that picture, so
+        // that nothing of the video is left out. (The sound of that moment is heard twice.)
+        const qint64 last = lastFrameStreamTime(), pos = position();
+        if (!m_seekInFlight && last >= 0 && pos - last > 200000000LL && pos - last < 5000000000LL) doSeek(last, SeekMode::Accurate);
+        if (m_targetPlaying && m_pipe) gst_element_set_state(m_pipe, GST_STATE_PLAYING);
+    }
+}
+
+void Player::setWaiting(bool waiting)
+{
+    if (m_waiting == waiting) return;
+    m_waiting = waiting;
+    emit waitingForDataChanged(waiting);
+}
+
 void Player::play()
 {
     if (!m_pipe) return;
@@ -703,6 +765,7 @@ void Player::pause()
     if (!m_pipe) return;
     m_targetPlaying = false;
     m_governor.setPlaying(false);   // (a paused picture is always the exact one)
+    if (m_heldByWait) { m_heldByWait = false; setWaiting(false); setState(State::Paused); }   // (it was waiting for the network: now it is simply paused)
     gst_element_set_state(m_pipe, GST_STATE_PAUSED);
 }
 
@@ -741,6 +804,10 @@ void Player::seek(qint64 posNs, SeekMode mode)
 void Player::doSeek(qint64 posNs, SeekMode mode)
 {
     int flags = GST_SEEK_FLAG_FLUSH;
+    // Two demuxers (a web video's picture and sound as two streams): a jump "to the nearest keyframe" would
+    // take each to a keyframe of its own, the picture's seconds apart, the sound's everywhere, and leave
+    // the two that far out of step (measured: 1.4 s). Every jump is an exact one there.
+    if (m_twoStreams) mode = SeekMode::Accurate;
     if (mode == SeekMode::Accurate) flags |= GST_SEEK_FLAG_ACCURATE;
     else flags |= GST_SEEK_FLAG_KEY_UNIT | GST_SEEK_FLAG_SNAP_NEAREST;
     m_seekTarget = posNs;
@@ -764,6 +831,7 @@ void Player::doSeek(qint64 posNs, SeekMode mode)
 void Player::seekKeyframe(bool forward)
 {
     if (!m_pipe) return;
+    if (m_twoStreams) { seek(position() + (forward ? 5000000000LL : -5000000000LL), SeekMode::Accurate); return; }   // (see doSeek)
     const qint64 pos = position();
     // Just past the current frame, snapping to the keyframe after it (or before it).
     const qint64 target = forward ? pos + 40000000 : std::max<qint64>(0, pos - 1000000);
@@ -1527,6 +1595,7 @@ bool Player::frameLateness(GstSample* s, qint64* out) const
 
 void Player::storeSample(GstSample* s)
 {
+    m_lastSampleMs = m_wall.elapsed();
     GstBuffer* b = gst_sample_get_buffer(s);
     const GstSegment* seg = gst_sample_get_segment(s);
     GstCaps* caps = gst_sample_get_caps(s);
@@ -1636,6 +1705,11 @@ void Player::setHttpHeaders(const QList<QPair<QByteArray, QByteArray>>& headers)
 void Player::onSourceSetup(GstElement*, GstElement* source, gpointer self)
 {
     auto* p = static_cast<Player*>(self);
+    if (crt_web_is_source(source)) {   // (its streams' levels are watched: watchNetwork)
+        QMutexLocker lock(&p->m_mutex);
+        if (p->m_webSource) gst_object_unref(p->m_webSource);
+        p->m_webSource = GST_ELEMENT(gst_object_ref(source));
+    }
     GObjectClass* klass = G_OBJECT_GET_CLASS(source);
     if (g_object_class_find_property(klass, "user-agent"))
         g_object_set(source, "user-agent", "CRT-Player", nullptr);
@@ -1787,8 +1861,9 @@ void Player::handleMessage(GstMessage* m, quint64 generation)
         GstState oldS, newS, pending;
         gst_message_parse_state_changed(m, &oldS, &newS, &pending);
         if (m_state == State::Error) break;   // (what a pipeline that failed still had to say about its states)
-        if (newS == GST_STATE_PLAYING) { setState(State::Playing); switchPendingAudio(); }
-        else if (newS == GST_STATE_PAUSED && m_loaded) setState(State::Paused);
+        if (newS == GST_STATE_PLAYING) { m_heldByWait = false; setState(State::Playing); switchPendingAudio(); }
+        // (waiting for the network is not "paused" for the viewer, nor is the moment it takes to play on)
+        else if (newS == GST_STATE_PAUSED && m_loaded && !m_heldByWait) setState(State::Paused);
         break;
     }
     case GST_MESSAGE_STEP_DONE:

@@ -10,6 +10,7 @@ It is asked the way the player asks the real one (--dump-single-json ... -- URL)
   .../yt/watch?v=muxed | hls | big                            one file with both; an HLS stream; the large file + AAC
   .../yt/watch?v=expireN | expireNxM | dead                   as "big", its addresses working for N seconds (those of the first
                                                               M answers; later ones for an hour), or never
+  .../yt/watch?v=outageN                                      as "big", over a slow line, and the network is away for a while
   .../yt/watch?v=gone | nojs | slow | headers | live          an error; the "no JavaScript runtime" warning; three seconds
                                                               to answer; headers and cookies to send along; a live stream
   .../yt/s/ID                                                 a short address of .../yt/watch?v=ID
@@ -87,6 +88,13 @@ elif vid.startswith('expire') or vid == 'dead':
     until = 1.0 if vid == 'dead' else time.time() + (float(life or 5) if asked <= int(times or 1) else 3600)
     info['requested_formats'] = [BIG(), AAC()]
     for f in info['requested_formats']: f['url'] += '?expire=%.3f' % until
+    info['subtitles'] = {}; info['automatic_captions'] = {}; info['chapters'] = []
+elif vid.startswith('outage'):
+    # The picture's stream comes over a line a little faster than the video, and the network is away for six
+    # seconds, eight seconds in. (The number after "outage" only makes the address a new one.)
+    info['requested_formats'] = [BIG(), AAC()]
+    info['requested_formats'][0]['url'] += '?kbps=7000&outage=8,6&n=' + vid[len('outage'):]
+    info['requested_formats'][0]['tbr'] = 6000
     info['subtitles'] = {}; info['automatic_captions'] = {}; info['chapters'] = []
 elif vid == 'muxed':
     info.update(url=media + 'muxed.mp4', protocol='http', ext='mp4', vcodec='avc1.64001e', acodec='mp4a.40.2', width=640, height=360, fps=25,

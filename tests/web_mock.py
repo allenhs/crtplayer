@@ -5,6 +5,10 @@
 
   /media/<file>                the clips of scripts/make-test-media.sh (DIR/web), with byte ranges.
                                "?expire=<unix time>": 403 once that time has passed (addresses that stop working)
+                               "?kbps=N": sent no faster than that; "?stall=BYTE,SECONDS": the connection hangs
+                               for that long, once, when it reaches that byte of the file (a network hiccup);
+                               "?outage=AFTER,SECONDS": nothing of this file is sent for that long, beginning
+                               AFTER seconds after it was first asked for (the network is away)
   /watch/muxed | dash | hls    pages with a video on them, for the real yt-dlp (its generic extractor):
                                an HTML5 video, a DASH manifest naming two files, an HLS stream
   /watch/none                  a page without a video
@@ -63,6 +67,9 @@ for asset, inner in (('deno-x86_64-unknown-linux-gnu.zip', 'deno'), ('deno-aarch
     RELEASE['bad/' + asset] = z
     RELEASE['bad/' + asset + '.sha256sum'] = ('%s  %s\n' % (hashlib.sha256(b'no').hexdigest(), asset)).encode()
 
+STALLED = set()
+FIRST = {}
+
 class H(http.server.BaseHTTPRequestHandler):
     protocol_version = 'HTTP/1.1'
     def log_message(self, *a): pass
@@ -76,8 +83,14 @@ class H(http.server.BaseHTTPRequestHandler):
         self.note(status)
         self.send_response(status); self.send_header('Content-Type', ctype); self.send_header('Content-Length', str(len(body))); self.end_headers()
         if self.command != 'HEAD': self.wfile.write(body)
-    def file(self, path, ctype=None):
+    def file(self, path, ctype=None, kbps=0, stall=None, outage=None):
         if not os.path.isfile(path): return self.plain(404)
+        first = FIRST.setdefault(self.path, time.time())   # (by the whole address: each test's own)
+        def wait_out():   # the network is away from `outage[0]` seconds after the file was first asked for, for outage[1] seconds
+            if outage:
+                left = first + outage[0] + outage[1] - time.time()
+                if 0 < left <= outage[1]: time.sleep(left)
+        wait_out()
         size = os.path.getsize(path); start, end, status = 0, size - 1, 200
         m = re.match(r'bytes=(\d*)-(\d*)', self.headers.get('Range') or '')
         if m:
@@ -94,11 +107,15 @@ class H(http.server.BaseHTTPRequestHandler):
         if self.command == 'HEAD': return
         try:
             with open(path, 'rb') as f:
-                f.seek(start); left = end - start + 1
+                f.seek(start); left = end - start + 1; sent = 0; began = time.time()
                 while left > 0:
-                    b = f.read(min(65536, left))
+                    b = f.read(min(16384 if kbps or stall or outage else 65536, left))
                     if not b: break
-                    self.wfile.write(b); left -= len(b)
+                    wait_out()
+                    self.wfile.write(b); left -= len(b); sent += len(b)
+                    if kbps: time.sleep(max(0.0, sent * 8 / (kbps * 1000.0) - (time.time() - began)))   # no faster than that
+                    if stall and start <= stall[0] < start + sent and path not in STALLED:                # the connection hangs once, there
+                        STALLED.add(path); self.wfile.flush(); time.sleep(stall[1])
         except (BrokenPipeError, ConnectionResetError): pass
     def do_HEAD(self): self.do_GET()
     def do_GET(self):
@@ -107,7 +124,9 @@ class H(http.server.BaseHTTPRequestHandler):
             if 'expire' in q and time.time() > float(q['expire'][0]): return self.plain(403, b'this address has expired')
             rel = os.path.normpath(p[len('/media/'):])
             if rel.startswith('..'): return self.plain(404)
-            return self.file(os.path.join(WEB, rel))
+            stall = [float(x) for x in q['stall'][0].split(',')] if 'stall' in q else None
+            outage = [float(x) for x in q['outage'][0].split(',')] if 'outage' in q else None
+            return self.file(os.path.join(WEB, rel), kbps=float(q.get('kbps', ['0'])[0]), stall=stall, outage=outage)
         if p.startswith('/watch/') and p[7:] in PAGES:
             name = p[7:]
             return self.plain(200, ('<!doctype html><html><head><title>Mock video: %s</title></head><body>%s</body></html>' % (name, PAGES[name])).encode(),

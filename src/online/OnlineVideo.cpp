@@ -237,6 +237,8 @@ QStringList OnlineResolver::arguments(const QString& url, const OnlineOptions& o
                        + QStringLiteral("/bv+ba/b");
     QStringList a = {QStringLiteral("--dump-single-json"), QStringLiteral("--flat-playlist"), QStringLiteral("--no-playlist"),
                      QStringLiteral("--no-progress"), QStringLiteral("--socket-timeout"), QStringLiteral("15"),
+                     // (what it says is read as UTF-8; on Windows it would otherwise write in the system's code page)
+                     QStringLiteral("--encoding"), QStringLiteral("utf-8"),
                      QStringLiteral("-f"), pick};
     // The largest picture within the limit; among those of one size, the codec this computer handles best
     // (given as the best codec to consider: yt-dlp ranks anything "better" than it last).
@@ -329,6 +331,7 @@ OnlineResult OnlineResolver::parse(const QByteArray& json, const QByteArray& err
             s.url = f.value(QStringLiteral("url")).toString();
             s.headers = headersOf(f);
             s.audioOnly = f.value(QStringLiteral("vcodec")).toString() == QLatin1String("none");
+            s.kbps = qRound(f.value(QStringLiteral("tbr")).toDouble());
             if (!s.url.isEmpty()) v.streams.append(s);
         }
     } else {

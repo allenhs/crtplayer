@@ -328,6 +328,88 @@ waitshown 101 12000
 wait 1500
 screenshot original @O@/@N@/n_38_101.png
 report s:hls:tone
+# -- a quick jump (as while dragging the seek bar: "to the nearest keyframe") on two streams of different kinds:
+# each would go to a keyframe of its own, so there every jump is an exact one
+openlink @W@/yt/watch?v=mixed-b
+waitstate playing 30000
+seek 26.4 fast
+wait 600
+wait 250
+report q:mixed-b:00
+wait 250
+report q:mixed-b:01
+wait 250
+report q:mixed-b:02
+wait 250
+report q:mixed-b:03
+wait 250
+report q:mixed-b:04
+wait 250
+report q:mixed-b:05
+wait 250
+report q:mixed-b:06
+wait 250
+report q:mixed-b:07
+wait 250
+report q:mixed-b:08
+wait 250
+report q:mixed-b:09
+wait 250
+report q:mixed-b:10
+wait 250
+report q:mixed-b:11
+wait 250
+report q:mixed-b:12
+wait 250
+report q:mixed-b:13
+wait 250
+report q:mixed-b:14
+wait 250
+report q:mixed-b:15
+wait 250
+report q:mixed-b:16
+wait 250
+report q:mixed-b:17
+openlink @W@/yt/watch?v=pair-vp9
+waitstate playing 30000
+seek 26.4 fast
+wait 600
+wait 250
+report q:pair-vp9:00
+wait 250
+report q:pair-vp9:01
+wait 250
+report q:pair-vp9:02
+wait 250
+report q:pair-vp9:03
+wait 250
+report q:pair-vp9:04
+wait 250
+report q:pair-vp9:05
+wait 250
+report q:pair-vp9:06
+wait 250
+report q:pair-vp9:07
+wait 250
+report q:pair-vp9:08
+wait 250
+report q:pair-vp9:09
+wait 250
+report q:pair-vp9:10
+wait 250
+report q:pair-vp9:11
+wait 250
+report q:pair-vp9:12
+wait 250
+report q:pair-vp9:13
+wait 250
+report q:pair-vp9:14
+wait 250
+report q:pair-vp9:15
+wait 250
+report q:pair-vp9:16
+wait 250
+report q:pair-vp9:17
 # -- a file larger than the player keeps in memory (90 MB): jumps far ahead and back, by byte ranges
 openlink @W@/yt/watch?v=big
 waitstate playing 30000
@@ -359,6 +441,98 @@ wait 1500
 screenshot original @O@/@N@/n_43_115.png
 report s:big:silent
 report big-4
+# -- the network is away for six seconds (a line only a little faster than the video, so little is read ahead):
+# the video waits and then goes on where the picture stopped; nothing is left out
+openlink @W@/yt/watch?v=outage1
+waitstate playing 30000
+wait 400
+report o:00
+wait 400
+report o:01
+wait 400
+report o:02
+wait 400
+report o:03
+wait 400
+report o:04
+wait 400
+report o:05
+wait 400
+report o:06
+wait 400
+report o:07
+wait 400
+report o:08
+wait 400
+report o:09
+wait 400
+report o:10
+wait 400
+report o:11
+wait 400
+report o:12
+wait 400
+report o:13
+wait 400
+report o:14
+wait 400
+report o:15
+wait 400
+report o:16
+wait 400
+report o:17
+wait 400
+report o:18
+wait 400
+report o:19
+wait 400
+report o:20
+wait 400
+report o:21
+wait 400
+report o:22
+wait 400
+report o:23
+wait 400
+report o:24
+wait 400
+report o:25
+wait 400
+report o:26
+wait 400
+report o:27
+wait 400
+report o:28
+wait 400
+report o:29
+wait 400
+report o:30
+wait 400
+report o:31
+wait 400
+report o:32
+wait 400
+report o:33
+wait 400
+report o:34
+wait 400
+report o:35
+wait 400
+report o:36
+wait 400
+report o:37
+wait 400
+report o:38
+wait 400
+report o:39
+wait 400
+report o:40
+wait 400
+report o:41
+wait 400
+report o:42
+wait 400
+report o:43
 # -- addresses that stop working (as a video left paused overnight): yt-dlp is asked again, the video goes on
 openlink @W@/yt/watch?v=expire6x2
 waitstate playing 30000
@@ -502,7 +676,7 @@ report slow-cancelled
 ytdlp height 720
 pastelink look at this: @W@/yt/watch?v=mixed-b (nice)
 waitstate playing 30000
-waitshown 2 10000
+wait 1500
 report pasted
 ytdlp height 0
 # -- an older yt-dlp (it does not know --js-runtimes; its age is said when it fails)

@@ -99,7 +99,9 @@ int main(int argc, char** argv)
         const QStringList c = R::arguments("https://example.com/x", o, {});
         check("no graphics card: the largest picture, and H.264 among those of that size", c.value(c.indexOf("-S") + 1) == "res,vcodec:h264", c.value(c.indexOf("-S") + 1));
         o.maxHeight = 0;
-        check("no size asked for: 1080", R::arguments("u", o, {}).value(7).contains("[height<=1080]"), "height<=1080");
+        const QStringList d = R::arguments("u", o, {});
+        check("no size asked for: 1080", d.value(d.indexOf("-f") + 1).contains("[height<=1080]"), "height<=1080");
+        check("its answers come as UTF-8, whatever the system's code page", d.indexOf("--encoding") > 0 && d.value(d.indexOf("--encoding") + 1) == "utf-8", "--encoding utf-8");
     }
 
     // ---- yt-dlp's answer: the picture and the sound as two addresses (YouTube)

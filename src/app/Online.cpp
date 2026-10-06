@@ -259,7 +259,11 @@ void MainWindow::webResolved(const OnlineResult& r, const QString& entry, int in
     else if (!v.live) start = m_resume->position(QStringLiteral("web:") + page) * 1000000;   // where it was left
     m_webStartNs = start;
     setHint(QString());
-    if (!v.streams.isEmpty()) {
+    if (v.live && v.streams.size() == 1) {
+        // A live stream at one plain address has no end and no "any part of the file": read front to back.
+        m_player->setHttpHeaders(v.streams.first().headers);
+        openResolved(index, v.streams.first().url, 0, m_mediaTitle, tr("live"));
+    } else if (!v.streams.isEmpty()) {
         m_player->setHttpHeaders({});
         openResolved(index, QString(), start, m_mediaTitle, v.what, v.streams);
     } else {

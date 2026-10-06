@@ -230,6 +230,10 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent)
         box->setAttribute(Qt::WA_DeleteOnClose);
         box->open();
     });
+    connect(m_player, &Player::waitingForDataChanged, this, [this](bool waiting) {
+        if (waiting) showOsd(tr("Waiting for the network…"), 3600000);
+        else { m_osdTimer.stop(); m_osd->hide(); }
+    });
     connect(m_player, &Player::warningOccurred, this, [this](const QString& w) {
         m_lastWarning = w;
         showOsd(w, 5000);
@@ -2719,6 +2723,7 @@ QJsonObject MainWindow::stateReport() const
         o["deskGlassAspect"] = v->glassRectLogical().height() > 0 ? v->glassRectLogical().width() / v->glassRectLogical().height() : 0.0;
         o["deskMaskRect"] = rectJson(m_desk->currentMask().boundingRect());
         o["deskControlsVisible"] = m_desk->controlsVisible();
+        o["deskControls"] = m_desk->controlsReport();
         o["deskWindowVisible"] = m_desk->isVisible();
         o["mainWindowVisible"] = isVisible();
         const auto dp = v->deskPose();

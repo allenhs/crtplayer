@@ -122,6 +122,14 @@ for vid in ('pair-h264', 'pair-vp9'):
           quiet is not None and 29.0 <= quiet['positionMs'] / 1000 <= 31.2 and before and all(e['everyday']['soundLevelDb'] > -40 for e in before),
           f"silence first measured at {quiet['positionMs'] / 1000:.2f} s" if quiet else 'never silent')
 
+for vid in ('mixed-b', 'pair-vp9'):
+    series = [R[f'q:{vid}:{i:02d}'][0] for i in range(18)]
+    apart = max(abs(e['positionMs'] - e['framePtsMs']) for e in series)
+    quiet = next((e for e in series if e['everyday']['soundLevelDb'] < -60), None)
+    check(f'{vid}: after a quick jump (as while dragging the seek bar) the picture and the sound are still together',
+          apart < 150 and quiet is not None and 29.0 <= quiet['framePtsMs'] / 1000 <= 31.2,
+          f"picture and clock at most {apart:.0f} ms apart; the tone stops with the picture at {quiet['framePtsMs'] / 1000:.2f} s" if quiet else f"{apart:.0f} ms apart; never silent")
+
 pa, pb, po, fa, na = one('paused-a'), one('paused-b'), one('played-on'), one('fast'), one('normal-again')
 check('paused: the picture stays', pa['state'] == 'paused' and pa['framePtsMs'] == pb['framePtsMs'], f"{pa['framePtsMs']:.0f} ms, {pb['framePtsMs']:.0f} ms")
 check('played on: it goes on from there', 1200 <= po['positionMs'] - pb['positionMs'] <= 3200, f"{po['positionMs'] - pb['positionMs']:.0f} ms in 2 s")
@@ -145,6 +153,17 @@ for i in range(4):
     rq = [r for r in requests(on(f'big-{i}')['wallClock'], on(f'big-{i + 1}')['wallClock']) if r['path'].startswith('/media/v_big.mp4')]
     jumps.append((len(rq), all(r['status'] == 206 and r['range'] for r in rq)))
 check('a 90 MB file: each jump (far ahead, back, ahead) takes a few requests by byte range', all(1 <= n <= 8 and ranged for n, ranged in jumps), f"requests for each jump: {[n for n, _ in jumps]}")
+
+series = [R[f'o:{i:02d}'][0] for i in range(44)]
+waited = [e for e in series if e['online']['player'].get('waiting')]
+steps = [b['framePtsMs'] - a['framePtsMs'] for a, b in zip(series, series[1:])]
+after = [e for e in series[-10:] if not e['online']['player'].get('waiting')]
+sound_ok = all((e['positionMs'] % 20000 < 9300) == (e['everyday']['soundLevelDb'] > -40) for e in after if 700 < e['positionMs'] % 10000 < 9300)
+check('the network away for six seconds: the video waits (it does not run on without a picture), then goes on where the picture stopped',
+      len(waited) >= 3 and max(steps) < 1500 and min(steps) > -1200 and series[-1]['state'] == 'playing' and not series[-1]['lastError']
+      and series[-1]['online']['player']['waits'] >= 1 and series[-1]['framePtsMs'] > waited[-1]['framePtsMs'] + 2000 and sound_ok and all(e['state'] == 'playing' for e in series),
+      f"waited for {len(waited) * 0.5:.1f} s with the picture at {waited[0]['framePtsMs'] / 1000:.1f} s; the largest step between two looks at the picture (half a second apart): "
+      f"{max(steps) / 1000:.2f} s; at the end {series[-1]['framePtsMs'] / 1000:.1f} s" if waited else f"never waited; largest step {max(steps) / 1000:.2f} s")
 
 es, ea, eg, ed = one('expire-start'), one('expire-after'), one('expire-again'), one('expire-dead')
 refused = [r for r in requests(es['online']['wallClock'], ea['online']['wallClock']) if r['status'] == 403]

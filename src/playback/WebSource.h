@@ -22,6 +22,7 @@ struct WebStream {
     QString url;
     QList<QPair<QByteArray, QByteArray>> headers;   // as the site wants them (User-Agent, Referer, Cookie, ...)
     bool audioOnly = false;                         // (a smaller buffer)
+    int kbps = 0;                                   // its bit rate, where the site says (how much to have at hand before playing on)
 };
 
 // Registers the element with GStreamer (once; safe to call again).
@@ -32,3 +33,18 @@ void crt_web_forget(const QString& uri);
 bool crt_web_is(const QString& uri);
 // For the tests: what was read so far, per stream (bytes, HTTP requests are counted by the test server).
 QJsonObject crt_web_report(const QString& uri);
+
+// How each stream of a playing source stands (the element playbin made for a "crtweb://" address):
+// how much is read ahead of the place being played, whether the file's end has arrived, how long ago the
+// server last sent anything.
+struct WebLevel {
+    bool audioOnly = false;
+    quint64 ahead = 0;        // bytes
+    quint64 room = 0;         // how much may be read ahead: a reader that has filled it is not sending because it need not
+    quint64 received = 0;     // bytes, in all
+    bool ended = false;
+    qint64 quietMs = 0;
+    int kbps = 0;
+};
+bool crt_web_is_source(GstElement* element);
+QList<WebLevel> crt_web_levels(GstElement* source);

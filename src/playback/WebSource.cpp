@@ -6,6 +6,7 @@
 #include <QStringList>
 
 #include <algorithm>
+#include <atomic>
 
 #include <cstring>
 
@@ -14,14 +15,41 @@ QMutex g_lock;
 QHash<QString, QList<WebStream>> g_streams;
 int g_next = 1;
 
-// How far ahead of the picture each stream is read (and how far back a jump finds its data still there).
-const guint64 kVideoRing = 32u * 1024 * 1024;
-const guint64 kAudioRing = 4u * 1024 * 1024;
+// Each stream's buffer: how much of the file is kept in memory around the place being played, and how much
+// of that may lie ahead of it (the rest stays behind it, for a jump back). Read ahead generously: the MP4
+// demuxer looks at the next fragment's header while it still plays the current one, megabytes on; with
+// GStreamer's usual 2 MB of reading ahead that was a new request to the server every few seconds.
+const guint64 kVideoRing = 32u * 1024 * 1024, kVideoAhead = 24u * 1024 * 1024;
+const guint64 kAudioRing = 4u * 1024 * 1024, kAudioAhead = 3u * 1024 * 1024;
 
 QList<WebStream> lookup(const QString& uri)
 {
     QMutexLocker lock(&g_lock);
     return g_streams.value(uri);
+}
+
+// What a reader has delivered, kept beside its ring buffer.
+struct StreamStats {
+    std::atomic<quint64> received{0};
+    std::atomic<gint64> lastData{0};   // g_get_monotonic_time()
+    std::atomic<bool> ended{false};
+    bool audioOnly = false;
+    int kbps = 0;
+};
+
+GstPadProbeReturn onReaderData(GstPad*, GstPadProbeInfo* info, gpointer data)
+{
+    auto* st = static_cast<StreamStats*>(data);
+    if (GST_PAD_PROBE_INFO_TYPE(info) & GST_PAD_PROBE_TYPE_BUFFER) {
+        st->received += gst_buffer_get_size(GST_PAD_PROBE_INFO_BUFFER(info));
+        st->lastData = g_get_monotonic_time();
+        st->ended = false;
+    } else if (GST_PAD_PROBE_INFO_TYPE(info) & GST_PAD_PROBE_TYPE_EVENT_DOWNSTREAM) {
+        const GstEventType type = GST_EVENT_TYPE(GST_PAD_PROBE_INFO_EVENT(info));
+        if (type == GST_EVENT_EOS) st->ended = true;
+        else if (type == GST_EVENT_SEGMENT || type == GST_EVENT_FLUSH_STOP) { st->ended = false; st->lastData = g_get_monotonic_time(); }
+    }
+    return GST_PAD_PROBE_OK;
 }
 } // namespace
 
@@ -79,11 +107,20 @@ static gboolean crt_web_src_build(CrtWebSrc* self)
         }
         // A ring buffer: what was read stays at hand (a short jump needs no new request), and downstream
         // may ask for any part of the file, which the buffer fetches by a byte range.
-        g_object_set(ring, "ring-buffer-max-size", st.audioOnly ? kAudioRing : kVideoRing, "max-size-buffers", 0u, "max-size-time", guint64(0),
-                     "use-buffering", FALSE, nullptr);
+        g_object_set(ring, "ring-buffer-max-size", st.audioOnly ? kAudioRing : kVideoRing, "max-size-bytes", guint(st.audioOnly ? kAudioAhead : kVideoAhead),
+                     "max-size-buffers", 0u, "max-size-time", guint64(0), "use-buffering", FALSE, nullptr);
         g_object_set_data(G_OBJECT(http), "crt-http", GINT_TO_POINTER(1));
+        auto* stats = new StreamStats;
+        stats->audioOnly = st.audioOnly;
+        stats->kbps = st.kbps;
+        stats->lastData = g_get_monotonic_time();
+        g_object_set_data_full(G_OBJECT(ring), "crt-stats", stats, [](gpointer p) { delete static_cast<StreamStats*>(p); });
         gst_bin_add_many(GST_BIN(self), http, ring, nullptr);
         if (!gst_element_link(http, ring)) return FALSE;
+        // (on the ring buffer's input: what the reader has handed over, and when)
+        GstPad* in = gst_element_get_static_pad(ring, "sink");
+        gst_pad_add_probe(in, GstPadProbeType(GST_PAD_PROBE_TYPE_BUFFER | GST_PAD_PROBE_TYPE_EVENT_DOWNSTREAM | GST_PAD_PROBE_TYPE_EVENT_FLUSH), onReaderData, stats, nullptr);
+        gst_object_unref(in);
         GstPad* out = gst_element_get_static_pad(ring, "src");
         gchar* name = g_strdup_printf("src_%u", n++);
         GstPadTemplate* templ = gst_static_pad_template_get(&crt_web_src_template);
@@ -242,6 +279,38 @@ void crt_web_forget(const QString& uri)
 }
 
 bool crt_web_is(const QString& uri) { return uri.startsWith(QStringLiteral("crtweb://")); }
+
+bool crt_web_is_source(GstElement* element) { return element && G_OBJECT_TYPE(element) == crt_web_src_get_type(); }
+
+QList<WebLevel> crt_web_levels(GstElement* source)
+{
+    QList<WebLevel> out;
+    if (!crt_web_is_source(source)) return out;
+    const gint64 now = g_get_monotonic_time();
+    GValue item = G_VALUE_INIT;
+    GstIterator* it = gst_bin_iterate_elements(GST_BIN(source));
+    while (gst_iterator_next(it, &item) == GST_ITERATOR_OK) {
+        GstElement* e = GST_ELEMENT(g_value_get_object(&item));
+        if (auto* st = static_cast<StreamStats*>(g_object_get_data(G_OBJECT(e), "crt-stats"))) {
+            WebLevel l;
+            guint ahead = 0;
+            g_object_get(e, "current-level-bytes", &ahead, nullptr);
+            l.audioOnly = st->audioOnly;
+            l.ahead = ahead;
+            l.room = st->audioOnly ? kAudioAhead : kVideoAhead;
+            l.received = st->received;
+            l.ended = st->ended;
+            l.quietMs = (now - st->lastData) / 1000;
+            l.kbps = st->kbps;
+            out.append(l);
+        }
+        g_value_reset(&item);
+    }
+    g_value_unset(&item);
+    gst_iterator_free(it);
+    std::stable_sort(out.begin(), out.end(), [](const WebLevel& a, const WebLevel& b) { return !a.audioOnly && b.audioOnly; });   // the picture first
+    return out;
+}
 
 QJsonObject crt_web_report(const QString& uri)
 {

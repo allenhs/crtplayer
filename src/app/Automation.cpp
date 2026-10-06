@@ -20,6 +20,7 @@
 #include <QApplication>
 #include <QAbstractButton>
 #include <QClipboard>
+#include <QCursor>
 #include <QMessageBox>
 #include <QTimer>
 #include <QFile>
@@ -678,6 +679,10 @@ void Automation::next()
         } else ok = false;
         if (!ok) ++m_failures;
         log(line, {{"ok", ok}});
+    } else if (cmd == "cursor") {
+        // cursor X Y : the real mouse pointer goes there (screen coordinates)
+        QCursor::setPos(a.value(1).toInt(), a.value(2).toInt());
+        log(line, {{"x", QCursor::pos().x()}, {"y", QCursor::pos().y()}});
     } else if (cmd == "closedialogs") {
         // closedialogs : whatever message boxes are up are closed (an error was shown; the next thing is tried)
         int n = 0;
