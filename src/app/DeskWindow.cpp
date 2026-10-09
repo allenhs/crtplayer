@@ -60,6 +60,7 @@ void DeskWindow::openOn(QScreen* screen)
     raise();
     activateWindow();
     m_view->setFocus();
+    ++m_opened;
     activity();
 }
 
@@ -90,7 +91,8 @@ QJsonObject DeskWindow::controlsReport() const
                        {"popup", popup ? QString::fromLatin1(popup->metaObject()->className()) + QLatin1Char(' ') + popup->objectName() : QString()},
                        {"cursor", QStringLiteral("%1,%2").arg(cursor.x()).arg(cursor.y())},
                        {"bar", QStringLiteral("%1,%2 %3x%4").arg(m_bar->mapToGlobal(QPoint(0, 0)).x()).arg(m_bar->mapToGlobal(QPoint(0, 0)).y()).arg(m_bar->width()).arg(m_bar->height())},
-                       {"hideInMs", m_hide.isActive() ? m_hide.remainingTime() : -1}};
+                       {"hideInMs", m_hide.isActive() ? m_hide.remainingTime() : -1}, {"opened", m_opened},
+                       {"sinceActivityMs", m_lastActivity.isValid() ? double(m_lastActivity.elapsed()) : -1.0}};
 }
 
 void DeskWindow::resizeEvent(QResizeEvent* e)
@@ -139,6 +141,7 @@ void DeskWindow::updateMask()
 
 void DeskWindow::activity()
 {
+    m_lastActivity.start();
     if (!m_bar->isVisible()) {
         m_bar->show();
         placeBar();

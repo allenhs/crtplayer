@@ -466,7 +466,10 @@ void Automation::next()
     }
     else if (cmd == "resetsync") { m_w->video()->resetSyncStats(); m_maxStallMs = 0; log(line); }
     else if (cmd == "report") {
+        QElapsedTimer took;
+        took.start();
         QJsonObject r = m_w->stateReport();
+        r["reportMs"] = double(took.elapsed());
         r["label"] = rest;
         r["maxEventLoopStallMs"] = m_maxStallMs;
         log("report", r);

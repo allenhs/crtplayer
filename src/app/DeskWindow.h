@@ -1,4 +1,5 @@
 #pragma once
+#include <QElapsedTimer>
 #include <QJsonObject>
 #include <QTimer>
 #include <QWidget>
@@ -44,6 +45,8 @@ private:
     DeskView* m_view;
     ControlBar* m_bar;
     QTimer m_hide;
+    int m_opened = 0;
+    QElapsedTimer m_lastActivity;
     int m_wokenByView = 0, m_wokenByBar = 0, m_wokenByPhase = 0, m_keptByUse = 0;   // (what has kept the strip up, for the checks)
     bool m_onTop = false;
     QRegion m_mask;
