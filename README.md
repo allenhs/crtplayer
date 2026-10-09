@@ -111,6 +111,7 @@ configurable, GPU-rendered CRT presentation that respects every aspect ratio:
 7. [Screenshots, frame stepping, playlist](#screenshots-frame-stepping-playlist)
    - [Cutting without re-encoding, and GIF clips](#cutting-without-re-encoding-and-gif-clips)
    - [Without a graphics card](#without-a-graphics-card)
+   - [4K HEVC 10-bit (2.17)](#4k-hevc-10-bit-217)
    - [Enhance: sharper upscaling and smooth motion](#enhance-sharper-upscaling-and-smooth-motion)
    - [NVIDIA AI upscaling and frame generation (RTX cards)](#nvidia-ai-upscaling-and-frame-generation-rtx-cards)
 8. [Desk mode: a 3D TV on your desktop](#desk-mode-a-3d-tv-on-your-desktop)
@@ -1083,8 +1084,38 @@ video at 30 frames a second, fullscreen unless said):
 | 1080p in a window, effects off: CPU used | 1.8 of 2 cores (at 17 frames a second) | 0.45 of 2 cores (at 30) |
 
 With effects off, playback is now limited by decoding and converting the video, as it
-should be, and both use every core. On those 2 cores that is plenty for 4K H.264 and not
-yet enough for 4K HEVC 10-bit; more cores should help, which was not measured.
+should be, and both use every core. On those 2 cores that is plenty for 4K H.264.
+
+### 4K HEVC 10-bit (2.17)
+
+4K HEVC 10-bit (most 4K films and series, and YouTube's 4K) was the one kind of video the
+fast path could not keep up with: 9 frames a second at best. Two things changed in 2.17.
+
+- **10 bits to 8, and smaller, in one pass.** The player brings 10-bit (and 12-bit)
+  pictures to 8 bits and shrinks them by a whole factor (4K to 1280×720 for a 1080p
+  window) in a single pass of its own, with a fine ordered dither so that gradients do
+  not band, before GStreamer's scaler and converter see them. That takes 1.7 ms a picture
+  instead of most of the conversion's time. 8-bit videos are left as they were (no gain
+  was measured there).
+- **Pictures left out before they are decoded.** When the computer still cannot decode
+  every picture in time, GStreamer used to drop pictures *after* decoding them, wasting
+  the work. The player now leaves out, before decoding, pictures that no other picture
+  is built from (H.264 and H.265 mark them), just as many as it takes for the rest to
+  arrive on time. A computer that keeps up loses nothing; paused and frame-stepped
+  pictures are always the exact ones.
+
+Measured on the same 2 cores, fullscreen, effects off:
+
+| | 2.16 | 2.17 |
+|---|---|---|
+| 4K HEVC 10-bit, a light clip | 10 frames a second | **30** (full rate) |
+| 4K HEVC 10-bit, a hard clip (20 Mbit/s, film grain) | 4 to 6 | **23 to 24**, all of them on time |
+
+Decoding alone manages 31 frames a second of the hard clip on these 2 cores, so that is
+close to what the machine can do. With a look on, drawing the look is the limit, as before.
+
+Both work only without a graphics card (a graphics card converts the picture itself).
+`CRTPLAYER_SHRINK_OFF=1` and `CRTPLAYER_GOVERNOR_OFF=1` switch them off, for comparison.
 
 **Settings** (*Settings → Playback → Decoding*):
 

@@ -71,7 +71,7 @@ def desk_on_screen(run, rep, label, scene, screen, what):
     if g.shape[:2] != (h, w):
         check(f'{run}: {what}: the desk view fits the screen grab', False, f'view {w}x{h} at {ox},{oy}, grab {g.shape[1]}x{g.shape[0]}'); return
     if r.get('deskControlsVisible'):
-        check(f'{run}: {what}: the strip of controls is hidden for the grab', False, f"visible: {r.get('deskControls')}, report took {r.get('reportMs')} ms, steps: {[(e.get('wall'), e['cmd'][:24]) for e in LOG[max(0, LOG.index(r) - 7):LOG.index(r) + 1]] if r in LOG else ''}")
+        check(f'{run}: {what}: the strip of controls is hidden for the grab', False, f"visible: {r.get('deskControls')}, report took {r.get('reportMs')} ms, steps: {[(e.get('began'), e.get('wall'), e['cmd'][:18]) for e in LOG[max(0, LOG.index(r) - 9):LOG.index(r) + 1]] if r in LOG else ''}")
     alpha = s[..., 3] / 255.0
     solid, clear, part = alpha > 0.996, alpha < 0.004, (alpha >= 0.004) & (alpha <= 0.996)
     near = (np.abs(g - s[..., :3]).max(axis=2) < 56)

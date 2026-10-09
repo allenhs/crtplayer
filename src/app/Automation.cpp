@@ -85,6 +85,7 @@ void Automation::log(const QString& cmd, const QJsonObject& data)
     QJsonObject o = data;
     o["t"] = double(m_clock.elapsed());
     o["wall"] = double(QDateTime::currentMSecsSinceEpoch() % 1000000);
+    o["began"] = double(m_stepStart);   // (when the step began: "wall" is when it was written down)
     o["cmd"] = cmd;
     m_log.append(o);
     QFile f(m_logPath);
@@ -103,6 +104,7 @@ void Automation::next()
 {
     if (m_pc >= m_lines.size()) { finish(m_failures ? 1 : 0); return; }
     const QString line = m_lines.at(m_pc++);
+    m_stepStart = QDateTime::currentMSecsSinceEpoch() % 1000000;
     const QStringList a = line.split(' ', Qt::SkipEmptyParts);
     const QString cmd = a.value(0).toLower();
     const QString rest = line.section(' ', 1).trimmed();
