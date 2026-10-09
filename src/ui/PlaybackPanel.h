@@ -38,6 +38,8 @@ signals:
     void smoothMotionChanged(bool on);
     void autoNextChanged(bool on);
     void sleepTimerChanged(int minutes);    // 0 off, -1 at the end of this video
+    void onlineHeightChanged(int height);   // 2.17: the largest picture asked of a web site; 0 = this screen's
+    void ytDlpRequested();                  // "Get yt-dlp" / "Update yt-dlp"
 public:
     void setSubtitlesWanted(bool on);
     void setSubtitleStyle(int size, int color, int background, int position);
@@ -52,6 +54,10 @@ public:
     void setNvidia(bool on, int quality, int mode);
     void setNvidiaStatus(bool installed, const QString& status);
     void setAutoNext(bool on);
+    void setOnlineHeight(int height);
+    void setOnlineStatus(const QString& status, const QString& button, bool buttonEnabled);
+    QString onlineStatus() const;
+    QString onlineButton() const;   // its words; empty while it cannot be pressed
     void setSleepTimer(int minutes, const QString& status);   // the choice, and what is left ("" when off)
     void setKeepAwake(bool on);
     void setLookSound(bool on);
@@ -89,6 +95,9 @@ private:
     QCheckBox* m_autoNext = nullptr;
     QComboBox* m_sleepCombo = nullptr;
     QLabel* m_sleepStatus = nullptr;
+    QComboBox* m_onlineHeight = nullptr;
+    QLabel* m_onlineStatus = nullptr;
+    class QPushButton* m_onlineGet = nullptr;
 signals:
 private:
     QCheckBox* m_hw;

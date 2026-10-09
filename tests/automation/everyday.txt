@@ -77,7 +77,9 @@ wait 800
 report no-subs
 open @M@/hd_16x9_multitrack.mkv
 waitstate playing 15000
-wait 1500
+# (the sound heard is measured over the last second: of this video, then)
+waitpos 1300 15000
+wait 300
 report back
 # off stays off
 subs off
@@ -314,6 +316,9 @@ wait 800
 # (the channel's programme may just be starting over: its tracks are known once it plays)
 waitstate playing 20000
 wait 600
+# (and again, should it have started over in those 0.6 s)
+waitstate playing 20000
+wait 300
 report tv-3-on
 sleep seconds 9
 wait 11500

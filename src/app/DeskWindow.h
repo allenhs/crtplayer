@@ -1,4 +1,6 @@
 #pragma once
+#include <QElapsedTimer>
+#include <QJsonObject>
 #include <QTimer>
 #include <QWidget>
 
@@ -23,6 +25,7 @@ public:
     void setKeepOnTop(bool on);
     bool keepOnTop() const { return m_onTop; }
     bool controlsVisible() const;
+    QJsonObject controlsReport() const;
     QRegion currentMask() const { return m_mask; }
 
 signals:
@@ -42,6 +45,11 @@ private:
     DeskView* m_view;
     ControlBar* m_bar;
     QTimer m_hide;
+    int m_opened = 0;
+    QString m_why;
+    QStringList m_events;
+    QElapsedTimer m_lastActivity;
+    int m_wokenByView = 0, m_wokenByBar = 0, m_wokenByPhase = 0, m_keptByUse = 0;   // (what has kept the strip up, for the checks)
     bool m_onTop = false;
     QRegion m_mask;
 };

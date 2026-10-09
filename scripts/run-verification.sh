@@ -131,6 +131,53 @@ enhance_suite() {
   echo "== Enhance checks"
   checker "$O/enhance-checks.txt" python3 "$HERE/scripts/check-enhance.py" "$O"
 }
+# 2.17: videos from web sites. Video sites cannot be reached from where the tests run, so the site is
+# tests/web_mock.py and yt-dlp is tests/fake_ytdlp.py, which answers the way the real one answers for YouTube (the
+# picture and the sound as two addresses, subtitles, automatic captions, chapters, playlists, addresses that stop
+# working). The real yt-dlp, where there is one, is run against the mock site's pages too. "Get yt-dlp" fetches
+# from the mock site.
+online_suite() {
+  if [[ ! -f "$M/web/v_big.mp4" ]]; then echo "== online checks skipped: no web clips in $M (scripts/make-test-media.sh)"; return; fi
+  local T="$O/online-tools" port=$((18600 + RANDOM % 300)) site mock rel
+  rm -rf "$T" "$O"/online*; mkdir -p "$T/fake" "$T/old" "$T/none" "$T/real"
+  cp "$HERE/tests/fake_ytdlp.py" "$T/fake/yt-dlp"; cp "$HERE/tests/fake_ytdlp.py" "$T/old/yt-dlp"
+  printf '#!/bin/sh\necho v22.0.0\n' > "$T/fake/node"; cp "$T/fake/node" "$T/old/node"; chmod +x "$T"/fake/* "$T"/old/*
+  site="http://127.0.0.1:$port"; rel="$site/release"
+  python3 "$HERE/tests/web_mock.py" --media "$M" --port $port --log "$O/online-requests.jsonl" --ytdlp "$HERE/tests/fake_ytdlp.py" > "$O/online-mock.log" 2>&1 &
+  mock=$!; sleep 1
+  on_run() { # script tools [env...]
+    local name=$1 tools=$2; shift 2
+    mkdir -p "$O/$name"
+    sed -e "s#@W@#$site#g" -e "s#@N@#$name#g" -e "s#@T@#$T#g" -e "s#@M@#$M#g" -e "s#@O@#$O#g" "$HERE/tests/automation/$name.txt" > "$O/$name.txt"
+    echo "== $name"
+    env CRTPLAYER_TOOLS_PATH="$T/$tools" FAKE_YTDLP_LOG="$O/$name-ytdlp.jsonl" "$@" timeout 900 "$BIN" --automation "$O/$name.txt" --automation-log "$O/$name.json" > "$O/$name.log" 2>&1
+    echo "   exit code $?"
+  }
+  export XDG_CACHE_HOME=$TMPCFG/cache
+  rm -rf "$XDG_CONFIG_HOME" "$XDG_DATA_HOME"
+  on_run online fake
+  on_run online-restore fake
+  rm -rf "$XDG_CONFIG_HOME" "$XDG_DATA_HOME"
+  on_run online-none none CRTPLAYER_YTDLP_RELEASE="$rel/yt-dlp" CRTPLAYER_DENO_RELEASE="$rel/deno"
+  rm -rf "$XDG_CONFIG_HOME" "$XDG_DATA_HOME"
+  on_run online-badsum none CRTPLAYER_YTDLP_RELEASE="$rel/bad" CRTPLAYER_DENO_RELEASE="$rel/deno"
+  rm -rf "$XDG_CONFIG_HOME" "$XDG_DATA_HOME"
+  on_run online-baddeno none CRTPLAYER_YTDLP_RELEASE="$rel/yt-dlp" CRTPLAYER_DENO_RELEASE="$rel/bad"
+  rm -rf "$XDG_CONFIG_HOME" "$XDG_DATA_HOME"
+  on_run online-late fake CRTPLAYER_WEB_CONNECT_DELAY_MS=150
+  # The real yt-dlp of this computer (outside the player's package), with whichever JavaScript runtime there is.
+  local real; real=$(env -u APPDIR bash -c 'command -v yt-dlp' 2>/dev/null || true)
+  if [[ -n "$real" && "${ONLINE_NO_REAL:-0}" != 1 ]]; then
+    ln -sf "$real" "$T/real/yt-dlp"
+    for rt in deno node bun qjs; do command -v $rt >/dev/null 2>&1 && ln -sf "$(command -v $rt)" "$T/real/$rt"; done
+    rm -rf "$XDG_CONFIG_HOME" "$XDG_DATA_HOME"
+    on_run online-real real
+  fi
+  kill $mock 2>/dev/null
+  rm -rf "$XDG_CONFIG_HOME" "$XDG_DATA_HOME"
+  echo "== videos from web sites"
+  checker "$O/online-checks.txt" python3 "$HERE/scripts/check-online.py" "$O" "$site"
+}
 # 1.8 features; three launches share settings and data so resume can be tested across restarts
 polish_suite() {
   rm -rf "$XDG_CONFIG_HOME" "$XDG_DATA_HOME"
@@ -293,6 +340,7 @@ else
   if python3 -c "import PIL" 2>/dev/null; then nvidia_suite; fi
   if python3 -c "import PIL" 2>/dev/null; then subtitles_suite; fi
   if python3 -c "import PIL" 2>/dev/null; then onscreen_suite; fi
+  if python3 -c "import PIL" 2>/dev/null; then online_suite; fi
   rm -rf "$XDG_CONFIG_HOME"
   run sound sound.txt
   echo "== sound checks"

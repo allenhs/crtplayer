@@ -4,3 +4,4 @@ dist/
 smoke/
 .appimage-tools/
 *.AppImage
+__pycache__/

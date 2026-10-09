@@ -26,6 +26,7 @@ private:
     QString m_script, m_logPath;
     QStringList m_lines;
     int m_pc = 0;
+    qint64 m_stepStart = 0;
     QJsonArray m_log;
     QElapsedTimer m_clock;
     QTimer m_loopProbe;

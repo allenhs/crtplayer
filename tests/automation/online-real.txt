@@ -1,0 +1,48 @@
+# 2.17: the real yt-dlp (the one on this computer) against the mock site's pages: an HTML5 video, a DASH
+# manifest naming two files (the picture and the sound as two addresses), an HLS stream, a page with nothing on it.
+report real-start
+openlink @W@/watch/dash
+waitstate playing 60000
+waitshown 3 10000
+screenshot original @O@/@N@/n_01_3.png
+report open:dash
+seek 47
+waitshown 47 12000
+wait 1500
+screenshot original @O@/@N@/n_02_47.png
+report s:dash:tone
+seek 13
+waitshown 13 12000
+wait 1500
+screenshot original @O@/@N@/n_03_13.png
+report s:dash:silent
+openlink @W@/watch/muxed
+waitstate playing 60000
+waitshown 3 10000
+screenshot original @O@/@N@/n_04_3.png
+report open:muxed
+seek 91
+waitshown 91 12000
+wait 1500
+screenshot original @O@/@N@/n_05_91.png
+report s:muxed:silent
+openlink @W@/watch/hls
+waitstate playing 60000
+waitshown 3 10000
+screenshot original @O@/@N@/n_06_3.png
+report open:hls
+seek 47
+waitshown 47 12000
+wait 1500
+screenshot original @O@/@N@/n_07_47.png
+report s:hls:tone
+openlink @W@/watch/none
+waitonline failures 1 60000
+wait 500
+report none-page
+closedialogs
+openlink @W@/stream
+waitstate playing 20000
+waitshown 2 10000
+report direct
+quit

@@ -10,6 +10,7 @@ public:
     QStringList items() const;
     void setItems(const QStringList& paths);
     int addItems(const QStringList& paths);   // returns index of the first added item
+    void replaceAt(int i, const QStringList& paths);   // entry i gives way to these, in its place
     int count() const;
     QString at(int i) const;
     QString labelAt(int i) const;

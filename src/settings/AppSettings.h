@@ -51,6 +51,9 @@ struct AppSettings {
     int cgModelFinish = 0;   // picture in the theater: 0 35mm print, 1 worn 16mm, 2 drive-in, 3 keep the current look
     bool keepAwake = true;  // no screen dimming / sleep while a video plays
     int jfMaxBitrateMbps = 0;
+    // 2.17: videos from web sites (yt-dlp).
+    int onlineMaxHeight = 0;       // the largest picture asked for; 0 = as large as this screen shows
+    QString ytDlpPath;             // a yt-dlp of the viewer's choosing; empty = the player's own copy, or the system's
     int gifWidth = 480, gifFps = 15;   // GIF clips
     bool gifLook = true;               // with the CRT look (false: the original picture)   // Jellyfin quality limit, Mbit/s (0 = the original file)
     bool lookSound = true;  // the look's sound: tape hiss, TV speaker, film crackle

@@ -1,4 +1,5 @@
 #include <functional>
+#include <QDateTime>
 #include <QElapsedTimer>
 #include <QFileInfo>
 #include <memory>
@@ -18,6 +19,11 @@
 #include "ui/PlaylistPanel.h"
 
 #include <QApplication>
+#include <QAbstractButton>
+#include <QClipboard>
+#include <QCursor>
+#include <QMessageBox>
+#include <QTimer>
 #include <QFile>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -78,6 +84,8 @@ void Automation::log(const QString& cmd, const QJsonObject& data)
 {
     QJsonObject o = data;
     o["t"] = double(m_clock.elapsed());
+    o["wall"] = double(QDateTime::currentMSecsSinceEpoch() % 1000000);
+    o["began"] = double(m_stepStart);   // (when the step began: "wall" is when it was written down)
     o["cmd"] = cmd;
     m_log.append(o);
     QFile f(m_logPath);
@@ -96,6 +104,7 @@ void Automation::next()
 {
     if (m_pc >= m_lines.size()) { finish(m_failures ? 1 : 0); return; }
     const QString line = m_lines.at(m_pc++);
+    m_stepStart = QDateTime::currentMSecsSinceEpoch() % 1000000;
     const QStringList a = line.split(' ', Qt::SkipEmptyParts);
     const QString cmd = a.value(0).toLower();
     const QString rest = line.section(' ', 1).trimmed();
@@ -119,6 +128,7 @@ void Automation::next()
             const qint64 pos = p->position() / 1000000;
             const bool ok = pos >= want && !p->isSeeking();
             if (ok || m_clock.elapsed() - t0 > timeout) {
+                poll->stop();   // (now: a timeout already due would otherwise run this again, and the script would go on twice)
                 poll->deleteLater();
                 if (!ok) ++m_failures;
                 log(line, {{"ok", ok}, {"positionMs", double(pos)}, {"waitedMs", double(m_clock.elapsed() - t0)}});
@@ -139,6 +149,7 @@ void Automation::next()
             const double shown = p->lastFrameStreamTime() / 1e6;
             const bool ok = !p->isSeeking() && shown >= want - 200.0 && shown <= want + 3000.0;
             if (ok || m_clock.elapsed() - t0 > timeout) {
+                poll->stop();   // (now: a timeout already due would otherwise run this again, and the script would go on twice)
                 poll->deleteLater();
                 if (!ok) ++m_failures;
                 log(line, {{"ok", ok}, {"shownMs", shown}, {"waitedMs", double(m_clock.elapsed() - t0)}});
@@ -157,6 +168,7 @@ void Automation::next()
             const QString st = m_w->stateReport().value("state").toString();
             const bool ok = st == want && (want != "playing" || m_w->stateReport().value("hasFrame").toBool());
             if (ok || st == "error" || m_clock.elapsed() - t0 > timeout) {
+                poll->stop();   // (now: a timeout already due would otherwise run this again, and the script would go on twice)
                 poll->deleteLater();
                 if (!ok) ++m_failures;
                 log(line, {{"ok", ok}, {"state", st}, {"waitedMs", double(m_clock.elapsed() - t0)}});
@@ -184,6 +196,7 @@ void Automation::next()
             const double pos = from + (to - from) * (*i) / std::max(1, steps - 1);
             p->seek(qint64(pos * 1e9), (*i == steps - 1) ? Player::SeekMode::Accurate : Player::SeekMode::Fast);
             if (++(*i) >= steps) {
+                t->stop();
                 t->deleteLater();
                 if (DeskWindow* d = m_w->deskWindow()) d->view()->setScrubbing(false);   // let go
                 log(line, {{"maxEventLoopStallMs", m_maxStallMs}});
@@ -273,6 +286,7 @@ void Automation::next()
         connect(poll, &QTimer::timeout, this, [=] {
             const bool ok = m_w->tv()->allReady();
             if (!ok && m_clock.elapsed() - t0 < timeout) return;
+            poll->stop();   // (now: a timeout already due would otherwise run this again, and the script would go on twice)
             poll->deleteLater();
             if (!ok) ++m_failures;
             log(line, {{"ok", ok}, {"waitedMs", double(m_clock.elapsed() - t0)}});
@@ -358,6 +372,7 @@ void Automation::next()
             connect(poll, &QTimer::timeout, this, [=] {
                 const QString st = m_w->video()->nvidia().stateName();
                 if (st == want || m_clock.elapsed() - t0 > timeout) {
+                    poll->stop();   // (now: a timeout already due would otherwise run this again, and the script would go on twice)
                     poll->deleteLater();
                     if (st != want) ++m_failures;
                     log(line, {{"ok", st == want}, {"state", st}, {"waitedMs", double(m_clock.elapsed() - t0)}});
@@ -461,7 +476,10 @@ void Automation::next()
     }
     else if (cmd == "resetsync") { m_w->video()->resetSyncStats(); m_maxStallMs = 0; log(line); }
     else if (cmd == "report") {
+        QElapsedTimer took;
+        took.start();
         QJsonObject r = m_w->stateReport();
+        r["reportMs"] = double(took.elapsed());
         r["label"] = rest;
         r["maxEventLoopStallMs"] = m_maxStallMs;
         log("report", r);
@@ -634,6 +652,7 @@ void Automation::next()
             DeskWindow* d = m_w->deskWindow();
             const QString ph = d ? d->view()->phaseName() : QString();
             if (ph == want || m_clock.elapsed() - t0 > timeout) {
+                poll->stop();   // (now: a timeout already due would otherwise run this again, and the script would go on twice)
                 poll->deleteLater();
                 if (ph != want) ++m_failures;
                 log(line, {{"ok", ph == want}, {"phase", ph}, {"waitedMs", double(m_clock.elapsed() - t0)}});
@@ -647,6 +666,79 @@ void Automation::next()
         bool ok = false;
         if (DeskWindow* d = m_w->deskWindow()) ok = d->view()->grabFramebuffer().save(a.value(1));
         log(line, {{"ok", ok}});
+    } else if (cmd == "openlink") {
+        // openlink ADDRESS : a page with a video on it (yt-dlp is asked), or a media address (2.17)
+        m_w->openLink(rest, true);
+        log(line);
+    } else if (cmd == "pastelink") {
+        // pastelink TEXT : TEXT goes to the clipboard and Ctrl+V is pressed
+        QGuiApplication::clipboard()->setText(rest);
+        const bool ok = m_w->pasteLink();
+        log(line, {{"ok", ok}});
+    } else if (cmd == "ytdlp") {
+        // ytdlp path FILE | fetch | dialog get|cancel | height N : the yt-dlp to use ("-": none set), the
+        // settings' button, the "yt-dlp is needed" dialog's buttons, the largest picture asked for (0: the screen's)
+        const QString what = a.value(1);
+        bool ok = true;
+        if (what == "path") m_w->setYtDlpPath(a.value(2) == "-" ? QString() : line.section(' ', 2).trimmed());
+        else if (what == "fetch") m_w->fetchYtDlp();
+        else if (what == "height") m_w->setOnlineMaxHeight(a.value(2).toInt());
+        else if (what == "dialog") {
+            auto* box = m_w->findChild<QMessageBox*>("ytDlpDialog");
+            ok = box != nullptr;
+            if (box) {
+                for (QAbstractButton* b : box->buttons())
+                    if ((a.value(2) == "get") == (box->buttonRole(b) == QMessageBox::AcceptRole)) { b->click(); break; }
+            }
+        } else ok = false;
+        if (!ok) ++m_failures;
+        log(line, {{"ok", ok}});
+    } else if (cmd == "cursor") {
+        // cursor X Y : the real mouse pointer goes there (screen coordinates)
+        QCursor::setPos(a.value(1).toInt(), a.value(2).toInt());
+        log(line, {{"x", QCursor::pos().x()}, {"y", QCursor::pos().y()}});
+    } else if (cmd == "closedialogs") {
+        // closedialogs : whatever message boxes are up are closed (an error was shown; the next thing is tried)
+        int n = 0;
+        for (QWidget* t : QApplication::topLevelWidgets())
+            if (t->isVisible() && qobject_cast<QMessageBox*>(t)) { t->close(); ++n; }
+        log(line, {{"closed", n}});
+    } else if (cmd == "waitonline") {
+        // waitonline KEY VALUE [TIMEOUT_MS] : until the "online" part of the report has KEY = VALUE
+        // (VALUE "*": anything but empty; numbers: at least VALUE)
+        const QString key = a.value(1), want = a.value(2);
+        const int timeout = a.value(3, "30000").toInt();
+        const qint64 t0 = m_clock.elapsed();
+        auto* poll = new QTimer(this);
+        poll->setInterval(50);
+        connect(poll, &QTimer::timeout, this, [=] {
+            const QJsonValue v = m_w->onlineReport().value(key);
+            const QString got = v.isBool() ? (v.toBool() ? "true" : "false") : v.isDouble() ? QString::number(v.toDouble()) : v.toString();
+            bool isNumber = false;
+            const double num = want.toDouble(&isNumber);
+            const bool ok = want == "*" ? !got.isEmpty() : (isNumber && v.isDouble()) ? v.toDouble() >= num : got == want;
+            if (ok || m_clock.elapsed() - t0 > timeout) {
+                poll->stop();   // (now: a timeout already due would otherwise run this again, and the script would go on twice)
+                poll->deleteLater();
+                if (!ok) ++m_failures;
+                log(line, {{"ok", ok}, {"got", got}, {"waitedMs", double(m_clock.elapsed() - t0)}});
+                QTimer::singleShot(10, this, &Automation::next);
+            }
+        });
+        poll->start();
+        return;
+    } else if (cmd == "openpair") {
+        // openpair VIDEO_URL [AUDIO_URL] : two addresses played as the picture and the sound of one video (2.17)
+        QList<WebStream> streams;
+        streams.append(WebStream{a.value(1), {}, false});
+        if (a.size() > 2) streams.append(WebStream{a.value(2), {}, true});
+        const bool ok = p->openWeb(streams, true, 0);
+        if (!ok) ++m_failures;
+        log(line, {{"ok", ok}});
+    } else if (cmd == "governor") {
+        // governor on|off : leaving pictures out before decoding when the computer cannot keep up (2.17)
+        p->setGovernorEnabled(a.value(1) != "off");
+        log(line);
     } else if (cmd == "deskontop") {
         // deskontop on|off : "Keep on top of other windows"
         if (DeskWindow* d = m_w->deskWindow()) d->setKeepOnTop(a.value(1) == "on");
@@ -729,6 +821,7 @@ void Automation::next()
             poll->setInterval(50);
             connect(poll, &QTimer::timeout, this, [=] {
                 if (dlg->isBusy() && m_clock.elapsed() - t0 < 180000) return;
+                poll->stop();   // (now: a timeout already due would otherwise run this again, and the script would go on twice)
                 poll->deleteLater();
                 const GifRecorder::Result r = dlg->lastResult();
                 if (!r.ok) ++m_failures;
@@ -754,6 +847,7 @@ void Automation::next()
             poll->setInterval(50);
             connect(poll, &QTimer::timeout, this, [=] {
                 if (dlg->isBusy() && m_clock.elapsed() - t0 < 120000) return;
+                poll->stop();   // (now: a timeout already due would otherwise run this again, and the script would go on twice)
                 poll->deleteLater();
                 const LosslessCutter::Result r = dlg->lastResult();
                 if (!r.ok) ++m_failures;
@@ -797,6 +891,7 @@ void Automation::next()
             else if (want == "listing") ok = jp->itemCount() > 0 && !jp->currentTitle().startsWith("Loading");
             else if (want == "count") { ok = jp->itemCount() >= wantCount; if (!ok) jp->scrollToEnd(); }
             if (ok || m_clock.elapsed() - t0 > timeout) {
+                poll->stop();   // (now: a timeout already due would otherwise run this again, and the script would go on twice)
                 poll->deleteLater();
                 if (!ok) ++m_failures;
                 log(line, {{"ok", ok}, {"listing", jp->currentTitle()}, {"count", jp->itemCount()}, {"total", jp->totalCount()},

@@ -81,22 +81,58 @@ void PlaylistPanel::setItems(const QStringList& paths)
     addItems(paths);
 }
 
+// What an entry is called in the list, and its tooltip.
+static void entryText(const QString& p, QString* label, QString* tip)
+{
+    *label = QFileInfo(p).fileName().isEmpty() ? p : QFileInfo(p).fileName();
+    *tip = p;
+    if (p.startsWith(QLatin1String("jellyfin:"))) {   // "jellyfin:///<id>#<title>"
+        *label = QStringLiteral("Jellyfin · ") + QUrl::fromPercentEncoding(p.section('#', 1).toUtf8());
+        *tip = *label;
+    } else if (p.startsWith(QLatin1String("web:"))) {   // "web:<page>#<title>" (2.17)
+        QString page = p.mid(4).section('#', 0, 0);
+        page.replace(QStringLiteral("%23"), QStringLiteral("#"));
+        const QString title = p.contains('#') ? QUrl::fromPercentEncoding(p.section('#', 1).toUtf8()) : QString();
+        const QUrl u(page);
+        *label = QStringLiteral("Web · ") + (title.isEmpty() ? u.host() + u.path() : title);
+        *tip = page;
+    } else if ((p.startsWith(QLatin1String("http://")) || p.startsWith(QLatin1String("https://"))) && QFileInfo(QUrl(p).path()).suffix().isEmpty()) {
+        const QUrl u(p);   // (an address that is not a file's: a page, until yt-dlp has said what is on it)
+        *label = QStringLiteral("Web · ") + u.host() + u.path();
+    }
+}
+
 int PlaylistPanel::addItems(const QStringList& paths)
 {
     const int first = m_list->count();
     for (const QString& p : paths) {
-        QString label = QFileInfo(p).fileName().isEmpty() ? p : QFileInfo(p).fileName();
-        QString tip = p;
-        if (p.startsWith(QLatin1String("jellyfin:"))) {   // "jellyfin:///<id>#<title>"
-            label = QStringLiteral("Jellyfin · ") + QUrl::fromPercentEncoding(p.section('#', 1).toUtf8());
-            tip = label;
-        }
+        QString label, tip;
+        entryText(p, &label, &tip);
         auto* it = new QListWidgetItem(label);
         it->setData(Qt::UserRole, p);
         it->setToolTip(tip);
         m_list->addItem(it);
     }
     return first;
+}
+
+// One entry gives way to others in its place (a web page that turned out to be a playlist; a page that now
+// has its title). The entry that is playing stays the one that is playing.
+void PlaylistPanel::replaceAt(int i, const QStringList& paths)
+{
+    if (i < 0 || i >= m_list->count() || paths.isEmpty()) return;
+    delete m_list->takeItem(i);
+    int at = i;
+    for (const QString& p : paths) {
+        QString label, tip;
+        entryText(p, &label, &tip);
+        auto* it = new QListWidgetItem(label);
+        it->setData(Qt::UserRole, p);
+        it->setToolTip(tip);
+        m_list->insertItem(at++, it);
+    }
+    if (m_current > i) m_current += int(paths.size()) - 1;
+    restyle();   // (not "changed": the list is what it was, with one entry now known by its name)
 }
 
 void PlaylistPanel::setShuffle(bool on)

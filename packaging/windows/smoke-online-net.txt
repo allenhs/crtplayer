@@ -1,0 +1,19 @@
+# Windows smoke test, videos from web sites (2.17), the part that needs the internet. The build machine has it,
+# but a download can fail and YouTube turns data centres away, so these results are reported and do not count.
+# "Get yt-dlp" from its project, a page of the mock site through the real yt-dlp.exe, then a video on YouTube.
+report start
+ytdlp fetch
+waitonline fetches 1 300000
+wait 8000
+report fetched
+openlink @W@/watch/dash
+waitonline idle true 180000
+wait 2500
+report page
+closedialogs
+openlink https://www.youtube.com/watch?v=aqz-KE-bpKQ
+waitonline idle true 180000
+wait 4000
+report youtube
+closedialogs
+quit

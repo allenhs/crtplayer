@@ -7,6 +7,7 @@
 #include "app/DeskWindow.h"
 #include "app/WinWindow.h"
 #include "jellyfin/JellyfinClient.h"
+#include "online/OnlineVideo.h"
 #include "playback/Thumbnailer.h"
 #include "app/Gamepad.h"
 #ifndef _WIN32
@@ -42,6 +43,7 @@
 #include <QApplication>
 #include <QCloseEvent>
 #include <QComboBox>
+#include <QDate>
 #include <QDesktopServices>
 #include <QDir>
 #include <QDockWidget>
@@ -170,7 +172,38 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent)
             m_video->powerOff();   // when the preset has power effects
         }
     });
-    connect(m_player, &Player::errorOccurred, this, [this](const QString& title, const QString& details) {
+    connect(m_player, &Player::errorOccurred, this, [this](const QString& titleIn, const QString& detailsIn) {
+        QString title = titleIn, details = detailsIn;
+        // A web video whose addresses stopped working (they do, after a few hours: a video left paused
+        // overnight): once, yt-dlp is asked for new ones, and the video goes on where it was.
+        // (Again whenever that happens: but not twice in a row, when the new addresses do not work either.)
+        if (!m_webPage.isEmpty() && (!m_webRetried || m_webResolvedAt.elapsed() > 30000) && m_player->lastErrorFromSource() && !tvOn()) {
+            m_webRetried = true;
+            m_webRetryNext = true;
+            ++m_webReasks;
+            m_lastWarning = title + ": " + details.section("\n\nDetails:", 0, 0);
+            const qint64 pos = m_player->position();
+            m_pendingStartNs = m_webLive ? -1 : pos > 0 ? pos : m_webStartNs;
+            showOsd(tr("The video's address stopped working — asking yt-dlp for a new one"), 5000);
+            QTimer::singleShot(0, this, [this] { playSource(m_lastSource, m_lastSourceIndex); });
+            return;
+        }
+        if (!m_webPage.isEmpty() && m_player->lastErrorFromSource()) {
+            // yt-dlp found the video and the site will not send it (asked twice by now).
+            const QString said = details.section("\n\nDetails:", 0, 0);
+            details = tr("yt-dlp found the video, but the site would not send it (%1).").arg(said);
+            const int age = OnlineResolver::versionAgeDays(m_ytVersion, QDate::currentDate());
+            if (age > 60)
+                details += QStringLiteral("\n\n") + tr("This yt-dlp is from %1. Video sites change every few weeks, and an older yt-dlp stops finding their "
+                                                       "videos: a newer one usually helps (Settings → Playback → Videos from web sites).").arg(m_ytVersion);
+            details += QStringLiteral("\n\nDetails: ") + detailsIn.section("\n\nDetails: ", 1);
+            title = tr("The site would not send the video");
+        }
+        if (!m_webFallbackNote.isEmpty()) {   // yt-dlp found no video at this address, and as a stream it does not play either
+            details = tr("yt-dlp found no video at this address (%1), and it does not play as a file or stream either.").arg(m_webFallbackNote)
+                      + QStringLiteral("\n\n") + details;
+            title = tr("No video was found at this address");
+        }
         // A Jellyfin original that won't play here (a codec this computer lacks, a damaged
         // file): once, the server is asked to convert it instead.
         if (!m_jfItemId.isEmpty() && !m_jfTranscoding && !m_jfRetried && m_jf->isSignedIn()) {
@@ -196,6 +229,10 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent)
         box->setDetailedText(details);
         box->setAttribute(Qt::WA_DeleteOnClose);
         box->open();
+    });
+    connect(m_player, &Player::waitingForDataChanged, this, [this](bool waiting) {
+        if (waiting) showOsd(tr("Waiting for the network…"), 3600000);
+        else { m_osdTimer.stop(); m_osd->hide(); }
     });
     connect(m_player, &Player::warningOccurred, this, [this](const QString& w) {
         m_lastWarning = w;
@@ -288,7 +325,10 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent)
     connect(m_settingsDock, &QDockWidget::visibilityChanged, this, [this](bool) {
         QSignalBlocker b(m_controls->settingsButton);
         m_controls->settingsButton->setChecked(m_settingsDock->isVisible());
+        if (m_settingsDock->isVisible()) updateOnlineStatus();   // (which yt-dlp there is: asked when it is looked at)
     });
+    connect(m_playbackPanel, &PlaybackPanel::onlineHeightChanged, this, &MainWindow::setOnlineMaxHeight);
+    connect(m_playbackPanel, &PlaybackPanel::ytDlpRequested, this, &MainWindow::fetchYtDlp);
     connect(m_playlistDock, &QDockWidget::visibilityChanged, this, [this](bool) {
         QSignalBlocker b(m_controls->playlistButton);
         m_controls->playlistButton->setChecked(m_playlistDock->isVisible());
@@ -417,12 +457,25 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent)
     connect(&m_resumeTimer, &QTimer::timeout, this, &MainWindow::rememberPosition);
     m_resumeTimer.start();
     connect(m_player, &Player::mediaLoaded, this, [this] {
-        if (m_currentLocal.isEmpty()) return;
-        m_settings.recentFiles.removeAll(m_currentLocal);
-        m_settings.recentFiles.prepend(m_currentLocal);
+        // A web video's chapters come from its page, not from its file.
+        if (!m_webPage.isEmpty() && !m_webChapters.isEmpty() && m_player->chapters().isEmpty()) {
+            QVector<ChapterInfo> chapters;
+            for (const auto& c : m_webChapters) chapters.append(ChapterInfo{c.first, c.second});
+            m_player->setChapters(chapters);
+        }
+        QString entry = m_currentLocal;
+        if (entry.isEmpty() && !m_webPage.isEmpty() && !tvOn()) {   // (kept as its page; the title is for the menu)
+            entry = OnlineResolver::reference(m_webPage, m_mediaTitle);
+            for (int i = m_settings.recentFiles.size() - 1; i >= 0; --i)
+                if (OnlineResolver::isReference(m_settings.recentFiles[i]) && OnlineResolver::referencePage(m_settings.recentFiles[i]) == m_webPage)
+                    m_settings.recentFiles.removeAt(i);
+        }
+        if (entry.isEmpty()) return;
+        m_settings.recentFiles.removeAll(entry);
+        m_settings.recentFiles.prepend(entry);
         while (m_settings.recentFiles.size() > 15) m_settings.recentFiles.removeLast();
     });
-    connect(m_player, &Player::endOfStream, this, [this] { if (!m_currentLocal.isEmpty() && !tvOn()) m_resume->forget(m_currentLocal); });
+    connect(m_player, &Player::endOfStream, this, [this] { if (!resumeKey().isEmpty() && !tvOn()) m_resume->forget(resumeKey()); });
     // Movie theater curtains follow playback.
     connect(m_player, &Player::stateChanged, this, &MainWindow::updateTheater);
     connect(m_player, &Player::seekFinished, this, [this] { if (m_desk) m_desk->view()->noteSeek(); });
@@ -516,7 +569,7 @@ void MainWindow::buildUi()
     m_info->setAttribute(Qt::WA_TransparentForMouseEvents);
     m_info->setTextFormat(Qt::PlainText);
     m_info->hide();
-    m_emptyHint = new QLabel(tr("Drop video files here or press Ctrl+O"), m_video);
+    m_emptyHint = new QLabel(tr("Drop video files here, press Ctrl+O to open a file\nor Ctrl+L to open a link"), m_video);
     m_emptyHint->setObjectName("emptyHint");
     m_emptyHint->setAlignment(Qt::AlignCenter);
     m_emptyHint->setAttribute(Qt::WA_TransparentForMouseEvents);
@@ -589,6 +642,7 @@ void MainWindow::buildUi()
     m_playlistDock->hide();
 
     m_jf = new JellyfinClient(this);
+    m_online = new OnlineResolver(this);
     m_jfDock = new QDockWidget(tr("Jellyfin"), this);
     m_jfDock->setObjectName("jellyfinDock");
     m_jfDock->setFeatures(QDockWidget::DockWidgetClosable | QDockWidget::DockWidgetMovable);
@@ -678,6 +732,8 @@ void MainWindow::buildActions()
     add({Qt::Key_MediaNext, Qt::Key_N}, [this] { nextItem(1); });
     add({Qt::Key_MediaPrevious, Qt::Key_P}, [this] { nextItem(-1); });
     add({QKeySequence::Open}, [this] { openDialog(); });
+    add({QKeySequence(Qt::CTRL | Qt::Key_L)}, [this] { promptOpenLink(); });   // a video page, or a stream's address (2.17)
+    add({QKeySequence::Paste}, [this] { pasteLink(); });                      // the address on the clipboard
     add({Qt::Key_E}, [this] { m_settingsDock->setVisible(!m_settingsDock->isVisible()); });
     add({Qt::Key_L}, [this] { m_playlistDock->setVisible(!m_playlistDock->isVisible()); });
     add({QKeySequence(Qt::CTRL | Qt::Key_J)}, [this] { showJellyfin(!m_jfDock->isVisible()); });
@@ -775,12 +831,13 @@ void MainWindow::openFiles(const QStringList& pathsIn, bool playNow)
     if (pathsIn.isEmpty()) return;
     QStringList paths;   // playlist files (.m3u, .m3u8) stand for what they list
     for (const QString& p : pathsIn) {
-        if (isPlaylistFile(p)) paths += readPlaylistFile(p);
+        // (a playlist *file*: an address ending in .m3u8 is a stream, which the player plays as it is)
+        if (isPlaylistFile(p) && (!p.contains(QStringLiteral("://")) || p.startsWith(QLatin1String("file:")))) paths += readPlaylistFile(p);
         else paths << p;
     }
     if (paths.isEmpty()) { showOsd(tr("Nothing to play in that playlist")); return; }
     const int first = m_playlist->addItems(paths);
-    if (!QFileInfo(paths.first()).absolutePath().isEmpty()) m_settings.lastDir = QFileInfo(paths.first()).absolutePath();
+    if (QFileInfo::exists(paths.first())) m_settings.lastDir = QFileInfo(paths.first()).absolutePath();
     if (playNow) playIndex(first);
     if (paths.size() > 1) showOsd(tr("Added %1 files to the playlist").arg(paths.size()));
 }
@@ -804,6 +861,24 @@ void MainWindow::playSource(const QString& path, int i)
     m_lastSourceIndex = i;
     rememberPosition();
     jellyfinStopCurrent(false);
+    // Whatever was asked of yt-dlp for the video before this one is not waited for any more.
+    ++m_webRequest;
+    m_online->cancel();
+    m_webPage.clear();
+    m_webAsking.clear();
+    m_webSite.clear();
+    m_webWhat.clear();
+    m_webLive = false;
+    m_webHeaders.clear();
+    m_webSubs.clear();
+    m_webChapters.clear();
+    m_webFallbackNote.clear();
+    m_webPending.clear();
+    if (!m_webInner) m_webDepth = 0;
+    m_webInner = false;
+    if (!m_webRetryNext) m_webRetried = false;
+    m_webRetryNext = false;
+    setHint(QString());
     // A server conversion that was never reported (Cable TV doesn't report) ends here.
     if (m_jfTranscoding && !m_jfPlaySession.isEmpty()) { m_jf->stopTranscode(m_jfPlaySession); m_jfPlaySession.clear(); }
     m_extSubs.clear();
@@ -886,6 +961,16 @@ void MainWindow::playSource(const QString& path, int i)
         m_emptyHint->hide();
         updateTitle();
         return;
+    } else if (!tv && (OnlineResolver::isReference(path) || OnlineResolver::isPage(path))) {
+        // A page with a video on it (2.17, Online.cpp): yt-dlp says where the video is.
+        m_player->setHttpHeaders({});
+        m_jfItemId.clear();
+        m_jfTranscoding = false;
+        m_currentLocal.clear();
+        m_webStartNs = m_pendingStartNs;
+        m_pendingStartNs = -1;
+        playWeb(path, i);
+        return;
     } else {
         m_player->setHttpHeaders({});
         m_jfItemId.clear();
@@ -913,7 +998,7 @@ void MainWindow::playSource(const QString& path, int i)
     openResolved(i, uri, start, m_mediaTitle.isEmpty() ? QFileInfo(path).fileName() : m_mediaTitle, QString());
 }
 
-void MainWindow::openResolved(int i, const QString& uri, qint64 start, const QString& shown, const QString& note)
+void MainWindow::openResolved(int i, const QString& uri, qint64 start, const QString& shown, const QString& note, const QList<WebStream>& streams)
 {
     if (i >= 0) m_playlist->setCurrentIndex(i);
     m_lastError.clear();
@@ -930,7 +1015,8 @@ void MainWindow::openResolved(int i, const QString& uri, qint64 start, const QSt
         m_video->clearFrame();
         if (m_desk) m_desk->view()->clearFrame();
     }
-    m_player->open(uri, true, start);
+    if (!streams.isEmpty()) m_player->openWeb(streams, true, start);   // (a web video: its picture and its sound may be two addresses)
+    else m_player->open(uri, true, start);
     updateTitle();
     if (tv) return;   // (the channel's own banner says what is on)
     QString msg = start > 0 ? tr("%1 — resuming at %2 (Home: start over)").arg(shown, formatTime(start / 1000000)) : shown;
@@ -1103,7 +1189,7 @@ void MainWindow::addDialog()
 
 void MainWindow::dragEnterEvent(QDragEnterEvent* e)
 {
-    if (e->mimeData()->hasUrls()) e->acceptProposedAction();
+    if (e->mimeData()->hasUrls() || !addressesIn(e->mimeData()->text()).isEmpty()) e->acceptProposedAction();
 }
 
 void MainWindow::dropEvent(QDropEvent* e)
@@ -1121,6 +1207,8 @@ void MainWindow::dropEvent(QDropEvent* e)
             files << u.toString();
         }
     }
+    // (a link dragged out of a browser's page, or a piece of text with an address in it)
+    if (files.isEmpty()) files = addressesIn(e->mimeData()->text());
     if (!files.isEmpty()) { openFiles(files, true); e->acceptProposedAction(); }
 }
 
@@ -1457,8 +1545,21 @@ void MainWindow::setExternalSubtitleFile(const QString& uri, const QString& labe
         applyExternalSubtitle(stageSubtitle(f.readAll(), u.toLocalFile()), label);
         return;
     }
-    // Server subtitle (Jellyfin): download it with the session's authentication first.
     showOsd(tr("Loading subtitles…"));
+    if (m_webSubs.contains(uri)) {
+        // A web video's subtitle file, fetched the way the site wants it (2.17). Automatic captions come with
+        // every line repeated while the next one rolls in: tidied to plain lines first.
+        const QPair<QString, bool> kind = m_webSubs.value(uri);
+        const int request = m_webRequest;
+        m_online->fetch(uri, m_webHeaders, [this, uri, label, kind, request](const QByteArray& data, const QString& err) {
+            if (request != m_webRequest) return;   // (another video by now)
+            if (!err.isEmpty() || data.trimmed().isEmpty()) { showOsd(tr("Could not load the subtitles: %1").arg(err.isEmpty() ? tr("the file is empty") : err), 4000); return; }
+            const QByteArray lines = kind.second ? OnlineResolver::tidyCaptions(data) : data;
+            applyExternalSubtitle(stageSubtitle(lines, uri + QLatin1Char('.') + (kind.first.isEmpty() ? QStringLiteral("vtt") : kind.first)), label);
+        });
+        return;
+    }
+    // Server subtitle (Jellyfin): download it with the session's authentication first.
     m_jf->fetchBytes(u, [this, uri, label](const QByteArray& data, const QString& err) {
         if (!err.isEmpty()) { showOsd(tr("Could not load the subtitles: %1").arg(err), 4000); return; }
         applyExternalSubtitle(stageSubtitle(data, uri), label);
@@ -1890,22 +1991,28 @@ bool MainWindow::loadSubtitleOffer(int index)
 
 void MainWindow::rememberPosition()
 {
-    if (m_currentLocal.isEmpty() || !m_player->hasMedia()) return;
+    const QString key = resumeKey();   // a local file's path, or a web video's page
+    if (key.isEmpty() || !m_player->hasMedia()) return;
     if (tvOn()) return;   // a channel's programme isn't something to resume
-    m_resume->remember(m_currentLocal, m_player->position() / 1000000, m_player->duration() / 1000000);
+    m_resume->remember(key, m_player->position() / 1000000, m_player->duration() / 1000000);
     m_resume->save();
 }
 
 void MainWindow::fillRecentMenu(QMenu* menu)
 {
     QStringList existing;
-    for (const QString& f : m_settings.recentFiles) if (QFileInfo::exists(f)) existing << f;
+    for (const QString& f : m_settings.recentFiles) if (OnlineResolver::isReference(f) || QFileInfo::exists(f)) existing << f;
     if (existing.isEmpty()) { menu->addAction(tr("No recent files"))->setEnabled(false); return; }
     for (const QString& f : existing) {
-        const qint64 at = m_resume->position(f);
-        const QString label = at > 0 ? tr("%1  (at %2)").arg(QFileInfo(f).fileName(), formatTime(at)) : QFileInfo(f).fileName();
+        const bool web = OnlineResolver::isReference(f);
+        const QString page = web ? OnlineResolver::referencePage(f) : QString();
+        const qint64 at = m_resume->position(web ? QStringLiteral("web:") + page : f);
+        QString name = QFileInfo(f).fileName();
+        if (web) name = tr("Web · %1").arg(OnlineResolver::referenceTitle(f).isEmpty() ? QUrl(page).host() + QUrl(page).path() : OnlineResolver::referenceTitle(f));
+        name.replace(QLatin1Char('&'), QStringLiteral("&&"));
+        const QString label = at > 0 ? tr("%1  (at %2)").arg(name, formatTime(at)) : name;
         QAction* a = menu->addAction(label, this, [this, f] { playIndex(m_playlist->addItems({f})); });
-        a->setToolTip(f);
+        a->setToolTip(web ? page : f);
     }
     menu->addSeparator();
     menu->addAction(tr("Clear recent files"), this, [this] { m_settings.recentFiles.clear(); });
@@ -2380,6 +2487,10 @@ void MainWindow::updateInfoOverlay()
     if (!m_jfItemId.isEmpty()) {   // (a network address, possibly with a token: never shown)
         lines << tr("File        %1").arg(mediaTitle());
         lines << tr("Jellyfin    %1").arg(jellyfinPlayDescription());
+    } else if (!m_webPage.isEmpty()) {   // (the streams' own addresses say nothing, and carry a signature)
+        lines << tr("File        %1").arg(mediaTitle());
+        lines << tr("Web         %1").arg(QStringList{m_webSite, m_webWhat, m_player->isWeb() && m_player->webReport().value("streams").toInt() > 1
+                                                                                  ? tr("picture and sound as two streams") : QString()}.join(QStringLiteral(" · ")));
     } else {
         lines << tr("File        %1").arg(QFileInfo(m_player->currentPath()).fileName());
     }
@@ -2425,6 +2536,7 @@ QJsonObject MainWindow::stateReport() const
     const QSizeF ds = displaySize(f, m_video->aspectOverride());
     static const char* states[] = {"idle", "loading", "paused", "playing", "error"};
     o["file"] = m_mediaTitle.isEmpty() ? QFileInfo(m_player->currentPath()).fileName() : m_mediaTitle;
+    o["online"] = onlineReport();
     o["source"] = m_jfItemId.isEmpty() ? QStringLiteral("file") : QStringLiteral("jellyfin");
     o["jellyfinSignedIn"] = m_jf->isSignedIn();
     o["tv"] = m_tv->report();
@@ -2510,7 +2622,7 @@ QJsonObject MainWindow::stateReport() const
     o["externalSubtitleOffers"] = int(m_extSubs.size());
     o["resumeMs"] = double(m_currentLocal.isEmpty() ? 0 : m_resume->position(m_currentLocal));
     QJsonArray rec;
-    for (const QString& f : m_settings.recentFiles) rec.append(QFileInfo(f).fileName());
+    for (const QString& f : m_settings.recentFiles) rec.append(OnlineResolver::isReference(f) ? QStringLiteral("web:") + OnlineResolver::referenceTitle(f) : QFileInfo(f).fileName());
     o["recentFiles"] = rec;
     {
         const QSize ps = pixelatedSize(f, m_video->aspectOverride(), m_params.pixelHeight, m_params.pixelWidth);
@@ -2611,6 +2723,7 @@ QJsonObject MainWindow::stateReport() const
         o["deskGlassAspect"] = v->glassRectLogical().height() > 0 ? v->glassRectLogical().width() / v->glassRectLogical().height() : 0.0;
         o["deskMaskRect"] = rectJson(m_desk->currentMask().boundingRect());
         o["deskControlsVisible"] = m_desk->controlsVisible();
+        o["deskControls"] = m_desk->controlsReport();
         o["deskWindowVisible"] = m_desk->isVisible();
         o["mainWindowVisible"] = isVisible();
         const auto dp = v->deskPose();

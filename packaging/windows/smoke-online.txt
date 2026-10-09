@@ -1,0 +1,19 @@
+# Windows smoke test, videos from web sites (2.17): the picture and the sound of one video read from two
+# addresses over HTTP (the mock site of tests/web_mock.py; no yt-dlp involved). These results count.
+openpair @W@/media/v_h264.mp4 @W@/media/a_aac.m4a
+waitstate playing 60000
+waitshown 2 15000
+report pair
+seek 12
+waitshown 12 15000
+wait 1500
+report pair-jump
+seek 3
+waitshown 3 15000
+wait 1500
+report pair-back
+openlink @W@/media/v_h264.mp4
+waitstate playing 60000
+wait 1500
+report direct
+quit

@@ -1,0 +1,26 @@
+# 2.17: the decoders are connected to the web source a moment late (CRTPLAYER_WEB_CONNECT_DELAY_MS), long after
+# the server's first bytes are there: every kind of video still opens (the readers wait with them)
+openlink @W@/yt/watch?v=big
+waitstate playing 20000
+waitshown 2 10000
+report late:big
+openlink @W@/yt/watch?v=pair-h264
+waitstate playing 20000
+waitshown 2 10000
+report late:pair-h264
+openlink @W@/yt/watch?v=pair-vp9
+waitstate playing 20000
+waitshown 2 10000
+report late:pair-vp9
+openlink @W@/yt/watch?v=muxed
+waitstate playing 20000
+waitshown 2 10000
+report late:muxed
+openlink @W@/yt/watch?v=mixed-a
+waitstate playing 20000
+waitshown 2 10000
+seek 47
+waitshown 47 12000
+wait 1500
+report late:mixed-a
+quit

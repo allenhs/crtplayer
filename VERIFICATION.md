@@ -290,6 +290,168 @@ was **not measured**, because there is no GPU in this environment.
 - the interlaced style's look at real refresh rates (only its field alternation was
   measured).
 
+## 2.17.0: videos from web sites (yt-dlp), and 4K HEVC 10-bit without a graphics card
+
+### What could not be tested here
+
+- **YouTube itself, and every other real video site.** This machine cannot reach them (its
+  network allows only package registries and GitHub). Everything below is against a small
+  video site on the same machine (`tests/web_mock.py`), with a stand-in for yt-dlp that
+  answers the way the real one answers for YouTube (`tests/fake_ytdlp.py`), and with the
+  real yt-dlp (2026.08.19) against that site's pages. From GitHub's Windows build machine,
+  which is on the internet, YouTube answered the real yt-dlp with *"Sign in to confirm
+  you're not a bot"*, which YouTube says to data centres; the player showed yt-dlp's words.
+  Whether a YouTube video plays at home is the first thing to try.
+- **Real automatic captions** (only a file written the way YouTube writes them), a real
+  site's cookies and headers (only the stand-in's), addresses that expire after six hours
+  (here after six seconds), and a real slow connection (a throttled local server).
+- **A graphics card**: as before, everything ran on software OpenGL.
+
+### Videos from web sites
+
+**How it is tested.** `RUN_ONLY=online scripts/run-verification.sh …` runs seven
+launches against the mock site (`tests/automation/online*.txt`), and
+`scripts/check-online.py` judges every picture and report by itself: the clips show where
+they are (a bar along the top grows 5 pixels a second) and say it in their sound as well
+(ten seconds of tone, ten of silence, in turn), so a picture or a sound level from the
+wrong place is caught. 86 checks, among them:
+
+- The picture and the sound as two streams, in all four combinations YouTube uses (H.264 +
+  AAC, VP9 + Opus, H.264 + Opus, VP9 + AAC), one file with both, and an HLS stream: after
+  every jump the picture is that of the place asked for, and so is the sound (tone or
+  silence). Where the tone stops at 30 s, the picture shows 29.6 to 30.1 s.
+- Pause, play on, twice the speed, frame steps; subtitle files (written by people; the
+  automatic captions tidied to one line at a time) with the right line in the picture
+  after jumps; chapters; playlists (their videos taking their place, the next one asked
+  for when its turn comes, saved as plain page addresses and opened again); a short
+  address kept under the video's own page; where a video was left, also after a restart;
+  "Recent".
+- A 90 MB file: a jump far ahead, back, and ahead again takes three requests to the
+  server each; playing on takes none.
+- Addresses that stop working: yt-dlp asked again once, the video going on at the place
+  asked for; again when it happens again later; addresses that never work: one error
+  dialog that says the site would not send the video.
+- The network away for six seconds: the video waits and goes on with the picture it
+  stopped at (largest step between two looks at the picture half a second apart: 0.88 s).
+- A video that is gone, a page without a video, an address whose server does not say what
+  it is (tried as a stream: it plays; and when it is nothing, both reasons in one dialog),
+  a video file sent as a page; no JavaScript runtime (said once); the site's headers and
+  cookies on every stream and subtitle request; a live stream (nothing kept to resume);
+  something else opened while yt-dlp is still thinking (its late answer not used); Ctrl+V
+  with an address inside other text; the picture size asked for.
+- **"Get yt-dlp"** from a release on the mock site: the checksum list, then the program;
+  Deno's checksum, then its archive, unpacked; both used, and the video that was waiting
+  starts by itself. A program whose checksum does not match is not kept, and it is said;
+  when only Deno's does not match, yt-dlp is kept and the button offers Deno again.
+- **The real "Get yt-dlp" from GitHub** (by hand, on this machine): yt-dlp_linux (its
+  SHA-256 matching the release's list) and Deno 2.9.7 (unpacked from its archive by the
+  player) were fetched, run, and played a page of the mock site in two streams.
+- **The real yt-dlp** against the mock site's pages: a page with a DASH manifest naming
+  two files (two streams), an HTML5 video, an HLS stream, a page with nothing on it.
+
+**Bugs found by these tests and fixed before release:**
+
+- **After a jump, a two-stream video's sound went silent** for as long as the jump was
+  long (found with a recording of what was heard: tone for 7 s, then silence where 3 s of
+  tone belonged). playbin hands a jump to the picture's sink only; with two demuxers the
+  sound's stayed where it was. The player's sink now hands events to every sink, for such
+  videos.
+- **A quick jump** ("to the nearest keyframe", as while dragging the seek bar) left the
+  picture and the sound **1.4 s apart** when their files were of different kinds: each
+  demuxer went to a keyframe of its own. Every jump is an exact one for two streams now.
+- **One start in about fifteen hung for good** (seen with a server on the same machine,
+  which answers within a millisecond): a reader that handed over its first bytes just as
+  the decoders were being connected was told "flushing" and stopped. The readers now wait
+  until the decoders are connected. Shown both ways with the decoders connected 150 ms
+  late on purpose (`CRTPLAYER_WEB_CONNECT_DELAY_MS`): without the fix no video opened (6 of
+  6), with it all did; that run stays in the suite. 180 openings in a row and 11 fresh
+  starts of the case that had hung: none hung.
+- **A network gap skipped video**: the clock ran on without a picture and the video went
+  on where the clock had got to (7.5 s never shown in a 6 s gap). It now waits.
+- **Reading ahead was 2 MB**, GStreamer's default, so the MP4 demuxer's look at the next
+  fragment meant two new requests every five seconds. It is 24 MB now.
+- **One failure brought several error dialogs**, and a failed pipeline's late messages
+  could set the state back to "paused". The first error is the one reported now.
+
+**Windows** (GitHub's build machine, software OpenGL, no graphics card): the packaged
+player played the picture and the sound of one video from two addresses of a local site,
+jumped ahead and back with both, and played a video file's address. Its **"Get yt-dlp"**
+fetched yt-dlp.exe and Deno, and the real yt-dlp.exe found the two streams of a page of
+the local site, which played. (`packaging/windows/smoke-online*.txt`; the part that needs
+the internet is reported, not counted.) yt-dlp's messages are asked for in UTF-8: on
+Windows they came in the system's code page before.
+
+**Found on the way, in the test driver:** a wait that polls (for a state, a position) could
+run the rest of a script twice over when a step took long, so later waits were cut short.
+On Windows that made desk mode's strip of controls seem not to hide (a 4 s wait lasted
+10 ms). Each such poll now stops its timer first.
+
+### 4K HEVC 10-bit without a graphics card
+
+Fullscreen, effects off, 2 cores, 2.16.1 against 2.17.0 on the same machine, twice each:
+
+| | 2.16.1 | 2.17.0 |
+|---|---|---|
+| 4K HEVC 10-bit, light clip | 10.4, 10.2 frames a second (60 ms late) | **30.0, 29.9** (3 ms) |
+| 4K HEVC 10-bit, hard clip (20 Mbit/s, grain) | 4.1, 6.4 (60 to 96 ms late) | **24.5, 22.9** (4 ms) |
+
+- The player's own filter (`ShrinkFilter`, `ShrinkKernel.h`) brings 10- and 12-bit pictures
+  to 8 bits and shrinks them by a whole factor in one pass: 1.7 ms for a 4K picture to
+  1280×720 alone, 14 ms in the running player. Unit-tested (`ctest -R shrink`): flat grey
+  stays flat, every sample counted, uneven edges, white stays white, the dither ramp.
+  The picture matches the old way's (mean difference 1.9 of 255) and is properly
+  averaged (no jagged fine detail).
+- Leaving pictures out before decoding (`FrameGovernor`): only pictures nothing is built
+  from (H.264 `nal_ref_idc` 0; H.265's top temporal layer), checked by unit tests on real
+  and on damaged data; on the hard clip 41 of 88 such pictures were left out, of 178; none
+  when switched off; paused and stepped pictures are the exact ones (picture 75, then 76,
+  77, 78).
+- On the OpenGL widget drawn by software OpenGL (a stand-in for a graphics card's path)
+  the hard clip is drawn at 1 to 5 frames a second, with the governor or without, from run
+  to run: there llvmpipe takes longer to draw a picture than the decoder to make it, which
+  a graphics card does not. Those two checks are reported there, not counted. On the plain
+  surface, the case of a machine without one, they count: 17.5 to 28.1 frames a second
+  with the governor against 7.9 to 18.2 without, in five runs.
+- Two thresholds of that OpenGL-widget stand-in were set to what it reaches at all: full
+  screen 1080p (2.16.1 and 2.17.0 measured alternately, three times each: 13.6, 15.6, 16.2
+  against 14.0, 15.4, 14.7 frames a second) now asks for 12 rather than 15, and so does 4K
+  HEVC 10-bit (12.7 to 21.9 measured; 2.2 the old way). Twelve quick changes of size and
+  look there ask for 15 frames a second rather than 24 (20.3 to 30 measured; what is checked
+  is that the stream carries on).
+
+### Full suites for 2.17.0
+
+| Run | Result |
+|---|---|
+| Native X11 | 780 passed, none failed (2 reported, above) |
+| Native X11, the path a graphics card takes (`CRTPLAYER_VIDEO_SURFACE=gl CRTPLAYER_FAST_PATH=never`) | 776 passed, **4 failed** (below) |
+| Native Wayland | 18 passed, none failed |
+| AppImage, X11, the system's Qt removed | 780 passed, none failed (2 reported) |
+| AppImage, Wayland, the system's Qt removed | 18 passed, none failed |
+| Unit tests | 11 of 11 passed |
+| Web videos, no-GPU playback and the on-screen checks under the address and undefined-behaviour sanitizers | no findings |
+
+(The sanitized build runs ten to twenty times slower, so its frame rates are not judged:
+its timing checks failed as expected, and so did one picture comparison of the 10-bit
+video taken while it played at about one frame a second. The checks that do not depend
+on speed passed, and the sanitizers reported nothing.)
+
+**The four failed checks** (on the graphics card's path; the player was the same binary as in
+the run without failures):
+
+- *Three frame rates of the no-GPU suite* (1080p 24.4 frames a second, 4K 13.5, the hard
+  clip 5.4 against 6.4 without the governor). That suite measured everything slow in that
+  run, on both surfaces: the hard clip on the plain surface came at 5.4 frames a second
+  where four other runs measured 17.5 to 28.1. The test machine shares its two cores; the
+  suite was run four more times after it (twice for 2.17.0, twice for 2.16.1 alongside)
+  and 2.17.0 passed every time.
+- *Cable TV: subtitles turned back on show again*: the report was taken while that
+  channel's programme was starting over (state "loading", no tracks known). A test's
+  timing: the script now waits for it to play again before looking. Found in the same
+  re-run: *a video without subtitles in between* measured the sound heard 37 ms into the
+  next video, so the last second's pitch was the previous video's; the script now waits
+  until it has played 1.3 s. The everyday suite with both changes, twice on each path: all passed (4 of 4).
+
 ## 2.16.1: Windows: the list of looks in full screen, and desk mode over the desktop (from real use)
 
 **The report** (the Windows preview of 2.16.0, on a PC with a graphics card): videos play.

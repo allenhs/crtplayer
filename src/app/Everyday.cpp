@@ -4,6 +4,7 @@
 // next video in a folder, and the sleep timer.
 #include "MainWindow.h"
 
+#include "online/OnlineVideo.h"
 #include "playback/Player.h"
 #include "render/VideoWidget.h"
 #include "tv/TvController.h"
@@ -80,6 +81,9 @@ void MainWindow::applyEverydaySettings()
     m_playbackPanel->setDeinterlace(m_settings.deinterlace);
     m_playbackPanel->setVideoPath(m_settings.videoPath);
     m_playbackPanel->setLookDetail(m_settings.lookDetail);
+    m_online->setConfiguredProgram(m_settings.ytDlpPath);
+    m_playbackPanel->setOnlineHeight(m_settings.onlineMaxHeight);
+    updateOnlineStatus(false);   // (without running yt-dlp for its version: that waits until it is needed)
     m_playbackPanel->setEnhance(m_settings.enhanceUpscale, m_settings.enhanceSharpness, m_settings.smoothMotion);
     m_playbackPanel->setNvidia(m_settings.enhanceNvidia, m_settings.nvidiaQuality, m_settings.nvidiaMotion);
     applyEnhance();
@@ -148,9 +152,11 @@ void MainWindow::chooseAudioTrack(int index)
 // files: the one in the preferred language (or the first) is loaded, once per video.
 void MainWindow::maybeLoadOfferedSubtitle()
 {
-    if (!m_settings.subtitlesOn || m_jfItemId.isEmpty() || m_extSubs.isEmpty() || !m_extSubLabel.isEmpty()) return;
-    if (!m_player->hasMedia() || !m_player->subtitleTracks().isEmpty() || m_autoSubTried == m_jfItemId) return;
-    m_autoSubTried = m_jfItemId;
+    // (a Jellyfin item's or, 2.17, a web video's: both come with subtitle files on offer and none inside)
+    const QString which = !m_jfItemId.isEmpty() ? m_jfItemId : !m_webPage.isEmpty() ? QStringLiteral("web:") + m_webPage : QString();
+    if (!m_settings.subtitlesOn || which.isEmpty() || m_extSubs.isEmpty() || !m_extSubLabel.isEmpty()) return;
+    if (!m_player->hasMedia() || !m_player->subtitleTracks().isEmpty() || m_autoSubTried == which) return;
+    m_autoSubTried = which;
     int pick = 0;
     if (!m_settings.subtitleLang.isEmpty()) {
         const gchar* name = gst_tag_get_language_name(m_settings.subtitleLang.toUtf8().constData());
@@ -359,12 +365,20 @@ QStringList MainWindow::readPlaylistFile(const QString& path)
     // .m3u8 is UTF-8; .m3u is whatever wrote it: UTF-8 when it is valid UTF-8, otherwise the system's encoding
     const QString text = QString::fromUtf8(data).contains(QChar(0xFFFD)) ? QString::fromLocal8Bit(data) : QString::fromUtf8(data);
     const QDir base = QFileInfo(path).absoluteDir();
+    QString webTitle;   // a web video's title, from the line before its address (as this player writes it)
     for (QString line : text.split(QLatin1Char('\n'))) {
         line = line.trimmed();
+        if (line.startsWith(QLatin1String("#EXTINF:"))) {
+            const QString t = line.section(QLatin1Char(','), 1).trimmed();
+            webTitle = t.startsWith(QStringLiteral("Web · ")) ? t.mid(6) : QString();
+            continue;
+        }
         if (line.isEmpty() || line.startsWith('#')) continue;
         if (line.contains(QStringLiteral("://"))) {
             const QUrl u(line);
-            out << (u.isLocalFile() ? u.toLocalFile() : line);
+            if (!webTitle.isEmpty() && OnlineResolver::isPage(line)) out << OnlineResolver::reference(line, webTitle);
+            else out << (u.isLocalFile() ? u.toLocalFile() : line);
+            webTitle.clear();
         } else {
             line.replace('\\', '/');   // (lists written on Windows)
             out << QDir::cleanPath(QFileInfo(line).isAbsolute() ? line : base.absoluteFilePath(line));
@@ -385,6 +399,8 @@ bool MainWindow::savePlaylistFile(const QString& path)
     for (int i = 0; i < m_playlist->count(); ++i) {
         const QString item = m_playlist->at(i);
         ts << "#EXTINF:-1," << m_playlist->labelAt(i) << "\n";
+        // A web video as its page's plain address: what any other player understands too.
+        if (OnlineResolver::isReference(item)) { ts << OnlineResolver::referencePage(item) << "\n"; continue; }
         if (item.contains(QStringLiteral("://"))) { ts << item << "\n"; continue; }
         // Videos under the list's own folder are written relative to it, so the folder can be moved.
         const QString rel = base.relativeFilePath(item);

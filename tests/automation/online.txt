@@ -1,0 +1,713 @@
+# 2.17: videos from web sites. yt-dlp here is tests/fake_ytdlp.py (it answers the way the real one answers for YouTube),
+# the site is tests/web_mock.py. The clips say where they are: the bar in the picture (5 pixels a second), and the
+# sound (ten seconds of tone, ten of silence, in turn). Screenshots are named <subtitle rule>_<number>_<seconds>.
+subs off
+report start
+# -- the picture and the sound as two addresses (H.264 + AAC): what YouTube serves
+openlink @W@/yt/watch?v=pair-h264
+waitstate playing 30000
+waitshown 3 10000
+screenshot original @O@/@N@/n_01_3.png
+report open:pair-h264
+seek 13
+waitshown 13 12000
+wait 1500
+screenshot original @O@/@N@/n_02_13.png
+report s:pair-h264:silent
+seek 27
+waitshown 27 12000
+wait 1500
+screenshot original @O@/@N@/n_03_27.png
+report s:pair-h264:tone
+seek 75
+waitshown 75 12000
+wait 1500
+screenshot original @O@/@N@/n_04_75.png
+report s:pair-h264:silent
+seek 103
+waitshown 103 12000
+wait 1500
+screenshot original @O@/@N@/n_05_103.png
+report s:pair-h264:tone
+seek 5
+waitshown 5 12000
+wait 1500
+screenshot original @O@/@N@/n_06_5.png
+report s:pair-h264:tone
+# -- the moment the tone stops (30 s): the sound is where the picture is
+seek 27.5
+waitshown 27.5 12000
+wait 250
+report b:pair-h264:00
+wait 250
+report b:pair-h264:01
+wait 250
+report b:pair-h264:02
+wait 250
+report b:pair-h264:03
+wait 250
+report b:pair-h264:04
+wait 250
+report b:pair-h264:05
+wait 250
+report b:pair-h264:06
+wait 250
+report b:pair-h264:07
+wait 250
+report b:pair-h264:08
+wait 250
+report b:pair-h264:09
+wait 250
+report b:pair-h264:10
+wait 250
+report b:pair-h264:11
+wait 250
+report b:pair-h264:12
+wait 250
+report b:pair-h264:13
+wait 250
+report b:pair-h264:14
+wait 250
+report b:pair-h264:15
+wait 250
+report b:pair-h264:16
+wait 250
+report b:pair-h264:17
+wait 250
+report b:pair-h264:18
+wait 250
+report b:pair-h264:19
+# -- paused, played on, at twice the speed, one picture at a time
+seek 41
+waitshown 41 12000
+wait 1200
+pause
+wait 400
+report paused-a
+wait 1500
+report paused-b
+play
+wait 2000
+report played-on
+rate 2
+wait 3000
+report fast
+rate 1
+wait 1500
+report normal-again
+seek 60
+waitshown 60 12000
+pause
+wait 600
+report step-0
+step
+wait 500
+report step-1
+step
+wait 500
+report step-2
+step back
+wait 900
+report step-3
+play
+# -- subtitle files the site offers: written by people, and the automatic captions (every line twice, word by word: tidied)
+seek 12
+waitshown 12 12000
+subfile offer 0
+wait 1800
+screenshot original @O@/@N@/a_07_x.png
+report subs-english
+seek 32
+waitshown 32 12000
+wait 800
+screenshot original @O@/@N@/a_08_32.png
+subfile offer 2
+wait 1800
+screenshot original @O@/@N@/a_09_x.png
+report subs-automatic
+seek 12
+waitshown 12 12000
+wait 800
+screenshot original @O@/@N@/a_10_12.png
+seek 26
+waitshown 26 12000
+wait 800
+screenshot original @O@/@N@/a_11_26.png
+subfile offer 1
+wait 1800
+screenshot original @O@/@N@/b_12_x.png
+report subs-french
+subfile off
+wait 1500
+screenshot original @O@/@N@/n_13_x.png
+report subs-off
+subs off
+# -- chapters from the page
+seek 5
+waitshown 5 12000
+wait 500
+chapter next
+wait 1500
+report chapter-1
+chapter next
+wait 1500
+report chapter-2
+infooverlay on
+wait 700
+grabwindow @O@/@N@/window-info.png
+infooverlay off
+# -- VP9 + Opus (WebM)
+openlink @W@/yt/watch?v=pair-vp9
+waitstate playing 30000
+waitshown 3 10000
+screenshot original @O@/@N@/n_14_3.png
+report open:pair-vp9
+seek 47
+waitshown 47 12000
+wait 1500
+screenshot original @O@/@N@/n_15_47.png
+report s:pair-vp9:tone
+seek 13
+waitshown 13 12000
+wait 1500
+screenshot original @O@/@N@/n_16_13.png
+report s:pair-vp9:silent
+seek 91
+waitshown 91 12000
+wait 1500
+screenshot original @O@/@N@/n_17_91.png
+report s:pair-vp9:silent
+seek 101
+waitshown 101 12000
+wait 1500
+screenshot original @O@/@N@/n_18_101.png
+report s:pair-vp9:tone
+seek 27.5
+waitshown 27.5 12000
+wait 250
+report b:pair-vp9:00
+wait 250
+report b:pair-vp9:01
+wait 250
+report b:pair-vp9:02
+wait 250
+report b:pair-vp9:03
+wait 250
+report b:pair-vp9:04
+wait 250
+report b:pair-vp9:05
+wait 250
+report b:pair-vp9:06
+wait 250
+report b:pair-vp9:07
+wait 250
+report b:pair-vp9:08
+wait 250
+report b:pair-vp9:09
+wait 250
+report b:pair-vp9:10
+wait 250
+report b:pair-vp9:11
+wait 250
+report b:pair-vp9:12
+wait 250
+report b:pair-vp9:13
+wait 250
+report b:pair-vp9:14
+wait 250
+report b:pair-vp9:15
+wait 250
+report b:pair-vp9:16
+wait 250
+report b:pair-vp9:17
+wait 250
+report b:pair-vp9:18
+wait 250
+report b:pair-vp9:19
+# -- H.264 + Opus
+openlink @W@/yt/watch?v=mixed-a
+waitstate playing 30000
+waitshown 3 10000
+screenshot original @O@/@N@/n_19_3.png
+report open:mixed-a
+seek 47
+waitshown 47 12000
+wait 1500
+screenshot original @O@/@N@/n_20_47.png
+report s:mixed-a:tone
+seek 13
+waitshown 13 12000
+wait 1500
+screenshot original @O@/@N@/n_21_13.png
+report s:mixed-a:silent
+seek 91
+waitshown 91 12000
+wait 1500
+screenshot original @O@/@N@/n_22_91.png
+report s:mixed-a:silent
+seek 101
+waitshown 101 12000
+wait 1500
+screenshot original @O@/@N@/n_23_101.png
+report s:mixed-a:tone
+# -- VP9 + AAC
+openlink @W@/yt/watch?v=mixed-b
+waitstate playing 30000
+waitshown 3 10000
+screenshot original @O@/@N@/n_24_3.png
+report open:mixed-b
+seek 47
+waitshown 47 12000
+wait 1500
+screenshot original @O@/@N@/n_25_47.png
+report s:mixed-b:tone
+seek 13
+waitshown 13 12000
+wait 1500
+screenshot original @O@/@N@/n_26_13.png
+report s:mixed-b:silent
+seek 91
+waitshown 91 12000
+wait 1500
+screenshot original @O@/@N@/n_27_91.png
+report s:mixed-b:silent
+seek 101
+waitshown 101 12000
+wait 1500
+screenshot original @O@/@N@/n_28_101.png
+report s:mixed-b:tone
+# -- one file with both
+openlink @W@/yt/watch?v=muxed
+waitstate playing 30000
+waitshown 3 10000
+screenshot original @O@/@N@/n_29_3.png
+report open:muxed
+seek 47
+waitshown 47 12000
+wait 1500
+screenshot original @O@/@N@/n_30_47.png
+report s:muxed:tone
+seek 13
+waitshown 13 12000
+wait 1500
+screenshot original @O@/@N@/n_31_13.png
+report s:muxed:silent
+seek 91
+waitshown 91 12000
+wait 1500
+screenshot original @O@/@N@/n_32_91.png
+report s:muxed:silent
+seek 101
+waitshown 101 12000
+wait 1500
+screenshot original @O@/@N@/n_33_101.png
+report s:muxed:tone
+# -- an HLS stream
+openlink @W@/yt/watch?v=hls
+waitstate playing 30000
+waitshown 3 10000
+screenshot original @O@/@N@/n_34_3.png
+report open:hls
+seek 47
+waitshown 47 12000
+wait 1500
+screenshot original @O@/@N@/n_35_47.png
+report s:hls:tone
+seek 13
+waitshown 13 12000
+wait 1500
+screenshot original @O@/@N@/n_36_13.png
+report s:hls:silent
+seek 91
+waitshown 91 12000
+wait 1500
+screenshot original @O@/@N@/n_37_91.png
+report s:hls:silent
+seek 101
+waitshown 101 12000
+wait 1500
+screenshot original @O@/@N@/n_38_101.png
+report s:hls:tone
+# -- a quick jump (as while dragging the seek bar: "to the nearest keyframe") on two streams of different kinds:
+# each would go to a keyframe of its own, so there every jump is an exact one
+openlink @W@/yt/watch?v=mixed-b
+waitstate playing 30000
+seek 26.4 fast
+wait 600
+wait 250
+report q:mixed-b:00
+wait 250
+report q:mixed-b:01
+wait 250
+report q:mixed-b:02
+wait 250
+report q:mixed-b:03
+wait 250
+report q:mixed-b:04
+wait 250
+report q:mixed-b:05
+wait 250
+report q:mixed-b:06
+wait 250
+report q:mixed-b:07
+wait 250
+report q:mixed-b:08
+wait 250
+report q:mixed-b:09
+wait 250
+report q:mixed-b:10
+wait 250
+report q:mixed-b:11
+wait 250
+report q:mixed-b:12
+wait 250
+report q:mixed-b:13
+wait 250
+report q:mixed-b:14
+wait 250
+report q:mixed-b:15
+wait 250
+report q:mixed-b:16
+wait 250
+report q:mixed-b:17
+openlink @W@/yt/watch?v=pair-vp9
+waitstate playing 30000
+seek 26.4 fast
+wait 600
+wait 250
+report q:pair-vp9:00
+wait 250
+report q:pair-vp9:01
+wait 250
+report q:pair-vp9:02
+wait 250
+report q:pair-vp9:03
+wait 250
+report q:pair-vp9:04
+wait 250
+report q:pair-vp9:05
+wait 250
+report q:pair-vp9:06
+wait 250
+report q:pair-vp9:07
+wait 250
+report q:pair-vp9:08
+wait 250
+report q:pair-vp9:09
+wait 250
+report q:pair-vp9:10
+wait 250
+report q:pair-vp9:11
+wait 250
+report q:pair-vp9:12
+wait 250
+report q:pair-vp9:13
+wait 250
+report q:pair-vp9:14
+wait 250
+report q:pair-vp9:15
+wait 250
+report q:pair-vp9:16
+wait 250
+report q:pair-vp9:17
+# -- a file larger than the player keeps in memory (90 MB): jumps far ahead and back, by byte ranges
+openlink @W@/yt/watch?v=big
+waitstate playing 30000
+waitshown 3 10000
+screenshot original @O@/@N@/n_39_3.png
+report open:big
+report big-0
+seek 100
+waitshown 100 12000
+wait 1500
+screenshot original @O@/@N@/n_40_100.png
+report s:big:tone
+report big-1
+seek 20
+waitshown 20 12000
+wait 1500
+screenshot original @O@/@N@/n_41_20.png
+report s:big:tone
+report big-2
+seek 65
+waitshown 65 12000
+wait 1500
+screenshot original @O@/@N@/n_42_65.png
+report s:big:tone
+report big-3
+seek 115
+waitshown 115 12000
+wait 1500
+screenshot original @O@/@N@/n_43_115.png
+report s:big:silent
+report big-4
+# -- the network is away for six seconds (a line only a little faster than the video, so little is read ahead):
+# the video waits and then goes on where the picture stopped; nothing is left out
+openlink @W@/yt/watch?v=outage1
+waitstate playing 30000
+wait 400
+report o:00
+wait 400
+report o:01
+wait 400
+report o:02
+wait 400
+report o:03
+wait 400
+report o:04
+wait 400
+report o:05
+wait 400
+report o:06
+wait 400
+report o:07
+wait 400
+report o:08
+wait 400
+report o:09
+wait 400
+report o:10
+wait 400
+report o:11
+wait 400
+report o:12
+wait 400
+report o:13
+wait 400
+report o:14
+wait 400
+report o:15
+wait 400
+report o:16
+wait 400
+report o:17
+wait 400
+report o:18
+wait 400
+report o:19
+wait 400
+report o:20
+wait 400
+report o:21
+wait 400
+report o:22
+wait 400
+report o:23
+wait 400
+report o:24
+wait 400
+report o:25
+wait 400
+report o:26
+wait 400
+report o:27
+wait 400
+report o:28
+wait 400
+report o:29
+wait 400
+report o:30
+wait 400
+report o:31
+wait 400
+report o:32
+wait 400
+report o:33
+wait 400
+report o:34
+wait 400
+report o:35
+wait 400
+report o:36
+wait 400
+report o:37
+wait 400
+report o:38
+wait 400
+report o:39
+wait 400
+report o:40
+wait 400
+report o:41
+wait 400
+report o:42
+wait 400
+report o:43
+# -- addresses that stop working (as a video left paused overnight): yt-dlp is asked again, the video goes on
+openlink @W@/yt/watch?v=expire6x2
+waitstate playing 30000
+waitshown 2 10000
+report expire-start
+pause
+wait 7000
+seek 90
+play
+waitonline askedAgain 1 30000
+waitstate playing 30000
+waitshown 90 20000
+wait 1200
+screenshot original @O@/@N@/n_44_90.png
+report expire-after
+# ... and again, when it happens again much later (here: half a minute)
+pause
+wait 32000
+seek 40
+play
+waitonline askedAgain 2 30000
+waitstate playing 30000
+waitshown 40 20000
+wait 2500
+screenshot original @O@/@N@/n_45_40.png
+report expire-again
+# ... and addresses that never work: asked again once, then the error is shown
+openlink @W@/yt/watch?v=dead
+waitstate error 40000
+wait 500
+report expire-dead
+grabwindow @O@/@N@/dialog-dead.png dialog
+closedialogs
+# -- a playlist: its videos take its place in the list; the next one is asked for when its turn comes
+playlist clear
+openlink @W@/yt/playlist?list=three
+waitstate playing 30000
+wait 1500
+report playlist-first
+item next
+waitonline page @W@/yt/watch?v=pair-vp9 30000
+waitstate playing 30000
+wait 1500
+report playlist-second
+seek 117
+waitonline page @W@/yt/watch?v=muxed 40000
+waitstate playing 30000
+waitshown 1 10000
+report playlist-third
+playlist show
+wait 600
+grabwindow @O@/@N@/window-playlist.png
+playlist save @O@/@N@/list.m3u8
+# -- a short address of a video: kept under the video's own page
+playlist clear
+openlink @W@/yt/s/mixed-a
+waitstate playing 30000
+waitshown 2 10000
+report short
+# -- where a video was left
+seek 44
+waitshown 44 12000
+wait 1500
+report resume-left
+openlink @W@/yt/watch?v=muxed
+waitstate playing 30000
+waitshown 1 10000
+openlink @W@/yt/s/mixed-a
+waitstate playing 30000
+waitshown 44 12000
+wait 500
+screenshot original @O@/@N@/n_46_44.png
+report resume-back
+# -- the saved playlist, opened again
+playlist clear
+open @O@/@N@/list.m3u8
+waitstate playing 30000
+wait 1500
+report playlist-file
+# -- a video that is gone; a page without a video; a video file sent as a page
+openlink @W@/yt/watch?v=gone
+waitonline failures 1 30000
+wait 500
+report gone
+grabwindow @O@/@N@/dialog-gone.png dialog
+closedialogs
+openlink @W@/watch/none
+waitonline failures 2 30000
+wait 500
+report none-page
+closedialogs
+# -- an address whose server does not say what it is: yt-dlp knows nothing, and it is tried as a stream (a video; nothing at all)
+openlink @W@/untyped
+waitstate playing 30000
+waitshown 2 10000
+screenshot original @O@/@N@/n_97_2.png
+report untyped
+openlink @W@/untyped-nothing
+waitstate error 40000
+wait 500
+report untyped-nothing
+grabwindow @O@/@N@/dialog-nothing.png dialog
+closedialogs
+openlink @W@/mislabeled
+waitstate playing 30000
+waitshown 2 10000
+screenshot original @O@/@N@/n_47_2.png
+report mislabeled
+# -- no JavaScript runtime (yt-dlp says so): said once
+openlink @W@/yt/watch?v=nojs
+waitstate playing 30000
+waitshown 2 10000
+wait 3200
+report nojs
+openlink @W@/yt/watch?v=nojs
+waitstate playing 30000
+report nojs-again
+# -- what the site wants sent along (who is asking, where from, cookies): for the streams and for subtitle files
+openlink @W@/yt/watch?v=headers
+waitstate playing 30000
+waitshown 2 10000
+subfile offer 0
+wait 1800
+report headers
+subfile off
+wait 800
+# -- a live stream: nothing to come back to
+openlink @W@/yt/watch?v=live
+waitstate playing 30000
+waitshown 2 10000
+report live
+# -- something else is opened while yt-dlp is still thinking: its late answer is not used
+openlink @W@/yt/watch?v=slow
+wait 600
+report slow-asking
+open @M@/sd_4x3_h264.mp4
+waitstate playing 20000
+wait 4500
+report slow-cancelled
+# -- pasted with Ctrl+V; the largest picture asked for
+ytdlp height 720
+pastelink look at this: @W@/yt/watch?v=mixed-b (nice)
+waitstate playing 30000
+wait 1500
+report pasted
+ytdlp height 0
+# -- an older yt-dlp (it does not know --js-runtimes; its age is said when it fails)
+ytdlp path @T@/old/yt-dlp
+wait 1500
+openlink @W@/yt/watch?v=pair-h264
+waitstate playing 30000
+wait 1500
+report old
+openlink @W@/yt/watch?v=gone
+waitonline failures 3 30000
+wait 500
+report old-gone
+grabwindow @O@/@N@/dialog-old.png dialog
+closedialogs
+ytdlp path -
+wait 1500
+# -- subtitles left on: a web video's subtitle file loads by itself (the one written by people, in the language last picked)
+subs on
+openlink @W@/yt/watch?v=pair-vp9
+waitstate playing 30000
+waitshown 3 10000
+wait 2500
+screenshot original @O@/@N@/a_95_x.png
+report subs-by-itself
+subs off
+# -- the settings
+openlink @W@/yt/watch?v=pair-h264
+waitstate playing 30000
+settings playback
+wait 800
+grabwindow @O@/@N@/window-settings.png
+report end
+quit

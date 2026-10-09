@@ -89,6 +89,14 @@ ffmpeg $F -f lavfi -i "testsrc2=size=1920x1080:rate=30:duration=20" -f lavfi -i 
   -vf "noise=alls=6:allf=t" -c:v libx264 -preset veryfast -crf 22 -pix_fmt yuv420p -g 30 -c:a aac -shortest fhd_plain_30.mp4
 ffmpeg $F -f lavfi -i "testsrc2=size=3840x2160:rate=30:duration=10" -f lavfi -i "sine=f=540:duration=10" \
   -vf "noise=alls=6:allf=t" -c:v libx264 -preset veryfast -crf 24 -pix_fmt yuv420p -g 30 -c:a aac -shortest uhd_h264.mp4
+# 2.17: 4K HEVC 10-bit. One that is easy to decode (flat colours) and one that is hard (grain all over the
+# picture, 20 Mbit/s): a computer with two cores cannot decode all of its pictures in time.
+ffmpeg $F -f lavfi -i "testsrc2=size=3840x2160:rate=30:duration=10" -f lavfi -i "sine=f=560:duration=10" \
+  -vf "format=yuv420p10le" -c:v libx265 -preset ultrafast -x265-params "log-level=error:keyint=60" -b:v 5M -c:a aac -shortest uhd_hevc10_light.mkv
+ffmpeg $F -f lavfi -i "testsrc2=size=3840x2160:rate=30:duration=10" -f lavfi -i "sine=f=580:duration=10" \
+  -vf "noise=alls=12:allf=t,format=yuv420p10le" -c:v libx265 -preset ultrafast -x265-params "log-level=error:keyint=60" -b:v 20M -c:a aac -shortest uhd_hevc10_heavy.mkv
+ffmpeg $F -f lavfi -i "testsrc2=size=1920x1080:rate=30:duration=10" -f lavfi -i "sine=f=600:duration=10" \
+  -vf "noise=alls=5:allf=t,format=yuv420p10le" -c:v libx265 -preset ultrafast -x265-params "log-level=error:keyint=60" -b:v 4M -c:a aac -shortest fhd_hevc10.mkv
 # 2.13: Enhance. A detailed picture at full size (the original) and at half size (what is
 # upscaled); a scene with a panning background, three objects moving their own ways and a
 # title that stands still, at 60 frames a second (the truth) and at 30 (what frames are
@@ -178,6 +186,65 @@ cp jump_a.srt jump_offset.srt
 python3 "$HERE/scripts/make-pgs.py" jump_pgs.sup
 ffmpeg $F -i jump_srt.mkv -i jump_pgs.sup -map 0:v -map 0:a -map 1 -map 0:s:0 -c copy -metadata:s:s:0 language=eng jump_pgs.mkv
 rm -f jump_pgs.sup
+# 2.17: videos as web sites serve them (tests/web_mock.py hands them out). The same picture as the jump_* clips (the
+# white bar says where in the video a picture is); the sound says it too: ten seconds of tone, ten of silence, in turn.
+# The picture and the sound as two files (fragmented MP4 with its index in front, WebM), one file with both, an
+# HLS stream, a DASH manifest naming the two files, a larger file than the player keeps in memory, subtitle
+# files (WebVTT; one of them the way YouTube writes automatic captions: every line twice, words timed one by one).
+mkdir -p web/hls
+WEBV=(-f lavfi -i "color=c=0x203860:size=640x360:rate=25:duration=120" -f lavfi -i "color=c=white:size=600x16:rate=25:duration=120")
+WEBA=(-f lavfi -i "sine=f=440:duration=120")
+WEBVF="[0:v][1:v]overlay=x='t*5-600':y=0,format=yuv420p[v]"
+WEBAF="volume='if(lt(mod(t,20),10),1,0)':eval=frame"
+FRAG="-movflags +frag_keyframe+empty_moov+default_base_moof+global_sidx"
+ffmpeg $F "${WEBV[@]}" -filter_complex "$WEBVF" -map "[v]" -c:v libx264 -g 125 $FRAG web/v_h264.mp4
+ffmpeg $F "${WEBA[@]}" -af "$WEBAF" -c:a aac -b:a 96k $FRAG -frag_duration 5000000 web/a_aac.m4a
+ffmpeg $F "${WEBV[@]}" -filter_complex "$WEBVF" -map "[v]" -c:v libvpx-vp9 -b:v 150k -g 125 -deadline realtime -cpu-used 8 -cues_to_front 1 web/v_vp9.webm
+ffmpeg $F "${WEBA[@]}" -af "$WEBAF" -c:a libopus -b:a 64k -cues_to_front 1 web/a_opus.webm
+ffmpeg $F -i web/v_h264.mp4 -i web/a_aac.m4a -c copy -movflags +faststart web/muxed.mp4
+ffmpeg $F -i web/muxed.mp4 -c copy -f hls -hls_time 10 -hls_playlist_type vod -hls_segment_filename web/hls/seg%03d.ts web/hls/index.m3u8
+printf '#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=400000,RESOLUTION=640x360,CODECS="avc1.64001e,mp4a.40.2"\nindex.m3u8\n' > web/hls/master.m3u8
+# (two minutes at 6 Mbit/s: about 90 MB; noise below, the plain blue and the bar above)
+ffmpeg $F -f lavfi -i "color=c=0x203860:size=1280x720:rate=25:duration=120" -f lavfi -i "color=c=white:size=1200x32:rate=25:duration=120" \
+  -f lavfi -i "testsrc2=size=1280x400:rate=25:duration=120" \
+  -filter_complex "[2:v]noise=alls=70:allf=t[n];[0:v][n]overlay=x=0:y=320[b];[b][1:v]overlay=x='t*10-1200':y=0,format=yuv420p[v]" -map "[v]" \
+  -c:v libx264 -preset ultrafast -g 125 -b:v 6M -minrate 6M -maxrate 6M -bufsize 6M -x264-params nal-hrd=cbr $FRAG web/v_big.mp4
+cp jump_a.vtt web/en.vtt
+cp jump_b.vtt web/fr.vtt
+python3 - <<'PY'
+import struct
+cues = [(2, 6, 1), (10, 20, 2), (25, 28, 3), (30, 45, 4), (50, 55, 5), (60, 110, 6), (112, 118, 7)]
+def ts(s): return '%02d:%02d:%06.3f' % (s // 3600, s // 60 % 60, s % 60)
+with open('web/auto.vtt', 'w') as f:
+    f.write('WEBVTT\nKind: captions\nLanguage: en\n\n')
+    before = ' '
+    for a, b, n in cues:
+        words = ['O'] + ['<%s><c>     O</c>' % ts(a + 0.3 * i) for i in range(1, n)]
+        f.write('%s --> %s align:start position:0%%\n%s\n%s\n\n' % (ts(a), ts(b - 0.01), before, ''.join(words)))
+        line = '     '.join('O' for _ in range(n))
+        f.write('%s --> %s align:start position:0%%\n%s\n \n\n' % (ts(b - 0.01), ts(b), line))
+        before = line
+# The DASH manifest: each file whole, with where its header ends and its index lies.
+def index(path):
+    data = open(path, 'rb').read(1 << 20); at = 0; found = None
+    while at + 8 <= len(data):
+        size, kind = struct.unpack('>I4s', data[at:at + 8])
+        if kind == b'sidx': found = (at, at + size - 1)
+        if kind == b'moof' or size < 8: break
+        at += size
+    return found
+def one(name, attrs, path):
+    i = index(path)
+    return ('  <AdaptationSet %s subsegmentAlignment="true">\n   <Representation id="%s" %s>\n    <BaseURL>%s</BaseURL>\n'
+            '    <SegmentBase indexRange="%d-%d"><Initialization range="0-%d"/></SegmentBase>\n   </Representation>\n  </AdaptationSet>\n'
+            % (attrs[0], name, attrs[1], path.split('/')[-1], i[0], i[1], i[0] - 1))
+mpd = ('<?xml version="1.0" encoding="UTF-8"?>\n<MPD xmlns="urn:mpeg:dash:schema:mpd:2011" type="static" mediaPresentationDuration="PT120S" '
+       'minBufferTime="PT2S" profiles="urn:mpeg:dash:profile:isoff-on-demand:2011">\n <Period>\n'
+       + one('v', ('mimeType="video/mp4"', 'codecs="avc1.64001e" width="640" height="360" frameRate="25" bandwidth="100000"'), 'web/v_h264.mp4')
+       + one('a', ('mimeType="audio/mp4" lang="en"', 'codecs="mp4a.40.2" audioSamplingRate="44100" bandwidth="96000"'), 'web/a_aac.m4a')
+       + ' </Period>\n</MPD>\n')
+open('web/dash.mpd', 'w').write(mpd)
+PY
 # 3D models for the 90s CG room: OBJ, STL, PLY, GLB / glTF and FBX; Z-up files, point
 # clouds, very large models, damaged files (models, models-upright, -scenes, -large, -single).
 python3 "$HERE/scripts/make-test-models.py" models

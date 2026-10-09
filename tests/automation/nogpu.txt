@@ -224,4 +224,105 @@ wait 1500
 grabwindow @O@/ng-tv.png
 report tv
 tv off
+wait 1000
+# ---- 2.17: 4K HEVC 10-bit. Its pictures are shrunk and brought to 8 bits in one pass of the player's own
+open @M@/uhd_hevc10_light.mkv
+waitstate playing 30000
+wait 2500
+resetsync
+wait 4000
+report ten-fast
+pause
+seek 4
+wait 2500
+report ten-paused
+grabwindow @O@/ng-ten-fast.png
+videopath never
+wait 800
+seek 4
+wait 3000
+grabwindow @O@/ng-ten-never.png
+play
+wait 1500
+resetsync
+wait 3000
+report ten-never
+videopath auto
+wait 800
+# changing the size and the look in quick succession: the player's own filter changes its factor each time
+# (the clip is ten seconds long, and the look can take seconds to come on with software OpenGL: round again at its end)
+repeat one
+open @M@/uhd_hevc10_light.mkv
+waitstate playing 30000
+wait 1000
+fullscreen on
+wait 150
+bypass off
+wait 400
+fullscreen off
+wait 250
+bypass on
+wait 150
+fullscreen on
+wait 400
+bypass off
+wait 150
+fullscreen off
+wait 300
+bypass on
+wait 1500
+resetsync
+wait 2500
+report ten-changes
+repeat off
+# with a look, a 10-bit video in a window near its own size: 8 bits a sample at its own size, then converted
+open @M@/fhd_hevc10.mkv
+waitstate playing 30000
+bypass off
+wait 3000
+report ten-look
+pause
+seek 4
+wait 2500
+grabwindow @O@/ng-ten-look-fast.png
+videopath never
+wait 800
+seek 4
+wait 3000
+grabwindow @O@/ng-ten-look-never.png
+videopath auto
+wait 800
+bypass on
+# ---- a 4K video this computer may not decode in time: pictures are left out before they are decoded
+open @M@/uhd_hevc10_heavy.mkv
+waitstate playing 30000
+wait 2500
+resetsync
+wait 4500
+report heavy-governed
+governor off
+report heavy-off
+seek 0
+wait 2500
+resetsync
+wait 4500
+report heavy-ungoverned
+governor on
+seek 0
+wait 3500
+# paused and stepped pictures are always the exact ones
+pause
+seek 2.51
+waitshown 2.51 9000
+wait 500
+report heavy-paused
+step
+wait 1200
+report heavy-step1
+step
+wait 1200
+report heavy-step2
+step
+wait 1200
+report heavy-step3
 quit

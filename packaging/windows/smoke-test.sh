@@ -81,4 +81,43 @@ if [ -n "${ONSCREEN_OLD_WAY:-}" ]; then   # for comparison: as before 2.16.1 (re
   onscreen oldway CRTPLAYER_VIDEO_SURFACE=gl CRTPLAYER_FULLSCREEN_BORDER=0
   python "$HERE/scripts/check-onscreen.py" "$WORK/out" oldway 2>&1 | sed -e 's/^FAIL/WAS-NO/' -e 's/^PASS/WAS-OK/' -e 's/^/ON-SCREEN /'
 fi
-[ $smoke_rc -eq 0 ] && [ $onscreen_rc -eq 0 ]
+
+# Videos from web sites (2.17): the picture and the sound of one video from two addresses of a small site on
+# this machine (tests/web_mock.py, run with MSYS2's Python). Then, reported but not counted: "Get yt-dlp" from
+# the internet, a page through the real yt-dlp.exe, and a video on YouTube.
+mkdir -p "$WORK/webmedia/web"
+gst-launch-1.0 -q -e videotestsrc num-buffers=600 pattern=ball ! video/x-raw,width=640,height=360,framerate=30/1 \
+  ! x264enc key-int-max=60 ! h264parse ! mp4mux faststart=true ! filesink location="$WORK/webmedia/web/v_h264.mp4"
+gst-launch-1.0 -q -e audiotestsrc num-buffers=862 samplesperbuffer=1024 ! audio/x-raw,rate=44100,channels=2 ! audioconvert \
+  ! avenc_aac ! aacparse ! mp4mux faststart=true ! filesink location="$WORK/webmedia/web/a_aac.m4a"
+cat > "$WORK/webmedia/web/dash.mpd" <<'MPD'
+<?xml version="1.0" encoding="UTF-8"?>
+<MPD xmlns="urn:mpeg:dash:schema:mpd:2011" type="static" mediaPresentationDuration="PT20S" minBufferTime="PT2S" profiles="urn:mpeg:dash:profile:isoff-on-demand:2011">
+ <Period>
+  <AdaptationSet mimeType="video/mp4"><Representation id="v" codecs="avc1.64001e" width="640" height="360" frameRate="30" bandwidth="800000"><BaseURL>v_h264.mp4</BaseURL></Representation></AdaptationSet>
+  <AdaptationSet mimeType="audio/mp4" lang="en"><Representation id="a" codecs="mp4a.40.2" audioSamplingRate="44100" bandwidth="128000"><BaseURL>a_aac.m4a</BaseURL></Representation></AdaptationSet>
+ </Period>
+</MPD>
+MPD
+ls -la "$WORK/webmedia/web"
+PORT=18650; SITE="http://127.0.0.1:$PORT"
+python "$HERE/tests/web_mock.py" --media "$WORK/webmedia" --port $PORT --log "$WORK/out/web-requests.jsonl" > "$WORK/out/web-mock.log" 2>&1 &
+MOCK=$!; sleep 2
+online() { # name script timeout
+  rm -rf "$WORK/localappdata" "$WORK/appdata"; mkdir -p "$WORK/localappdata" "$WORK/appdata"
+  sed -e "s#@W@#$SITE#g" -e "s#@O@#$O#g" "$(dirname "$0")/$2" > "$WORK/$1.txt"
+  APPDATA="$(cygpath -w "$WORK/appdata")" /usr/bin/timeout "$3" env PATH="$CLEAN_PATH" QT_OPENGL=software "$APP" --automation "$(cygpath -m "$WORK/$1.txt")" \
+    --automation-log "$O/$1.json" > "$WORK/out/$1.log" 2>&1
+  echo "web-video run $1 rc=$?"
+}
+online online smoke-online.txt 300
+online online-net smoke-online-net.txt 900
+kill $MOCK 2>/dev/null
+echo "---- web videos, the player's output:"
+grep -v "custom-downstream-sticky" "$WORK/out/online.log" | tail -40
+echo "---- web videos:"
+python "$(dirname "$0")/check-smoke-online.py" "$WORK/out" 2>&1 | sed 's/^/WEB /'
+online_rc=${PIPESTATUS[0]}
+ls -la "$WORK/appdata/CRTPlayer/CRTPlayer/tools" 2>/dev/null | sed 's/^/WEB tools: /'
+grep -i "yt-dlp\|deno\|error\|warn" "$WORK/out/online-net.log" | grep -v "custom-downstream-sticky" | tail -25 | sed 's/^/WEB net log: /'
+[ $smoke_rc -eq 0 ] && [ $onscreen_rc -eq 0 ] && [ $online_rc -eq 0 ]

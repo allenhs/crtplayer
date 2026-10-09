@@ -29,6 +29,8 @@ for f in "$PREFIX"/lib/gstreamer-1.0/libgst*.dll; do
 done
 cp "$PREFIX"/lib/gio/modules/*.dll "$OUT/lib/gio/modules/" 2>/dev/null || true
 cp "$PREFIX/bin/SDL2.dll" "$OUT/"   # loaded at runtime, so no dependency scan finds it
+# libsoup (HTTP: Jellyfin, videos from web sites): GStreamer's plugin may open it at runtime, where no scan finds it.
+for f in libsoup-3.0-0.dll; do [ -e "$PREFIX/bin/$f" ] && cp "$PREFIX/bin/$f" "$OUT/" && echo "HTTP: $f"; done
 
 # Every library those need, from the MinGW prefix, until nothing new turns up.
 collect() {
