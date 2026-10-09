@@ -586,7 +586,7 @@ void OnlineResolver::install(bool program, bool runtime, std::function<void(cons
         download(denoBase + QLatin1Char('/') + denoAsset + QStringLiteral(".sha256sum"), nullptr,
                  [this, denoBase, denoAsset, progress, done, sofar, name](const QByteArray& sums, const QString& err) {
             auto fail = [this, done, sofar](const QString& why) {
-                m_installing = false;
+                m_installing = false; m_lookedAt = 0;
                 // yt-dlp itself is in place: that much worked.
                 if (sofar.isEmpty()) done(false, why, QString());
                 else done(true, sofar, tr("Deno (which yt-dlp needs for YouTube) could not be fetched: %1").arg(why));
@@ -604,7 +604,7 @@ void OnlineResolver::install(bool program, bool runtime, std::function<void(cons
                 if (exe.isEmpty()) { fail(tr("the archive does not hold the program")); return; }
                 QString why;
                 if (!putInPlace(path, exe, &why)) { fail(why); return; }
-                m_installing = false;
+                m_installing = false; m_lookedAt = 0;
                 done(true, sofar.isEmpty() ? tr("Deno is in place") : tr("yt-dlp and Deno are in place"), QString());
             });
         });
@@ -613,7 +613,7 @@ void OnlineResolver::install(bool program, bool runtime, std::function<void(cons
 
     // First the release's list of checksums, then the program itself, which must match it.
     download(base + QStringLiteral("/SHA2-256SUMS"), nullptr, [this, base, asset, runtime, fetchRuntime, progress, done](const QByteArray& sums, const QString& err) {
-        auto fail = [this, done](const QString& why) { m_installing = false; done(false, why, QString()); };
+        auto fail = [this, done](const QString& why) { m_installing = false; m_lookedAt = 0; done(false, why, QString()); };
         if (!err.isEmpty()) { fail(tr("Could not reach the download (%1)").arg(err)); return; }
         const QByteArray want = checksumIn(sums, asset.toUtf8());
         if (want.size() != 64) { fail(tr("The release lists no checksum for %1").arg(asset)); return; }
@@ -629,7 +629,7 @@ void OnlineResolver::install(bool program, bool runtime, std::function<void(cons
             if (!putInPlace(ownCopyPath(), data, &why)) { fail(why); return; }
             const QString sofar = tr("yt-dlp is in place");
             if (runtime) { fetchRuntime(sofar); return; }
-            m_installing = false;
+            m_installing = false; m_lookedAt = 0;
             done(true, sofar, QString());
         });
     });
@@ -804,6 +804,13 @@ QByteArray OnlineResolver::tidyCaptions(const QByteArray& vtt)
 
 QJsonObject OnlineResolver::report() const
 {
-    return QJsonObject{{"program", program()}, {"ownCopy", programIsOwnCopy()}, {"runs", m_runs}, {"busy", busy()}, {"lastCommand", m_lastCommand},
-                       {"jsRuntime", jsRuntime()}, {"installing", m_installing}};
+    // (the program and the runtime are looked for on disk: at most every two seconds, the report is asked for often)
+    const qint64 now = QDateTime::currentMSecsSinceEpoch();
+    if (now - m_lookedAt > 2000 || m_installing) {
+        m_lookedAt = now;
+        m_seenProgram = program();
+        m_seenRuntime = jsRuntime();
+    }
+    return QJsonObject{{"program", m_seenProgram}, {"ownCopy", m_seenProgram == ownCopyPath()}, {"runs", m_runs}, {"busy", busy()}, {"lastCommand", m_lastCommand},
+                       {"jsRuntime", m_seenRuntime}, {"installing", m_installing}};
 }

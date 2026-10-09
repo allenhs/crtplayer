@@ -102,8 +102,14 @@ QString MainWindow::resumeKey() const
 OnlineOptions MainWindow::onlineOptions() const
 {
     OnlineOptions o;
-    QStringList containers;
-    Player::localFormats(&containers, &o.videoCodecs, &o.audioCodecs);
+    // (what GStreamer here decodes: looked up once, it takes a walk through all its decoders)
+    static QStringList videoCodecs, audioCodecs;
+    if (videoCodecs.isEmpty()) {
+        QStringList containers;
+        Player::localFormats(&containers, &videoCodecs, &audioCodecs);
+    }
+    o.videoCodecs = videoCodecs;
+    o.audioCodecs = audioCodecs;
     const bool software = m_video->softwareRenderer();
     int h = m_settings.onlineMaxHeight;
     if (h <= 0) {

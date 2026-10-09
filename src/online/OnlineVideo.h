@@ -77,7 +77,7 @@ public:
     ~OnlineResolver() override;
 
     // Where yt-dlp is, or empty: the path set by the viewer, the copy the player fetched, the system's.
-    void setConfiguredProgram(const QString& path) { m_configured = path; }
+    void setConfiguredProgram(const QString& path) { m_configured = path; m_lookedAt = 0; }
     QString program() const;
     static QString ownCopyPath();         // where the player keeps a copy it fetched itself
     bool programIsOwnCopy() const;
@@ -142,5 +142,7 @@ private:
     QNetworkAccessManager* m_net = nullptr;
     QNetworkAccessManager* network();
     QString m_lastCommand;
+    mutable qint64 m_lookedAt = 0;
+    mutable QString m_seenProgram, m_seenRuntime;
     int m_runs = 0;
 };

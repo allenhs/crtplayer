@@ -128,6 +128,7 @@ void Automation::next()
             const qint64 pos = p->position() / 1000000;
             const bool ok = pos >= want && !p->isSeeking();
             if (ok || m_clock.elapsed() - t0 > timeout) {
+                poll->stop();   // (now: a timeout already due would otherwise run this again, and the script would go on twice)
                 poll->deleteLater();
                 if (!ok) ++m_failures;
                 log(line, {{"ok", ok}, {"positionMs", double(pos)}, {"waitedMs", double(m_clock.elapsed() - t0)}});
@@ -148,6 +149,7 @@ void Automation::next()
             const double shown = p->lastFrameStreamTime() / 1e6;
             const bool ok = !p->isSeeking() && shown >= want - 200.0 && shown <= want + 3000.0;
             if (ok || m_clock.elapsed() - t0 > timeout) {
+                poll->stop();   // (now: a timeout already due would otherwise run this again, and the script would go on twice)
                 poll->deleteLater();
                 if (!ok) ++m_failures;
                 log(line, {{"ok", ok}, {"shownMs", shown}, {"waitedMs", double(m_clock.elapsed() - t0)}});
@@ -166,6 +168,7 @@ void Automation::next()
             const QString st = m_w->stateReport().value("state").toString();
             const bool ok = st == want && (want != "playing" || m_w->stateReport().value("hasFrame").toBool());
             if (ok || st == "error" || m_clock.elapsed() - t0 > timeout) {
+                poll->stop();   // (now: a timeout already due would otherwise run this again, and the script would go on twice)
                 poll->deleteLater();
                 if (!ok) ++m_failures;
                 log(line, {{"ok", ok}, {"state", st}, {"waitedMs", double(m_clock.elapsed() - t0)}});
@@ -193,6 +196,7 @@ void Automation::next()
             const double pos = from + (to - from) * (*i) / std::max(1, steps - 1);
             p->seek(qint64(pos * 1e9), (*i == steps - 1) ? Player::SeekMode::Accurate : Player::SeekMode::Fast);
             if (++(*i) >= steps) {
+                t->stop();
                 t->deleteLater();
                 if (DeskWindow* d = m_w->deskWindow()) d->view()->setScrubbing(false);   // let go
                 log(line, {{"maxEventLoopStallMs", m_maxStallMs}});
@@ -282,6 +286,7 @@ void Automation::next()
         connect(poll, &QTimer::timeout, this, [=] {
             const bool ok = m_w->tv()->allReady();
             if (!ok && m_clock.elapsed() - t0 < timeout) return;
+            poll->stop();   // (now: a timeout already due would otherwise run this again, and the script would go on twice)
             poll->deleteLater();
             if (!ok) ++m_failures;
             log(line, {{"ok", ok}, {"waitedMs", double(m_clock.elapsed() - t0)}});
@@ -367,6 +372,7 @@ void Automation::next()
             connect(poll, &QTimer::timeout, this, [=] {
                 const QString st = m_w->video()->nvidia().stateName();
                 if (st == want || m_clock.elapsed() - t0 > timeout) {
+                    poll->stop();   // (now: a timeout already due would otherwise run this again, and the script would go on twice)
                     poll->deleteLater();
                     if (st != want) ++m_failures;
                     log(line, {{"ok", st == want}, {"state", st}, {"waitedMs", double(m_clock.elapsed() - t0)}});
@@ -646,6 +652,7 @@ void Automation::next()
             DeskWindow* d = m_w->deskWindow();
             const QString ph = d ? d->view()->phaseName() : QString();
             if (ph == want || m_clock.elapsed() - t0 > timeout) {
+                poll->stop();   // (now: a timeout already due would otherwise run this again, and the script would go on twice)
                 poll->deleteLater();
                 if (ph != want) ++m_failures;
                 log(line, {{"ok", ph == want}, {"phase", ph}, {"waitedMs", double(m_clock.elapsed() - t0)}});
@@ -711,6 +718,7 @@ void Automation::next()
             const double num = want.toDouble(&isNumber);
             const bool ok = want == "*" ? !got.isEmpty() : (isNumber && v.isDouble()) ? v.toDouble() >= num : got == want;
             if (ok || m_clock.elapsed() - t0 > timeout) {
+                poll->stop();   // (now: a timeout already due would otherwise run this again, and the script would go on twice)
                 poll->deleteLater();
                 if (!ok) ++m_failures;
                 log(line, {{"ok", ok}, {"got", got}, {"waitedMs", double(m_clock.elapsed() - t0)}});
@@ -813,6 +821,7 @@ void Automation::next()
             poll->setInterval(50);
             connect(poll, &QTimer::timeout, this, [=] {
                 if (dlg->isBusy() && m_clock.elapsed() - t0 < 180000) return;
+                poll->stop();   // (now: a timeout already due would otherwise run this again, and the script would go on twice)
                 poll->deleteLater();
                 const GifRecorder::Result r = dlg->lastResult();
                 if (!r.ok) ++m_failures;
@@ -838,6 +847,7 @@ void Automation::next()
             poll->setInterval(50);
             connect(poll, &QTimer::timeout, this, [=] {
                 if (dlg->isBusy() && m_clock.elapsed() - t0 < 120000) return;
+                poll->stop();   // (now: a timeout already due would otherwise run this again, and the script would go on twice)
                 poll->deleteLater();
                 const LosslessCutter::Result r = dlg->lastResult();
                 if (!r.ok) ++m_failures;
@@ -881,6 +891,7 @@ void Automation::next()
             else if (want == "listing") ok = jp->itemCount() > 0 && !jp->currentTitle().startsWith("Loading");
             else if (want == "count") { ok = jp->itemCount() >= wantCount; if (!ok) jp->scrollToEnd(); }
             if (ok || m_clock.elapsed() - t0 > timeout) {
+                poll->stop();   // (now: a timeout already due would otherwise run this again, and the script would go on twice)
                 poll->deleteLater();
                 if (!ok) ++m_failures;
                 log(line, {{"ok", ok}, {"listing", jp->currentTitle()}, {"count", jp->itemCount()}, {"total", jp->totalCount()},
