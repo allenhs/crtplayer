@@ -1,4 +1,5 @@
 #include <functional>
+#include <QDateTime>
 #include <QElapsedTimer>
 #include <QFileInfo>
 #include <memory>
@@ -83,6 +84,7 @@ void Automation::log(const QString& cmd, const QJsonObject& data)
 {
     QJsonObject o = data;
     o["t"] = double(m_clock.elapsed());
+    o["wall"] = double(QDateTime::currentMSecsSinceEpoch() % 1000000);
     o["cmd"] = cmd;
     m_log.append(o);
     QFile f(m_logPath);

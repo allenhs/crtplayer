@@ -69,6 +69,8 @@ void FrameGovernor::reset()
     m_settle = 15;
     m_inHand = 0.4;
     m_pictures = m_unreferenced = m_leftOut = 0;
+    m_winFed = m_winLeft = m_winArrived = 0;
+    m_lostToDecoder = 0;
 }
 
 GstPadProbeReturn FrameGovernor::onEvent(GstPad*, GstPadProbeInfo* info, gpointer self)
@@ -104,6 +106,7 @@ GstPadProbeReturn FrameGovernor::onEvent(GstPad*, GstPadProbeInfo* info, gpointe
         std::lock_guard<std::mutex> lock(g->m_lock);
         g->m_credit = 0;
         g->m_settle = 12;
+        g->m_winFed = g->m_winLeft = g->m_winArrived = 0;
         g->m_inHand = 0.4;   // (the first pictures after a jump are shown as they come)
     }
     return GST_PAD_PROBE_OK;
@@ -129,6 +132,7 @@ bool FrameGovernor::leaveOut(GstBuffer* buf)
     }
     std::lock_guard<std::mutex> lock(m_lock);
     ++m_pictures;
+    if (m_settle == 0 && m_playing.load()) ++m_winFed;
     if (layer > m_topLayer) m_topLayer = layer;
     // H.265 with temporal layers: pictures of a higher layer may be built from this one.
     if (unref && codec == Codec::H265 && layer >= 0 && layer < m_topLayer) unref = false;
@@ -139,6 +143,7 @@ bool FrameGovernor::leaveOut(GstBuffer* buf)
     if (m_credit < 1.0) return false;
     m_credit -= 1.0;
     ++m_leftOut;
+    if (m_settle == 0) ++m_winLeft;
     return true;
 }
 
@@ -157,6 +162,20 @@ void FrameGovernor::arrived(gint64 earlyNs, gint64 pictureNs)
 {
     std::lock_guard<std::mutex> lock(m_lock);
     if (m_settle > 0) { --m_settle; return; }
+    ++m_winArrived;
+    // Pictures the decoder dropped by itself (too late to be worth showing): decoded in part or whole, and
+    // still never shown. Then it is far behind, and the pictures that do arrive say little (they are the
+    // few on time). Counted over thirty pictures: those fed, less those left out here, less those that
+    // arrived. (Measured, 4K HEVC 10-bit drawn by software OpenGL: two of every three pictures were lost
+    // that way, while the governor, fed by the few that arrived, needed five seconds to step in.)
+    if (m_winFed >= 30) {
+        const int lost = int(m_winFed) - int(m_winLeft) - int(m_winArrived);
+        if (lost >= 4 && m_enabled.load()) {
+            m_share = std::min(1.0, m_share + 0.02 * lost);
+            m_lostToDecoder += lost;
+        }
+        m_winFed = m_winLeft = m_winArrived = 0;
+    }
     if (pictureNs <= 0) pictureNs = 33333333;
     const double inHand = double(earlyNs) / double(pictureNs);
     m_inHand = m_inHand * 0.9 + std::clamp(inHand, -1.0, 1.0) * 0.1;
@@ -171,5 +190,5 @@ QJsonObject FrameGovernor::report() const
     return QJsonObject{{"codec", m_codec == Codec::H264 ? "h264" : m_codec == Codec::H265 ? "h265" : "none"},
                        {"enabled", m_enabled.load()}, {"pictures", double(m_pictures)}, {"unreferenced", double(m_unreferenced)},
                        {"leftOut", double(m_leftOut)}, {"share", m_share}, {"shareMax", m_shareMax}, {"topLayer", m_topLayer},
-                       {"inHand", m_inHand}};
+                       {"inHand", m_inHand}, {"lostToDecoder", double(m_lostToDecoder)}};
 }

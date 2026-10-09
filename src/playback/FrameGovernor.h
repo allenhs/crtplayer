@@ -55,5 +55,7 @@ private:
     int m_settle = 0;            // pictures after a jump whose timing says nothing
     double m_inHand = 0.4;       // how early pictures arrive, as a share of a picture's time, averaged over the last ten or so
     quint64 m_pictures = 0, m_unreferenced = 0, m_leftOut = 0;
+    quint64 m_winFed = 0, m_winLeft = 0, m_winArrived = 0;   // the last few pictures: fed to the decoder, left out here, arrived at the sink
+    quint64 m_lostToDecoder = 0;
     double m_shareMax = 0;
 };
