@@ -183,7 +183,7 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent)
             m_webRetryNext = true;
             ++m_webReasks;
             m_lastWarning = title + ": " + details.section("\n\nDetails:", 0, 0);
-            const qint64 pos = m_player->position();
+            const qint64 pos = m_player->resumePosition();   // (a jump that met the refusal: where it was going)
             m_pendingStartNs = m_webLive ? -1 : pos > 0 ? pos : m_webStartNs;
             showOsd(tr("The video's address stopped working — asking yt-dlp for a new one"), 5000);
             QTimer::singleShot(0, this, [this] { playSource(m_lastSource, m_lastSourceIndex); });

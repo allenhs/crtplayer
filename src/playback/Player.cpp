@@ -647,6 +647,7 @@ void Player::teardown()
 {
     m_seekWatchdog.stop();
     m_seekInFlight = false;
+    m_askedPos = -1;
     m_hasPendingSeek = false;
     if (m_pipe) {
         GstBus* bus = gst_element_get_bus(m_pipe);
@@ -815,6 +816,7 @@ void Player::doSeek(qint64 posNs, SeekMode mode)
     else flags |= GST_SEEK_FLAG_KEY_UNIT | GST_SEEK_FLAG_SNAP_NEAREST;
     m_seekTarget = posNs;
     m_seekInFlight = true;
+    m_askedPos = posNs;
     g_object_get(m_pipe, "current-text", &m_textTrackRead, nullptr);   // (the file is read again with this track selected)
     m_endReported = false;
     m_videoDone = false;
@@ -841,6 +843,7 @@ void Player::seekKeyframe(bool forward)
     const int flags = GST_SEEK_FLAG_FLUSH | GST_SEEK_FLAG_KEY_UNIT | (forward ? GST_SEEK_FLAG_SNAP_AFTER : GST_SEEK_FLAG_SNAP_BEFORE);
     m_seekTarget = target;
     m_seekInFlight = true;
+    m_askedPos = target;
     m_endReported = false;
     m_videoDone = false;
     m_seekWatchdog.start();
@@ -1895,6 +1898,7 @@ void Player::handleMessage(GstMessage* m, quint64 generation)
         }
         m_seekWatchdog.stop();
         m_seekInFlight = false;
+        m_askedPos = -1;   // (it has got there)
         if (m_hasPendingSeek) {
             m_hasPendingSeek = false;
             doSeek(m_pendingSeek, m_pendingMode);

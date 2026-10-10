@@ -309,6 +309,13 @@ wait 4500
 report heavy-ungoverned
 governor on
 seek 0
+# (and governed again, from the same footing as the run without it: the first run after opening also carries the
+# start of everything, and measured 7.5 to 24 frames a second from run to run, with the governor or not)
+wait 2500
+resetsync
+wait 4500
+report heavy-governed-again
+seek 0
 wait 3500
 # paused and stepped pictures are always the exact ones
 pause
