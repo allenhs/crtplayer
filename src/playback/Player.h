@@ -122,7 +122,7 @@ public:
     // Where to go on from when the video has to be opened again (a web video whose addresses ran out): the place
     // last asked for while the jump there has not landed (it may have failed, being what met the refusal), or the
     // place it is at. (2.18)
-    qint64 resumePosition() const { return m_askedPos >= 0 ? m_askedPos : position(); }
+    qint64 resumePosition() const { return m_state == State::Error ? m_errorPos : m_askedPos >= 0 ? m_askedPos : position(); }
     qint64 duration() const { return m_duration; }
     bool isSeeking() const { return m_seekInFlight; }
 
@@ -352,6 +352,7 @@ private:
 
     std::atomic<bool> m_seekInFlight{false};
     qint64 m_askedPos = -1;          // the place a jump was asked to, until it lands (resumePosition)
+    qint64 m_errorPos = 0;           // where it was, or was going, when it failed (resumePosition)
     qint64 m_seekTarget = 0;
     bool m_hasPendingSeek = false;
     qint64 m_pendingSeek = 0;

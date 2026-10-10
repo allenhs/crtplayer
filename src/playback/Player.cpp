@@ -1830,6 +1830,8 @@ void Player::handleMessage(GstMessage* m, quint64 generation)
         if (!missing.isEmpty()) details = missing + QStringLiteral("\n\nGStreamer said: ") + msg;
         if (!debug.isEmpty()) details += QStringLiteral("\n\nDetails: ") + debug;
         const QString title = missing.isEmpty() ? tr("Cannot play this file") : tr("Missing codec or GStreamer plugin");
+        // (where it was, or was going: asked before the pipeline is stopped, which forgets it)
+        m_errorPos = m_askedPos >= 0 ? m_askedPos : position();
         gst_element_set_state(m_pipe, GST_STATE_NULL);
         setState(State::Error);
         emit errorOccurred(title, details);

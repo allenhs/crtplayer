@@ -184,6 +184,8 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent)
             ++m_webReasks;
             m_lastWarning = title + ": " + details.section("\n\nDetails:", 0, 0);
             const qint64 pos = m_player->resumePosition();   // (a jump that met the refusal: where it was going)
+            if (qEnvironmentVariableIsSet("CRTPLAYER_WEB_TRACE"))
+                qInfo() << "web: addresses refused; going on from" << pos / 1000000 << "ms (at" << m_player->position() / 1000000 << "ms)";
             m_pendingStartNs = m_webLive ? -1 : pos > 0 ? pos : m_webStartNs;
             showOsd(tr("The video's address stopped working — asking yt-dlp for a new one"), 5000);
             QTimer::singleShot(0, this, [this] { playSource(m_lastSource, m_lastSourceIndex); });
@@ -211,7 +213,7 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent)
             m_jfRetried = true;
             m_jfForceNext = true;
             m_lastWarning = title + ": " + details.section("\n\nDetails:", 0, 0);
-            const qint64 pos = m_player->position();
+            const qint64 pos = m_player->resumePosition();   // (2.18: where it was, or was going)
             m_pendingStartNs = pos > 0 ? pos : m_jfStartNs;
             showOsd(tr("The original file won't play here — asking the server to convert it"), 5000);
             QTimer::singleShot(0, this, [this] { playSource(m_lastSource, m_lastSourceIndex); });
