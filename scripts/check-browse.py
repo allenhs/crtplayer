@@ -45,8 +45,11 @@ check('a channel by its link ("…/@handle"): its page, its videos, and it is fo
       e.get('section') == 'channel' and e.get('channel') == RETRO and e.get('channelTitle') == 'Retro Tube Lab' and e.get('titles') == titles_of(RETRO)[:12]
       and [c['id'] for c in d.get('channels', [])] == [RETRO] and d.get('channels', [{}])[0].get('avatar', '').endswith('/thumbs/a00.jpg'),
       f"{e.get('channelTitle')} ({e.get('channel')}), {e.get('count')} videos; followed: {[c.get('title') for c in d.get('channels', [])]}")
+e = B.get('b:channel-back', {})
+check('a channel\'s page has a way back: up from its videos, its "‹ Channels" button', e.get('focus') == 'tabs' and e.get('tab') == -1 and e.get('backTo') == 'Channels',
+      f"focus {e.get('focus')}, tab {e.get('tab')}, back to {e.get('backTo')}")
 e = B.get('b:channels-one', {})
-check('back to Channels: the one followed, then the two ways to add more', e.get('titles') == ['channel:Retro Tube Lab', '+add', '+import'], e.get('titles'))
+check('... Enter there: back to Channels, the one followed, then the two ways to add more', e.get('titles') == ['channel:Retro Tube Lab', '+add', '+import'], e.get('titles'))
 e = B.get('b:imported', {})
 ids = sorted(c['id'] for c in e.get('data', {}).get('channels', []))
 check('Google Takeout\'s list: the three not followed yet are added (the one followed already and the line that is no channel are not)',

@@ -290,10 +290,16 @@ was **not measured**, because there is no GPU in this environment.
 - the interlaced style's look at real refresh rates (only its field alternation was
   measured).
 
-## 2.18.1: the browser's tray, and painting the browser quickly
+## 2.18.1: the browser's tray, a way back from a channel, and painting the browser quickly
 
 Reported by the user on 2.18.0: the round *Search* and *Back to the player* buttons sat right against the edge of
-the tray above them, and turning pages of a channel's videos was "kind of laggy".
+the tray above them; turning pages of a channel's videos was "kind of laggy"; and there was no visible way back to
+the channels from a channel's page (only Esc, a controller's B, or the *Channels* tab with the mouse).
+
+**A way back.** A channel's page has a **‹ Channels** button left of its name (or *‹ New*, *‹ Search* …: wherever
+the channel was opened from). Up from the first row of videos reaches it; Enter, A or a click goes back. On the tabs,
+Enter on *Channels* goes back too. Checked: up from the videos, the button has the focus; Enter there shows the
+channels.
 
 **Painting.** The browser painted every tile anew for every picture: shadows, bezel, picture, caption, glass, scan
 lines. Measured with a new count of the time each paint takes (`report`'s `browse.paintMsAvg`), turning pages and
@@ -313,15 +319,16 @@ a page turns. (The more pictures painted in the same time in 2.18.1 are the anim
 **The tray.** It is a little taller, and the buttons with their names sit in the middle of the band below its edge
 (about 15 pixels clear of the edge at 1080p, where they touched it).
 
-**Checks.** The browser's suite (`scripts/check-browse.py`) has a new check: turning pages and moving between tiles,
-a picture takes less than 20 ms to paint on average at 1080p here (4.6 ms measured). Run on 2.18.1:
+**Checks.** The browser's suite (`scripts/check-browse.py`) has two new checks: the way back (above), and turning
+pages and moving between tiles, a picture takes less than 20 ms to paint on average at 1080p here (4.8 ms
+measured). Run on 2.18.1:
 
 | Run | Result |
 |---|---|
-| The browser's suite, native X11 | 41 passed, none failed |
-| The same, the path a graphics card takes (OpenGL widget) | 41 passed, none failed |
-| The same, AppImage, the system's Qt removed | 41 passed, none failed |
-| The same, under the address and undefined-behaviour sanitizers | 40 passed, none failed (the painting time reported, not judged); no findings |
+| The browser's suite, native X11 | 42 passed, none failed |
+| The same, the path a graphics card takes (OpenGL widget) | 42 passed, none failed |
+| The same, AppImage, the system's Qt removed | 42 passed, none failed |
+| The same, under the address and undefined-behaviour sanitizers | 40 passed; 1 failed: a wait for the video to reach 2 s ran out (15 s), the sanitized build being about ten times slower (it passed in the run before the back button); no findings |
 | Windows (GitHub's build machine) | @WIN@ |
 
 Only the browser's screen changed (`src/ui/BrowseScreen.*`, and a test-driver command); the other suites were run

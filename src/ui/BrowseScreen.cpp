@@ -465,6 +465,24 @@ void BrowseScreen::openChannel(const WebChannel& c)
     enterSection(Section::Channel);
 }
 
+QString BrowseScreen::backLabel() const
+{
+    switch (m_beforeChannel) {
+    case Section::New: return tr("New");
+    case Section::Later: return tr("Watch later");
+    case Section::History: return tr("History");
+    case Section::Search: return tr("Search");
+    default: return tr("Channels");
+    }
+}
+
+void BrowseScreen::leaveChannel()
+{
+    m_tab = m_beforeChannel == Section::Channel ? int(Section::Channels) : int(m_beforeChannel);
+    enterSection(m_beforeChannel == Section::Channel ? Section::Channels : m_beforeChannel);
+    setFocusArea(Focus::Grid);
+}
+
 void BrowseScreen::startInput(bool channelLink)
 {
     m_inputChannel = channelLink;
@@ -727,7 +745,11 @@ void BrowseScreen::moveGrid(int dx, int dy)
         return;
     }
     if (dy < 0) {
-        if (row == 0) { setFocusArea(m_section == Section::Search && m_input->isVisible() ? Focus::Input : Focus::Tabs); return; }
+        if (row == 0) {
+            if (m_section == Section::Channel) m_tab = -1;   // (up from a channel's videos: its back button)
+            setFocusArea(m_section == Section::Search && m_input->isVisible() ? Focus::Input : Focus::Tabs);
+            return;
+        }
         select(v.selected - kCols);
         return;
     }
@@ -818,7 +840,7 @@ void BrowseScreen::keyPressEvent(QKeyEvent* e)
         return;
     }
     if (k == Qt::Key_Escape || k == Qt::Key_Backspace) {
-        if (m_section == Section::Channel) { enterSection(m_beforeChannel == Section::Channel ? Section::Channels : m_beforeChannel); return; }
+        if (m_section == Section::Channel) { leaveChannel(); return; }
         if (m_focus != Focus::Grid) { setFocusArea(Focus::Grid); return; }
         emit closeRequested();
         return;
@@ -828,15 +850,19 @@ void BrowseScreen::keyPressEvent(QKeyEvent* e)
     if (m_focus == Focus::Tabs) {
         const bool chip = !actionLabel().isEmpty();
         const int last = chip ? 5 : 4;
+        const int first = m_section == Section::Channel ? -1 : 0;   // (-1: the back button of a channel's page)
         if (k == Qt::Key_Left || k == Qt::Key_Right) {
-            m_tab = std::clamp(m_tab + (k == Qt::Key_Left ? -1 : 1), 0, last);
-            if (m_tab < 5 && Section(m_tab) != m_section) enterSection(Section(m_tab));
-            if (m_tab == 5) update();
+            m_tab = std::clamp(m_tab + (k == Qt::Key_Left ? -1 : 1), first, last);
+            if (m_tab >= 0 && m_tab < 5 && Section(m_tab) != m_section && !(m_section == Section::Channel && m_tab == int(Section::Channels)))
+                enterSection(Section(m_tab));
+            update();
             setFocusArea(Focus::Tabs);
         } else if (k == Qt::Key_Down) {
             setFocusArea(m_section == Section::Search && m_input->isVisible() ? Focus::Input : Focus::Grid);
         } else if (k == Qt::Key_Return || k == Qt::Key_Enter || k == Qt::Key_Space) {
             if (m_tab == 5) runAction();
+            else if (m_tab == -1) leaveChannel();
+            else if (Section(m_tab) != m_section) enterSection(Section(m_tab));   // (a channel's page: its "Channels" tab goes back)
             else setFocusArea(Focus::Grid);
         }
         update();
@@ -928,6 +954,7 @@ void BrowseScreen::mousePressEvent(QMouseEvent* e)
     }
     for (int i = 0; i < m_l.tabs.size(); ++i)
         if (m_l.tabs[i].contains(at)) { m_tab = i; enterSection(Section(i)); return; }
+    if (m_section == Section::Channel && m_l.back.contains(at)) { leaveChannel(); return; }
     if (m_l.action.contains(at) && !actionLabel().isEmpty()) { runAction(); return; }
     if (m_l.trayLeft.contains(at)) { if (m_section != Section::Search) enterSection(Section::Search); startInput(false); return; }
     if (m_l.trayRight.contains(at)) { emit closeRequested(); return; }
@@ -1005,6 +1032,8 @@ void BrowseScreen::relayout()
                                    .arg(int(24 * s)).arg(int(18 * s)));
     }
     l.banner = QRectF(mx, 124 * s, w - 2 * mx, 20 * s);
+    const double bw = QFontMetricsF(font(16 * s, 600)).horizontalAdvance(backLabel()) + 50 * s;
+    l.back = QRectF(mx, l.title.center().y() - 21 * s, bw, 42 * s);
     // the tray
     const double trayH = 132 * s;
     l.tray = QRectF(0, h - trayH, w, trayH);
@@ -1202,6 +1231,23 @@ void BrowseScreen::paintHeader(QPainter& p)
     // the title (a channel's: with its picture)
     double tx = m_l.title.left();
     if (m_section == Section::Channel) {
+        // "‹ Channels": back to where the channel was opened from
+        const QRectF b = m_l.back;
+        const bool focused = m_focus == Focus::Tabs && m_tab == -1;
+        if (focused)
+            for (int k = 4; k >= 1; --k) {
+                p.setPen(QPen(QColor(242, 163, 58, 90 / (k + 1)), k * 3 * s));
+                p.setBrush(Qt::NoBrush);
+                p.drawRoundedRect(b, b.height() / 2, b.height() / 2);
+            }
+        p.setPen(focused ? QPen(kAmber, 2 * s) : QPen(QColor(255, 255, 255, 40), 1.2 * s));
+        p.setBrush(QColor(255, 255, 255, focused ? 24 : 12));
+        p.drawRoundedRect(b, b.height() / 2, b.height() / 2);
+        icon(p, "chevron-left", QRectF(b.left() + 10 * s, b.center().y() - 10 * s, 20 * s, 20 * s), focused ? kAmber : kText);
+        p.setFont(font(16 * s, 600));
+        p.setPen(focused ? kText : QColor(0xcf, 0xca, 0xbf));
+        p.drawText(b.adjusted(34 * s, 0, -14 * s, 0), Qt::AlignLeft | Qt::AlignVCenter, backLabel());
+        tx = b.right() + 18 * s;
         const int ad = int(44 * s);
         const QPixmap av = avatar(m_channel.avatar, ad);
         const QRectF ar(tx, m_l.title.center().y() - ad / 2.0, ad, ad);
@@ -1912,7 +1958,7 @@ QJsonObject BrowseScreen::report() const
     QJsonArray cells;
     for (const QRectF& r : m_l.cells) cells.append(QJsonArray{r.x(), r.y(), r.width(), r.height()});
     return QJsonObject{{"open", m_open}, {"section", QString::fromLatin1(sections[int(m_section)])}, {"focus", QString::fromLatin1(focuses[int(m_focus)])},
-                       {"tab", m_tab}, {"page", v.page}, {"pages", pages()}, {"selected", v.selected}, {"count", int(v.tiles.size())},
+                       {"tab", m_tab}, {"backTo", m_section == Section::Channel ? backLabel() : QString()}, {"page", v.page}, {"pages", pages()}, {"selected", v.selected}, {"count", int(v.tiles.size())},
                        {"titles", titles}, {"selectedTitle", sel.kind == TileKind::Channel ? sel.channel.title : sel.item.title},
                        {"selectedUrl", sel.item.url}, {"loading", v.loading}, {"error", v.error}, {"cached", v.cached}, {"fresh", fresh},
                        {"failedChannels", v.failedChannels}, {"detail", m_detailOpen}, {"detailTitle", m_detailOpen ? m_detail.item.title : QString()},

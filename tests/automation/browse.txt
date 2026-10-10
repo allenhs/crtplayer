@@ -25,8 +25,12 @@ waitbrowse channel UCretrotubelabxxxxxxxxxx 5000
 wait 800
 grabwindow @O@/@N@/channel-page.png
 report b:channel-added
-# back: the channel is among the followed
-browse key Escape
+# back (2.18.1: its "‹ Channels" button, up from its first row of videos): the channel is among the followed
+browse key Up
+wait 300
+grabwindow @O@/@N@/channel-back.png
+report b:channel-back
+browse key Return
 wait 300
 report b:channels-one
 # -- Google Takeout's list: three more (one of them already followed, one line that is no channel)

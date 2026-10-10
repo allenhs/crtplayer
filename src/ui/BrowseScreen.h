@@ -103,6 +103,8 @@ private:
     void closeDetail();
     void activate();
     void openChannel(const WebChannel& c);
+    void leaveChannel();
+    QString backLabel() const;
     void startInput(bool channelLink);
     void finishInput();
     void importTakeout();
@@ -118,6 +120,7 @@ private:
     // ---- layout (all in pixels of this widget)
     struct Layout {
         double s = 1;
+        QRectF back;   // a channel's page: back to where it was opened from
         QRectF header, title, tabsRow, grid, tray, clock, trayLeft, trayRight, arrowLeft, arrowRight, dots, banner, action, input;
         QList<QRectF> tabs;
         QList<QRectF> cells;   // the twelve places of a page
