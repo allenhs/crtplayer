@@ -31,6 +31,10 @@ configurable, GPU-rendered CRT presentation that respects every aspect ratio:
   video plays in the player, with whatever look is on: YouTube and the many other sites
   [yt-dlp](https://github.com/yt-dlp/yt-dlp) knows. Subtitles, chapters, playlists and
   "go on where I left off" work as for files. See [Videos from web sites](#videos-from-web-sites).
+- **Browse YouTube** (**Ctrl+B**) like a console's channel menu: the new videos of the
+  channels you follow, search, *Watch later* and your history, on pages of twelve tiles,
+  all from the couch with a game controller. No signing in: what you follow stays on
+  your computer. See [Browsing YouTube](#browsing-youtube).
 - **Made for Bazzite:** game controllers (Xbox, PlayStation, Switch, Steam Deck), media
   keys and KDE's media widget / KDE Connect (MPRIS), and Steam Game Mode, with a room
   backdrop for desk mode.
@@ -118,6 +122,7 @@ configurable, GPU-rendered CRT presentation that respects every aspect ratio:
 9. [Cable TV](#cable-tv)
 10. [Jellyfin](#jellyfin)
 11. [Videos from web sites](#videos-from-web-sites) (YouTube and others, through yt-dlp)
+   - [Browsing YouTube](#browsing-youtube) (2.18)
 12. [Where settings are stored](#where-settings-are-stored)
 13. [Troubleshooting](#troubleshooting)
 14. [Code layout](#code-layout)
@@ -1380,6 +1385,7 @@ the Steam Deck, and Steam Input's virtual pad.
 | D-pad ← / → | Seek −10 s / +10 s (hold to keep seeking) |
 | D-pad ↑ / ↓ | Volume |
 | L3 / R3 (stick press) | Previous / next chapter |
+| Guide (the logo button) | Browse YouTube (see [Browsing YouTube](#browsing-youtube)) |
 | Left stick | Desk mode: turn the set |
 | Right stick (up/down) | Desk mode: bigger / smaller |
 
@@ -1387,6 +1393,8 @@ the Steam Deck, and Steam Input's virtual pad.
 
 - **Menus and panels:** when one has focus (e.g. the Jellyfin browser), the D-pad, **A**
   and **B** work as arrow keys, Enter and Escape.
+- **Browsing YouTube:** the D-pad moves, **A** opens, **B** goes back, **X** puts a video
+  on *Watch later*, **Y** searches, **LB / RB** change sections.
 - **Focus:** the controller only acts while CRT Player is the active app, so it won't
   interfere with a game you're playing (in Game Mode it always acts).
 - **SDL2 is optional:** it's loaded when the player starts (Bazzite includes it). If it's
@@ -1904,6 +1912,69 @@ with the same keys.
 - A link that is a **video file or stream itself** (`….mp4`, `….m3u8`, or an address
   whose server says it is video) plays directly, as before, without yt-dlp.
 
+### Browsing YouTube
+
+Press **Ctrl+B** (or the grid button on the control bar, or a controller's Guide button).
+The player becomes a menu of channels and videos, twelve tiles to a page, like a game
+console's channel menu, with a clock in the tray below. The video you were watching waits
+meanwhile and plays on when you go back (**Esc**, or *Back to the video*).
+
+![Browsing YouTube: the new videos of the channels you follow](docs/images/browse-new.jpg)
+
+| Section | What it shows |
+|---|---|
+| **New** | The newest videos of the channels you follow, newest first. A number on the tab says how many are new since you last looked. |
+| **Channels** | The channels you follow, with how many new videos each has. Add one by pasting its link (`youtube.com/@name`), or bring in all your YouTube subscriptions at once from Google Takeout. |
+| **Watch later** | The videos you put aside (**W**). |
+| **History** | What you watched, from here or from a link, with how far you got. |
+| **Search** | YouTube's search: 36 results, three pages. |
+
+**A video's page.** Choosing a video opens its own page, as a console's channel shows its
+preview before it starts: a large picture, its title, channel, length, age and
+description, and the buttons **Play** (or **Resume from …** and **Start over**),
+**Watch later**, **Go to the channel** and **Follow the channel**.
+
+**Keys:**
+
+| Key | Controller | What it does |
+|---|---|---|
+| Arrow keys | D-pad | Move between tiles; past the edge, to the next or previous page |
+| Enter | A | Open (a video's page, a channel, a button) |
+| Esc / Backspace | B | Back (out of a page; out of the menu) |
+| Page Up / Page Down, the mouse wheel | | Previous / next page |
+| [ / ] , Tab | LB / RB | Previous / next section |
+| / | Y | Search |
+| W | X | Watch later (on or off) |
+| F | | Follow (or stop following) the video's channel |
+| R | | Read the section again |
+| U | | Fetch the newest yt-dlp |
+
+The mouse works too: point at a tile to choose it, click to open, right-click to go back.
+
+**Your YouTube subscriptions** (without signing in): in Google Takeout
+(`takeout.google.com`) choose only *YouTube and YouTube Music → subscriptions*. The
+download holds `subscriptions.csv`. In the player, *Channels → Import from Google Takeout*,
+and pick that file.
+
+**How it works, and why it should keep working:**
+
+- **Nothing is signed in to.** The channels you follow, *Watch later* and the history are
+  one file on your computer (`~/.local/share/CRTPlayer/CRTPlayer/web/library.json`).
+  Signing in through a browser's cookies is what breaks most often, so the player does
+  not do it. (YouTube's own recommendations are therefore not there.)
+- **New videos come from each channel's feed**, a small file YouTube has published for
+  every channel for many years, read directly: fast, and nothing to sign in to. A channel
+  whose feed does not answer is asked of yt-dlp instead.
+- **Search and channel pages go through yt-dlp**, which follows YouTube's changes within
+  days. When YouTube changes something and a search fails, the menu shows what yt-dlp said
+  and offers the newest yt-dlp: **U** fetches it. Once a day the player asks yt-dlp's
+  project whether a newer one is out, and the tray says so.
+- **The last lists are kept.** When YouTube does not answer, New shows the list it had,
+  and says from when.
+- **Pictures** are fetched once and kept (`~/.cache/CRTPlayer/CRTPlayer/web/thumbs`, 200 MB
+  at most).
+- **Shorts** (upright phone videos) are left out of *New*.
+
 ### yt-dlp
 
 Video sites change how they hand out their videos every few weeks. yt-dlp is the free
@@ -1960,11 +2031,15 @@ the picture at one address, the sound at another. GStreamer's player opens one a
 The player therefore has a source of its own that reads both and hands them on as the
 picture and the sound of one video: they start together and jump together.
 
-- Each stream is read into a buffer in memory (32 MB for the picture, 4 MB for the
-  sound): up to 24 MB ahead of the place being played, the rest behind it. A jump to a
-  place outside it asks the server for exactly that part of the file, by byte range:
-  three requests for a jump in a 90 MB test file, whether ahead or back. Playing on
-  needs no further requests.
+- Each stream is read **in pieces of 10 MB** (2.18), as yt-dlp itself reads YouTube:
+  YouTube's servers send a request for more than that, or for "everything from here on",
+  slowly, about as fast as the video plays. Before 2.18 the player asked that way, and
+  every jump waited for it. On a test server that behaves like YouTube's, a jump took
+  1.1 to 1.5 seconds then, and takes 0.1 to 0.2 seconds now.
+- What was read is kept in memory (64 MB for the picture, 8 MB for the sound), and the
+  player reads up to 24 MB ahead of the place being played. A jump back to where it has
+  been needs no new request; a jump elsewhere asks for exactly that part of the file.
+  The connection to the server is kept and reused (HTTP/2, where the server speaks it).
 - **When the network is slow or away**, the video waits (*Waiting for the network…*)
   and goes on with the picture it stopped at once about three seconds are at hand
   again. Nothing is skipped. (Without this, the clock would run on without a picture
@@ -1998,7 +2073,10 @@ picture and the sound of one video: they start together and jump together.
   you may watch from a site is between you and that site's terms.
 - For tests: `CRTPLAYER_TOOLS_PATH` (folders, separated by `:`) replaces the places
   yt-dlp and the JavaScript runtimes are looked for; `CRTPLAYER_YTDLP_RELEASE` and
-  `CRTPLAYER_DENO_RELEASE` replace the addresses the button fetches from. To use a yt-dlp
+  `CRTPLAYER_DENO_RELEASE` replace the addresses the button fetches from;
+  `CRTPLAYER_YT_SITE` replaces `https://www.youtube.com` for the browser's feeds and
+  channel pages, and `CRTPLAYER_YTDLP_LATEST` the address it asks about yt-dlp's newest
+  release. To use a yt-dlp
   somewhere else, set `ytDlpPath` under `[online]` in `CRTPlayer.conf`.
 
 ---
@@ -2012,6 +2090,8 @@ picture and the sound of one video: they start together and jump together.
 | Jellyfin sign-in (server, user, access token, device ID; never the password) | `~/.config/CRTPlayer/CRTPlayer/jellyfin.json` (owner-only) |
 | Resume positions (local files; web videos by their page's address) | `~/.local/share/CRTPlayer/CRTPlayer/resume.json` |
 | yt-dlp and Deno, when the player fetched them ([Videos from web sites](#videos-from-web-sites)) | `~/.local/share/CRTPlayer/CRTPlayer/tools/` |
+| Browsing YouTube: channels followed, Watch later, history | `~/.local/share/CRTPlayer/CRTPlayer/web/library.json` |
+| Browsing YouTube: the last lists, and the pictures | `~/.cache/CRTPlayer/CRTPlayer/web/` |
 | Recent files | in `CRTPlayer.conf` |
 | TV channels (folders, names, numbers, video lengths; no sign-in details) | `~/.config/CRTPlayer/CRTPlayer/channels.json` |
 | NVIDIA AI: the SDK you installed (not the player's; listed here so that you can find it) | `~/.local/share/crtplayer/VideoFX` |
@@ -2060,6 +2140,21 @@ yt-dlp found the video, the player asked for it, and the site's server refused (
 dialog names the answer, usually *Forbidden*). The player has by then asked yt-dlp for
 fresh addresses once. Update yt-dlp (above); if it is current, try again later: some
 sites refuse for a while after many requests.
+
+**Browsing YouTube: "The search did not come back", or a channel cannot be read**
+
+The menu shows what yt-dlp said. Press **U** for the newest yt-dlp (the tray says when a
+newer one is out); YouTube changes, and yt-dlp follows within days. *"Sign in to confirm
+you're not a bot"* is YouTube turning a network away (often a VPN or a data centre's);
+the browser does not sign in. New and the channels' pages keep showing the last lists
+they had meanwhile.
+
+**Browsing YouTube: a followed channel shows no new videos**
+
+Its feed is read directly from YouTube; if it does not answer, the channel's page is
+asked of yt-dlp instead (slower). *R* reads the section again. A channel followed by a
+link that was not the channel's own (a video's, a playlist's) is not followed: paste
+the channel's address (`youtube.com/@name`).
 
 **A web video's picture and sound drifted apart, or the sound stopped after a jump**
 
@@ -2314,7 +2409,13 @@ src/
   app/Online.cpp           videos from web sites: links, yt-dlp's answers played, its settings (part of MainWindow)
   online/OnlineVideo.*     asks yt-dlp what a page holds and reads its answer; fetches yt-dlp and Deno (unit-tested)
   playback/WebSource.*     a GStreamer source of the player's own: the picture and the sound of a web video,
-                           each from its own address, each through a buffer that can be read at any place
+                           each from its own address
+  playback/RangeSource.*   the reader of one such address: asks in pieces of 10 MB, keeps what it read, lets
+                           the demuxer read any part of the file (Qt's network, one thread for all)
+  online/WebBrowse.*       browsing YouTube: search and channel pages through yt-dlp, channels' feeds, pictures,
+                           what is followed and kept (unit-tested)
+  ui/BrowseScreen.*        the browser's screen: tiles, pages, a video's page, the tray (keys and controller)
+  app/Browse.cpp           the browser's side in the window (part of MainWindow)
   playback/ShrinkFilter.*  without a graphics card: 10- and 12-bit pictures to 8 bits, and smaller by a whole
                            factor, in one pass (ShrinkKernel.h, unit-tested)
   playback/FrameGovernor.* when the computer cannot decode every picture in time: leaves out, before decoding,
@@ -2349,13 +2450,15 @@ tools/nvfx/                crtplayer-nvfx, the helper that runs NVIDIA's Video S
 tests/                     unit tests + automation scripts
 tests/nvfx_mock/           a stand-in for NVIDIA's SDK (plain arithmetic), for checks without an NVIDIA card
 tests/web_mock.py          a small video site, and tests/fake_ytdlp.py, a stand-in for yt-dlp that answers as the
-                           real one does for YouTube (video sites cannot be reached from where the tests run)
+                           real one does for YouTube (video sites cannot be reached from where the tests run);
+                           tests/web_catalog.py, the site's channels and videos for the browser's tests
 third_party/ufbx/          the FBX reader (ufbx, unmodified; MIT or public domain)
 third_party/nvidia-vfx/    the NVIDIA Video Effects SDK's three API headers (NVIDIA, MIT)
 scripts/                   build-bazzite.sh, install-local.sh, make-test-media.sh, run-verification.sh,
                            check-effects.py, check-desk.py (measure the captures),
                            run-jellyfin-tests.sh + check-jellyfin.py (with tests/jellyfin_mock.py),
-                           check-online.py (videos from web sites),
+                           check-online.py (videos from web sites), check-browse.py (browsing YouTube),
+                           make-web-thumbs.py (the test site's pictures),
                            build-appimage.sh
 ```
 

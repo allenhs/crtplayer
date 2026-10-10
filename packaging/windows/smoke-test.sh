@@ -119,7 +119,9 @@ online() { # name script timeout
     --automation-log "$O/$1.json" > "$WORK/out/$1.log" 2>&1
   echo "web-video run $1 rc=$?"
 }
+export CRTPLAYER_WEB_TRACE=1
 online online smoke-online.txt 300
+unset CRTPLAYER_WEB_TRACE
 # (2.18) the browser: channels from Google Takeout's list, their new videos from the site's feeds, their pictures
 rm -rf "$WORK/localappdata" "$WORK/appdata"; mkdir -p "$WORK/localappdata" "$WORK/appdata"
 sed -e "s#@W@#$SITE#g" -e "s#@O@#$(cygpath -m "$O")#g" "$(dirname "$0")/smoke-browse.txt" > "$WORK/browse.txt"
@@ -133,6 +135,9 @@ grep -v "custom-downstream-sticky" "$WORK/out/online.log" | tail -40
 echo "---- web videos:"
 python "$(dirname "$0")/check-smoke-online.py" "$WORK/out" 2>&1 | sed 's/^/WEB /'
 online_rc=${PIPESTATUS[0]}
+if [ $online_rc -ne 0 ]; then   # what the web readers did, and what GStreamer said
+  grep -E "web-reader|WARN|rror|auto\] (wait|seek|open|report)" "$WORK/out/online.log" | grep -v "custom-downstream-sticky" | head -110 | sed 's/^/WEB log: /'
+fi
 ls -la "$WORK/appdata/CRTPlayer/CRTPlayer/tools" 2>/dev/null | sed 's/^/WEB tools: /'
 grep -i "yt-dlp\|deno\|error\|warn" "$WORK/out/online-net.log" | grep -v "custom-downstream-sticky" | tail -25 | sed 's/^/WEB net log: /'
 [ $smoke_rc -eq 0 ] && [ $onscreen_rc -eq 0 ] && [ $online_rc -eq 0 ]

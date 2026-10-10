@@ -3,6 +3,7 @@
 #include <gst/base/gstbasesrc.h>
 
 #include <QCoreApplication>
+#include <QDebug>
 #include <QElapsedTimer>
 #include <QHash>
 #include <QMutex>
@@ -22,6 +23,14 @@
 #include <memory>
 
 namespace {
+
+// CRTPLAYER_WEB_TRACE=1: what the readers ask for and get, and where the demuxers wait (to standard error)
+bool tracing()
+{
+    static const bool on = qEnvironmentVariableIsSet("CRTPLAYER_WEB_TRACE");
+    return on;
+}
+#define WEBTRACE(...) do { if (tracing()) qInfo().noquote() << "web-reader:" << __VA_ARGS__; } while (0)
 
 const quint64 kBlock = 64 * 1024;            // what is kept is kept in blocks of this size
 const quint64 kDefaultChunk = 10ull << 20;   // the most one request asks for (yt-dlp's "http_chunk_size" for YouTube)
@@ -231,6 +240,7 @@ private:
         rq.setRawHeader("Range", QByteArray("bytes=") + QByteArray::number(m_from) + '-' + QByteArray::number(m_to));
         rq.setRawHeader("Accept-Encoding", "identity");
         rq.setTransferTimeout(15000);
+        WEBTRACE(url.fileName() << "ask" << m_from << "-" << m_to);
         m_reply = NetThread::get()->nam()->get(rq);
         connect(m_reply, &QNetworkReply::readyRead, this, [this, r = m_reply] { if (r == m_reply) take(); });
         connect(m_reply, &QNetworkReply::finished, this, [this, r = m_reply] { if (r == m_reply) done(); });
@@ -255,6 +265,7 @@ private:
         const int status = m_reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
         if (status == 0) return false;   // (no answer yet)
         m_checked = true;
+        WEBTRACE(m_reply->url().fileName() << "status" << status << m_reply->rawHeader("Content-Range") << "length" << m_reply->rawHeader("Content-Length"));
         QMutexLocker l(&m_sh->lock);
         m_sh->status = status;
         if (status == 206) {
@@ -325,6 +336,7 @@ private:
         r->deleteLater();
         const int status = r->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
         const QNetworkReply::NetworkError err = r->error();
+        WEBTRACE(r->url().fileName() << "done" << status << "error" << int(err) << r->errorString() << "next" << m_next);
         {
             QMutexLocker l(&m_sh->lock);
             m_sh->partial.clear();
@@ -426,6 +438,7 @@ static void crt_range_close(CrtRangeSrc* self)
 static gboolean crt_range_src_start(GstBaseSrc* src)
 {
     auto* self = reinterpret_cast<CrtRangeSrc*>(src);
+    WEBTRACE("start");
     crt_range_open(self);
     std::shared_ptr<Shared> sh = *self->sh;
     QMutexLocker l(&sh->lock);
@@ -466,6 +479,7 @@ static gboolean crt_range_src_is_seekable(GstBaseSrc* src)
 static gboolean crt_range_src_unlock(GstBaseSrc* src)
 {
     auto* self = reinterpret_cast<CrtRangeSrc*>(src);
+    WEBTRACE("unlock (flushing)");
     QMutexLocker l(&(*self->sh)->lock);
     (*self->sh)->flushing = true;
     (*self->sh)->changed.wakeAll();
@@ -512,7 +526,14 @@ static GstFlowReturn crt_range_src_fill(GstBaseSrc* src, guint64 offset, guint l
             if (end / kBlock != before || asked) { l.unlock(); crt_range_kick(self); }
             return GST_FLOW_OK;
         }
-        if (!asked) { asked = true; l.unlock(); crt_range_kick(self); l.relock(); continue; }
+        if (!asked) {
+            asked = true;
+            WEBTRACE(sh->url.fileName() << "fill waits" << offset << "+" << length << "missing at" << sh->firstMissing(offset, end));
+            l.unlock();
+            crt_range_kick(self);
+            l.relock();
+            continue;
+        }
         sh->changed.wait(&sh->lock, 250);
         if (sh->firstMissing(offset, end) < end && !sh->flushing) { l.unlock(); crt_range_kick(self); l.relock(); }
     }
@@ -531,7 +552,8 @@ static GstStateChangeReturn crt_range_src_change_state(GstElement* element, GstS
 // connected yet (see WebSource.cpp).
 static gboolean crt_range_src_activate(GstPad* pad, GstObject*)
 {
-    if (gst_pad_activate_mode(pad, GST_PAD_MODE_PULL, TRUE)) return TRUE;
+    if (gst_pad_activate_mode(pad, GST_PAD_MODE_PULL, TRUE)) { WEBTRACE("activated: pull"); return TRUE; }
+    WEBTRACE("activated: push");
     return gst_pad_activate_mode(pad, GST_PAD_MODE_PUSH, TRUE);
 }
 

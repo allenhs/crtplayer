@@ -10,6 +10,12 @@ def reports(name):
     try: return {e['label']: e for e in json.load(open(out / name)) if e['cmd'] == 'report'}
     except Exception as e: return None
 rep = reports('online.json')
+try:   # (the steps that did not do what they were to do, and how long they waited)
+    for e in json.load(open(out / 'online.json')):
+        if e.get('ok') is False or e['cmd'].startswith('wait'):
+            print(f"STEP  {e['cmd']}: ok {e.get('ok')}, got {e.get('got')}, waited {e.get('waitedMs')} ms, began {e.get('began')}, at {e.get('wall')}")
+except Exception:
+    pass
 if rep is None:
     check('the web-video run ran', False, 'no online.json')
 else:

@@ -152,7 +152,9 @@ jumps = []
 for i in range(4):
     rq = [r for r in requests(on(f'big-{i}')['wallClock'], on(f'big-{i + 1}')['wallClock']) if r['path'].startswith('/media/v_big.mp4')]
     jumps.append((len(rq), all(r['status'] == 206 and r['range'] for r in rq)))
-check('a 90 MB file: each jump (far ahead, back, ahead) takes a few requests by byte range', all(1 <= n <= 8 and ranged for n, ranged in jumps), f"requests for each jump: {[n for n, _ in jumps]}")
+# (2.18: what was read stays in memory, 64 MB of it: a jump to a part read before, and still kept, asks for nothing)
+check('a 90 MB file: each jump (far ahead, back, ahead) takes a few requests by byte range, a jump into what is kept none',
+      jumps[0][0] >= 1 and all(n <= 8 and ranged for n, ranged in jumps), f"requests for each jump: {[n for n, _ in jumps]}")
 
 series = [R[f'o:{i:02d}'][0] for i in range(44)]
 waited = [e for e in series if e['online']['player'].get('waiting')]

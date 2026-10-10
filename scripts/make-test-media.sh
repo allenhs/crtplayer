@@ -211,6 +211,8 @@ ffmpeg $F -f lavfi -i "color=c=0x203860:size=1280x720:rate=25:duration=120" -f l
   -c:v libx264 -preset ultrafast -g 125 -b:v 6M -minrate 6M -maxrate 6M -bufsize 6M -x264-params nal-hrd=cbr $FRAG web/v_big.mp4
 cp jump_a.vtt web/en.vtt
 cp jump_b.vtt web/fr.vtt
+# (2.18) pictures for the browser's tiles: painted scenes that read like video thumbnails, and channel pictures
+python3 "$HERE/scripts/make-web-thumbs.py" web/thumbs || echo "no pictures for the browser's tests (Python's PIL is needed)"
 python3 - <<'PY'
 import struct
 cues = [(2, 6, 1), (10, 20, 2), (25, 28, 3), (30, 45, 4), (50, 55, 5), (60, 110, 6), (112, 118, 7)]
