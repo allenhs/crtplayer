@@ -30,7 +30,12 @@ bool tracing()
     static const bool on = qEnvironmentVariableIsSet("CRTPLAYER_WEB_TRACE");
     return on;
 }
-#define WEBTRACE(...) do { if (tracing()) qInfo().noquote() << "web-reader:" << __VA_ARGS__; } while (0)
+qint64 traceMs()
+{
+    static const gint64 t0 = g_get_monotonic_time();
+    return (g_get_monotonic_time() - t0) / 1000;
+}
+#define WEBTRACE(...) do { if (tracing()) qInfo().noquote() << "web-reader:" << traceMs() << "ms" << __VA_ARGS__; } while (0)
 
 const quint64 kBlock = 64 * 1024;            // what is kept is kept in blocks of this size
 const quint64 kDefaultChunk = 10ull << 20;   // the most one request asks for (yt-dlp's "http_chunk_size" for YouTube)
@@ -145,7 +150,9 @@ protected:
     void run() override
     {
         m_context = new QObject;
+        WEBTRACE("network thread: making its access manager");
         m_nam = new QNetworkAccessManager;
+        WEBTRACE("network thread: made");
         m_nam->setProxyFactory(new SystemProxies);
         m_nam->setRedirectPolicy(QNetworkRequest::NoLessSafeRedirectPolicy);
         m_ready.release();
@@ -407,6 +414,7 @@ static void crt_range_kick(CrtRangeSrc* self)
 static void crt_range_open(CrtRangeSrc* self)
 {
     if (*self->reader) return;
+    WEBTRACE("open");
     std::shared_ptr<Shared> sh = *self->sh;
     {
         QMutexLocker l(&sh->lock);
@@ -414,6 +422,7 @@ static void crt_range_open(CrtRangeSrc* self)
         sh->lastData = g_get_monotonic_time();
     }
     NetThread* net = NetThread::get();
+    WEBTRACE("network thread ready");
     QPointer<QObject>* holder = self->reader;
     QMetaObject::invokeMethod(net->context(), [sh, holder] {
         auto* r = new Reader(sh);

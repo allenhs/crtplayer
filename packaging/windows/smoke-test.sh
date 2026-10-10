@@ -82,17 +82,19 @@ if [ -n "${ONSCREEN_OLD_WAY:-}" ]; then   # for comparison: as before 2.16.1 (re
   python "$HERE/scripts/check-onscreen.py" "$WORK/out" oldway 2>&1 | sed -e 's/^FAIL/WAS-NO/' -e 's/^PASS/WAS-OK/' -e 's/^/ON-SCREEN /'
 fi
 
+# (a minute long: the first picture drawn with the look waits for software OpenGL to build its shader, many seconds on
+# a slow build machine, while the video plays on)
 # Videos from web sites (2.17): the picture and the sound of one video from two addresses of a small site on
 # this machine (tests/web_mock.py, run with MSYS2's Python). Then, reported but not counted: "Get yt-dlp" from
 # the internet, a page through the real yt-dlp.exe, and a video on YouTube.
 mkdir -p "$WORK/webmedia/web"
-gst-launch-1.0 -q -e videotestsrc num-buffers=600 pattern=ball ! video/x-raw,width=640,height=360,framerate=30/1 \
+gst-launch-1.0 -q -e videotestsrc num-buffers=1800 pattern=ball ! video/x-raw,width=640,height=360,framerate=30/1 \
   ! x264enc key-int-max=60 ! h264parse ! mp4mux faststart=true ! filesink location="$WORK/webmedia/web/v_h264.mp4"
-gst-launch-1.0 -q -e audiotestsrc num-buffers=862 samplesperbuffer=1024 ! audio/x-raw,rate=44100,channels=2 ! audioconvert \
+gst-launch-1.0 -q -e audiotestsrc num-buffers=2584 samplesperbuffer=1024 ! audio/x-raw,rate=44100,channels=2 ! audioconvert \
   ! avenc_aac ! aacparse ! mp4mux faststart=true ! filesink location="$WORK/webmedia/web/a_aac.m4a"
 cat > "$WORK/webmedia/web/dash.mpd" <<'MPD'
 <?xml version="1.0" encoding="UTF-8"?>
-<MPD xmlns="urn:mpeg:dash:schema:mpd:2011" type="static" mediaPresentationDuration="PT20S" minBufferTime="PT2S" profiles="urn:mpeg:dash:profile:isoff-on-demand:2011">
+<MPD xmlns="urn:mpeg:dash:schema:mpd:2011" type="static" mediaPresentationDuration="PT60S" minBufferTime="PT2S" profiles="urn:mpeg:dash:profile:isoff-on-demand:2011">
  <Period>
   <AdaptationSet mimeType="video/mp4"><Representation id="v" codecs="avc1.64001e" width="640" height="360" frameRate="30" bandwidth="800000"><BaseURL>v_h264.mp4</BaseURL></Representation></AdaptationSet>
   <AdaptationSet mimeType="audio/mp4" lang="en"><Representation id="a" codecs="mp4a.40.2" audioSamplingRate="44100" bandwidth="128000"><BaseURL>a_aac.m4a</BaseURL></Representation></AdaptationSet>

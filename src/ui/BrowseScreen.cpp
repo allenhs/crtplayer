@@ -1637,7 +1637,14 @@ void BrowseScreen::paintDetail(QPainter& p)
     p.save();
     p.setClipPath(screen);
     p.fillRect(sr, Qt::black);
-    const QPixmap pm = thumb(it.thumb, m_l.detailTv.adjusted(10 * s, 10 * s, -10 * s, -10 * s).size().toSize());
+    // (YouTube's large picture, for the large screen, where it has one; the tile's meanwhile, or instead)
+    const QSize tvSize = m_l.detailTv.adjusted(10 * s, 10 * s, -10 * s, -10 * s).size().toSize();
+    QPixmap pm;
+    if (!it.id.isEmpty() && it.thumb.contains(QLatin1String("ytimg.com/"))) {
+        const QString big = QStringLiteral("https://i.ytimg.com/vi/%1/hq720.jpg").arg(it.id);
+        pm = thumb(big, tvSize);
+    }
+    if (pm.isNull()) pm = thumb(it.thumb, tvSize);
     if (!pm.isNull()) {
         p.setRenderHint(QPainter::SmoothPixmapTransform);
         p.drawPixmap(sr, pm, QRectF(0, 0, pm.width(), pm.height()));
