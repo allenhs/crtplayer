@@ -99,6 +99,15 @@ cat > "$WORK/webmedia/web/dash.mpd" <<'MPD'
  </Period>
 </MPD>
 MPD
+# (2.18) pictures for the browser's tiles: GStreamer's test patterns
+mkdir -p "$WORK/webmedia/web/thumbs"
+for i in $(seq 0 47); do
+  gst-launch-1.0 -q videotestsrc num-buffers=1 pattern=$((i % 25)) ! video/x-raw,width=640,height=360 ! jpegenc ! filesink location="$(printf "$WORK/webmedia/web/thumbs/t%02d.jpg" $i)"
+done
+for i in $(seq 0 11); do
+  gst-launch-1.0 -q videotestsrc num-buffers=1 pattern=$((i + 3)) ! video/x-raw,width=176,height=176 ! jpegenc ! filesink location="$(printf "$WORK/webmedia/web/thumbs/a%02d.jpg" $i)"
+done
+printf 'Channel Id,Channel Url,Channel Title\r\nUCretrotubelabxxxxxxxxxx,http://www.youtube.com/channel/UCretrotubelabxxxxxxxxxx,Retro Tube Lab\r\nUCnightdrivefmxxxxxxxxxx,http://www.youtube.com/channel/UCnightdrivefmxxxxxxxxxx,Night Drive FM\r\nUCpixelkitchenxxxxxxxxxx,http://www.youtube.com/channel/UCpixelkitchenxxxxxxxxxx,Pixel Kitchen\r\n' > "$O/subscriptions.csv"
 ls -la "$WORK/webmedia/web"
 PORT=18650; SITE="http://127.0.0.1:$PORT"
 python "$HERE/tests/web_mock.py" --media "$WORK/webmedia" --port $PORT --log "$WORK/out/web-requests.jsonl" > "$WORK/out/web-mock.log" 2>&1 &
@@ -111,6 +120,12 @@ online() { # name script timeout
   echo "web-video run $1 rc=$?"
 }
 online online smoke-online.txt 300
+# (2.18) the browser: channels from Google Takeout's list, their new videos from the site's feeds, their pictures
+rm -rf "$WORK/localappdata" "$WORK/appdata"; mkdir -p "$WORK/localappdata" "$WORK/appdata"
+sed -e "s#@W@#$SITE#g" -e "s#@O@#$(cygpath -m "$O")#g" "$(dirname "$0")/smoke-browse.txt" > "$WORK/browse.txt"
+APPDATA="$(cygpath -w "$WORK/appdata")" LOCALAPPDATA="$(cygpath -w "$WORK/localappdata")" CRTPLAYER_YT_SITE="$SITE" /usr/bin/timeout 300 env PATH="$CLEAN_PATH" QT_OPENGL=software \
+  "$APP" --automation "$(cygpath -m "$WORK/browse.txt")" --automation-log "$O/browse.json" > "$WORK/out/browse.log" 2>&1
+echo "web-video run browse rc=$?"
 online online-net smoke-online-net.txt 900
 kill $MOCK 2>/dev/null
 echo "---- web videos, the player's output:"

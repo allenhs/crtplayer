@@ -1,4 +1,5 @@
 #include "Gamepad.h"
+#include "ui/BrowseScreen.h"
 #include "app/DeskWindow.h"
 #include "app/MainWindow.h"
 #include "render/DeskView.h"
@@ -72,7 +73,7 @@ int buttonByName(const QString& n)
         {"lb", SDL_CONTROLLER_BUTTON_LEFTSHOULDER}, {"rb", SDL_CONTROLLER_BUTTON_RIGHTSHOULDER},
         {"l3", SDL_CONTROLLER_BUTTON_LEFTSTICK}, {"r3", SDL_CONTROLLER_BUTTON_RIGHTSTICK},
         {"up", SDL_CONTROLLER_BUTTON_DPAD_UP}, {"down", SDL_CONTROLLER_BUTTON_DPAD_DOWN},
-        {"left", SDL_CONTROLLER_BUTTON_DPAD_LEFT}, {"right", SDL_CONTROLLER_BUTTON_DPAD_RIGHT}};
+        {"left", SDL_CONTROLLER_BUTTON_DPAD_LEFT}, {"right", SDL_CONTROLLER_BUTTON_DPAD_RIGHT}, {"guide", SDL_CONTROLLER_BUTTON_GUIDE}};
     return map.value(n.toLower(), -1);
 }
 int axisByName(const QString& n)
@@ -171,6 +172,7 @@ bool Gamepad::uiHasFocus() const
 {
     // A menu, dialog or panel with keyboard focus: the pad navigates it like arrow keys.
     if (QApplication::activePopupWidget() || QApplication::activeModalWidget()) return true;
+    if (m_w->browseOpen()) return true;   // (the browser of web videos covers the window: it is all UI)
     QWidget* f = QApplication::focusWidget();
     return f && f->window() == m_w && !m_w->isVideoFocus(f);
 }
@@ -179,6 +181,7 @@ void Gamepad::sendKey(int qtKey)
 {
     QWidget* target = QApplication::activePopupWidget();
     if (!target) target = QApplication::activeModalWidget();
+    if (!target && m_w->browseOpen()) target = m_w->browseScreen()->keyTarget();
     if (!target) target = QApplication::focusWidget();
     if (!target) return;
     QKeyEvent press(QEvent::KeyPress, qtKey, Qt::NoModifier), release(QEvent::KeyRelease, qtKey, Qt::NoModifier);
@@ -210,7 +213,18 @@ void Gamepad::onButton(int b, bool down)
         case SDL_CONTROLLER_BUTTON_B: act(QStringLiteral("key:%1").arg(Qt::Key_Escape)); return;
         default: break;
         }
+        if (m_w->browseOpen()) {   // (the browser of web videos: put aside, search, the sections)
+            switch (b) {
+            case SDL_CONTROLLER_BUTTON_X: act(QStringLiteral("key:%1").arg(Qt::Key_W)); return;
+            case SDL_CONTROLLER_BUTTON_Y: act(QStringLiteral("key:%1").arg(Qt::Key_Slash)); return;
+            case SDL_CONTROLLER_BUTTON_LEFTSHOULDER: act(QStringLiteral("key:%1").arg(Qt::Key_BracketLeft)); return;
+            case SDL_CONTROLLER_BUTTON_RIGHTSHOULDER: act(QStringLiteral("key:%1").arg(Qt::Key_BracketRight)); return;
+            case SDL_CONTROLLER_BUTTON_GUIDE: act("browse"); return;
+            default: break;
+            }
+        }
     }
+    if (b == SDL_CONTROLLER_BUTTON_GUIDE) { act("browse"); return; }
     switch (b) {
     case SDL_CONTROLLER_BUTTON_A: act("playpause"); break;
     case SDL_CONTROLLER_BUTTON_B: act("back"); break;

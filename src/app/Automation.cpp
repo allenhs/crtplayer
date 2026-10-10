@@ -17,6 +17,7 @@
 #include "app/Gamepad.h"
 #include "ui/JellyfinPanel.h"
 #include "ui/PlaylistPanel.h"
+#include "ui/BrowseScreen.h"
 
 #include <QApplication>
 #include <QAbstractButton>
@@ -719,6 +720,43 @@ void Automation::next()
             const bool ok = want == "*" ? !got.isEmpty() : (isNumber && v.isDouble()) ? v.toDouble() >= num : got == want;
             if (ok || m_clock.elapsed() - t0 > timeout) {
                 poll->stop();   // (now: a timeout already due would otherwise run this again, and the script would go on twice)
+                poll->deleteLater();
+                if (!ok) ++m_failures;
+                log(line, {{"ok", ok}, {"got", got}, {"waitedMs", double(m_clock.elapsed() - t0)}});
+                QTimer::singleShot(10, this, &Automation::next);
+            }
+        });
+        poll->start();
+        return;
+    } else if (cmd == "browse") {
+        // browse open | close | key NAME [NAME...] | section NAME | search TEXT | type TEXT | import FILE : the browser of web videos (2.18)
+        const QString what = a.value(1);
+        bool ok = true;
+        if (what == "open") m_w->showBrowse(true);
+        else if (what == "close") m_w->showBrowse(false);
+        else if (what == "key") { for (int i = 2; i < a.size(); ++i) ok = m_w->browseScreen()->pressKey(a.value(i)) && ok; }
+        else if (what == "section") ok = m_w->browseScreen()->chooseSection(a.value(2));
+        else if (what == "search") m_w->browseScreen()->searchFor(QStringList(a.mid(2)).join(QLatin1Char(' ')));
+        else if (what == "type") ok = m_w->browseScreen()->typeText(QStringList(a.mid(2)).join(QLatin1Char(' ')));   // into the line, then Enter
+        else if (what == "import") ok = m_w->browseScreen()->importFrom(a.value(2)) >= 0;                          // Google Takeout's list
+        else ok = false;
+        if (!ok) ++m_failures;
+        log(line, {{"ok", ok}});
+    } else if (cmd == "waitbrowse") {
+        // waitbrowse KEY VALUE [TIMEOUT_MS] : until the browser's report has KEY = VALUE (as waitonline)
+        const QString key = a.value(1), want = a.value(2);
+        const int timeout = a.value(3, "30000").toInt();
+        const qint64 t0 = m_clock.elapsed();
+        auto* poll = new QTimer(this);
+        poll->setInterval(50);
+        connect(poll, &QTimer::timeout, this, [=] {
+            const QJsonValue v = m_w->browseReport().value(key);
+            const QString got = v.isBool() ? (v.toBool() ? "true" : "false") : v.isDouble() ? QString::number(v.toDouble()) : v.toString();
+            bool isNumber = false;
+            const double num = want.toDouble(&isNumber);
+            const bool ok = want == "*" ? !got.isEmpty() : (isNumber && v.isDouble()) ? v.toDouble() >= num : got == want;
+            if (ok || m_clock.elapsed() - t0 > timeout) {
+                poll->stop();
                 poll->deleteLater();
                 if (!ok) ++m_failures;
                 log(line, {{"ok", ok}, {"got", got}, {"waitedMs", double(m_clock.elapsed() - t0)}});

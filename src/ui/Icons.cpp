@@ -25,6 +25,10 @@ void paintIcon(QPainter& p, const QString& n, const QColor& c)
     auto speaker = [&] { fillPoly({{3.5, 9}, {7.5, 9}, {12, 5}, {12, 19}, {7.5, 15}, {3.5, 15}}); };
 
     if (n == "play") fillPoly({{7.5, 5}, {19, 12}, {7.5, 19}});
+    else if (n == "browse") {   // (2.18) the browser of web videos: a page of tiles
+        p.drawRoundedRect(QRectF(3.5, 4.5, 7.5, 6), 1.6, 1.6); p.drawRoundedRect(QRectF(13, 4.5, 7.5, 6), 1.6, 1.6);
+        p.drawRoundedRect(QRectF(3.5, 13.5, 7.5, 6), 1.6, 1.6); p.drawRoundedRect(QRectF(13, 13.5, 7.5, 6), 1.6, 1.6);
+    }
     else if (n == "pause") { p.setBrush(c); p.setPen(Qt::NoPen); p.drawRoundedRect(QRectF(6, 5, 4, 14), 1, 1); p.drawRoundedRect(QRectF(14, 5, 4, 14), 1, 1); }
     else if (n == "prev") { fillPoly({{20, 6.5}, {13, 12}, {20, 17.5}}); fillPoly({{13, 6.5}, {6, 12}, {13, 17.5}}); p.setBrush(c); p.setPen(Qt::NoPen); p.drawRect(QRectF(3.5, 6.5, 2, 11)); }
     else if (n == "next") { fillPoly({{4, 6.5}, {11, 12}, {4, 17.5}}); fillPoly({{11, 6.5}, {18, 12}, {11, 17.5}}); p.setBrush(c); p.setPen(Qt::NoPen); p.drawRect(QRectF(18.5, 6.5, 2, 11)); }

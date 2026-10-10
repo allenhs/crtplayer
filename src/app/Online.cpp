@@ -3,6 +3,7 @@
 // manifest. The playlist keeps the page ("web:<page>#<title>"), never the streams' own addresses,
 // which stop working after a few hours.
 #include "MainWindow.h"
+#include "online/WebBrowse.h"
 
 #include "online/OnlineVideo.h"
 #include "playback/Player.h"
@@ -236,6 +237,22 @@ void MainWindow::webResolved(const OnlineResult& r, const QString& entry, int in
     m_webLive = v.live;
     m_webHeaders = v.headers;
     m_mediaTitle = v.title.isEmpty() ? shownAddress(page) : v.title;
+    // (2.18) The browser's history: what is known of it (more, if it was chosen in the browser).
+    if (m_webBrowse && !v.live) {
+        WebItem h = WebItem::fromJson(m_browsePicked);
+        if (h.url != asked && h.url != page) h = WebItem();
+        h.url = page;
+        h.id = v.id;
+        if (!v.title.isEmpty()) h.title = v.title;
+        if (!v.uploader.isEmpty()) h.channel = v.uploader;
+        if (!v.channelId.isEmpty()) h.channelId = v.channelId;
+        if (v.seconds > 0) h.seconds = v.seconds;
+        if (h.thumb.isEmpty())
+            h.thumb = (page.contains(QLatin1String("youtube.com")) || page.contains(QLatin1String("youtu.be"))) && !v.id.isEmpty()
+                          ? QStringLiteral("https://i.ytimg.com/vi/%1/mqdefault.jpg").arg(v.id) : v.thumbnail;
+        m_webBrowse->addHistory(h);
+    }
+    m_browsePicked = QJsonObject();
 
     // Subtitle files on offer: the ones people wrote first, then the automatic ones.
     QStringList labels;
@@ -326,7 +343,7 @@ void MainWindow::offerYtDlp(const QString& entry, int index)
     box->open();
 }
 
-void MainWindow::fetchYtDlp()
+void MainWindow::fetchYtDlp(bool ownCopy)
 {
     if (m_online->installing()) return;
     const bool have = !m_online->program().isEmpty();
@@ -334,7 +351,8 @@ void MainWindow::fetchYtDlp()
     const bool runtime = OnlineResolver::jsRuntime().isEmpty();
     // A yt-dlp of the system's own is left to the system; only what is missing is fetched. Asked once
     // more (nothing is missing), the player gets a copy of its own, which it then uses and keeps current.
-    const bool program = !have || own || !runtime;
+    // (The browser's "update yt-dlp" always fetches the player's own copy: the newest.)
+    const bool program = ownCopy || !have || own || !runtime;
     m_ytStatus = tr("Fetching…");
     updateOnlineStatus();
     m_online->install(program, runtime,
@@ -349,6 +367,7 @@ void MainWindow::fetchYtDlp()
                           m_onlineAsked = ok ? QStringLiteral("fetched") : QStringLiteral("fetch-failed");
                           ++(ok ? m_ytFetches : m_ytFetchFailures);
                           updateOnlineStatus();
+                          browseYtDlpDone(ok, ok ? (problem.isEmpty() ? message : message + QStringLiteral(" · ") + problem) : message);
                           if (!ok) {
                               m_lastWarning = tr("yt-dlp could not be fetched: %1").arg(message);
                               showOsd(m_lastWarning, 8000);

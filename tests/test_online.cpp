@@ -2,12 +2,15 @@
 // which addresses are pages, how a web video is kept in the playlist, automatic captions tidied, the
 // zip archive Deno comes in.
 #include "online/OnlineVideo.h"
+#include "online/WebBrowse.h"
 
 #include <QCoreApplication>
 #include <QDate>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QDateTime>
+#include <QTimeZone>
 #include <cstdio>
 #include <zlib.h>
 
@@ -243,6 +246,101 @@ int main(int argc, char** argv)
         const int end = lying.lastIndexOf(QByteArray("PK\x05\x06", 4));
         lying[end + 16] = char(0xf0); lying[end + 17] = char(0xff); lying[end + 18] = char(0xff); lying[end + 19] = char(0x7f);
         check("an archive whose list points outside it: nothing", R::unzipOne(lying, "deno").isEmpty(), "empty");
+    }
+    // ---- 2.18: the browser's lists (src/online/WebBrowse.cpp)
+    {
+        // A channel's feed, as YouTube writes them (the media:title is not the title; its 480x360 picture gives way
+        // to the 16:9 one beside it; a "short" says so in its link).
+        const QByteArray feed = R"(<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns:yt="http://www.youtube.com/xml/schemas/2015" xmlns:media="http://search.yahoo.com/mrss/" xmlns="http://www.w3.org/2005/Atom">
+ <link rel="self" href="http://www.youtube.com/feeds/videos.xml?channel_id=UCabcdefghijklmnopqrstuv"/>
+ <id>yt:channel:abcdefghijklmnopqrstuv</id><yt:channelId>abcdefghijklmnopqrstuv</yt:channelId>
+ <title>A Channel &amp; Co</title><author><name>A Channel &amp; Co</name><uri>https://www.youtube.com/channel/UCabc</uri></author>
+ <entry>
+  <id>yt:video:AAAAAAAAAAA</id><yt:videoId>AAAAAAAAAAA</yt:videoId><yt:channelId>UCabcdefghijklmnopqrstuv</yt:channelId>
+  <title>First &amp; best</title><link rel="alternate" href="https://www.youtube.com/watch?v=AAAAAAAAAAA"/>
+  <author><name>A Channel &amp; Co</name><uri>https://www.youtube.com/channel/UCabc</uri></author>
+  <published>2026-10-01T12:00:00+00:00</published><updated>2026-10-02T12:00:00+00:00</updated>
+  <media:group><media:title>not this</media:title><media:content url="https://www.youtube.com/v/AAAAAAAAAAA?version=3" type="application/x-shockwave-flash" width="640" height="390"/>
+   <media:thumbnail url="https://i1.ytimg.com/vi/AAAAAAAAAAA/hqdefault.jpg" width="480" height="360"/><media:description>What it is about.</media:description>
+   <media:community><media:starRating count="10" average="5.00" min="1" max="5"/><media:statistics views="12345"/></media:community></media:group>
+ </entry>
+ <entry>
+  <id>yt:video:BBBBBBBBBBB</id><yt:videoId>BBBBBBBBBBB</yt:videoId><yt:channelId>UCabcdefghijklmnopqrstuv</yt:channelId>
+  <title>Upright</title><link rel="alternate" href="https://www.youtube.com/shorts/BBBBBBBBBBB"/>
+  <author><name>A Channel &amp; Co</name></author><published>2026-10-03T08:30:00+00:00</published>
+  <media:group><media:thumbnail url="https://i2.ytimg.com/vi/BBBBBBBBBBB/hqdefault.jpg" width="480" height="360"/></media:group>
+ </entry>
+</feed>)";
+        const QList<WebItem> items = WebBrowse::parseFeed(feed, QStringLiteral("UCabcdefghijklmnopqrstuv"));
+        check("a channel's feed: its videos", items.size() == 2, QString::number(items.size()));
+        if (items.size() == 2) {
+            const WebItem& a = items[0];
+            check("... with title, address, channel, date, views, description", a.title == "First & best" && a.url == "https://www.youtube.com/watch?v=AAAAAAAAAAA" &&
+                  a.id == "AAAAAAAAAAA" && a.channel == "A Channel & Co" && a.channelId == "UCabcdefghijklmnopqrstuv" &&
+                  a.published == QDateTime(QDate(2026, 10, 1), QTime(12, 0), Qt::UTC).toSecsSinceEpoch() && a.views == 12345 &&
+                  a.description == "What it is about." && !a.shorts, a.title + " | " + a.channel + " | " + QString::number(a.views));
+            check("... the 16:9 picture rather than the 480x360 one", a.thumb == "https://i1.ytimg.com/vi/AAAAAAAAAAA/mqdefault.jpg", a.thumb);
+            check("... and a short is known by its link", items[1].shorts && items[1].views == -1, items[1].url);
+        }
+        check("a feed that is not one: nothing", WebBrowse::parseFeed("<html>404</html>", "x").isEmpty() && WebBrowse::parseFeed("", "x").isEmpty(), "empty");
+
+        // A search (yt-dlp --flat-playlist): entries with thumbnails of several sizes; a playlist and a channel among them.
+        QJsonArray entries;
+        entries.append(QJsonObject{{"_type", "url"}, {"id", "CCCCCCCCCCC"}, {"url", "https://www.youtube.com/watch?v=CCCCCCCCCCC"}, {"title", "Found"},
+                                   {"duration", 754.0}, {"channel", "Somebody"}, {"channel_id", "UCsomebodysomebodysomeb"}, {"view_count", 98765},
+                                   {"timestamp", 1790000000}, {"thumbnails", QJsonArray{
+                                       QJsonObject{{"url", "https://i.ytimg.com/vi/CCCCCCCCCCC/hq720.jpg?sqp=a"}, {"width", 360}, {"height", 202}},
+                                       QJsonObject{{"url", "https://i.ytimg.com/vi/CCCCCCCCCCC/hq720.jpg?sqp=b"}, {"width", 720}, {"height", 404}},
+                                       QJsonObject{{"url", "https://i.ytimg.com/vi/CCCCCCCCCCC/hqdefault.jpg"}, {"width", 480}, {"height", 360}},
+                                       QJsonObject{{"url", "https://i.ytimg.com/vi_webp/CCCCCCCCCCC/x.webp"}, {"width", 320}, {"height", 180}}}}});
+        entries.append(QJsonObject{{"_type", "url"}, {"id", "PLxyz"}, {"url", "https://www.youtube.com/playlist?list=PLxyz"}, {"title", "A list"}});
+        entries.append(QJsonObject{{"_type", "url"}, {"id", "UCother"}, {"url", "https://www.youtube.com/channel/UCother"}, {"title", "A channel"}});
+        entries.append(QJsonObject{{"_type", "url"}, {"id", "DDDDDDDDDDD"}, {"url", "https://www.youtube.com/shorts/DDDDDDDDDDD"}, {"title", "Short"},
+                                   {"live_status", "is_live"}});
+        const QByteArray search = QJsonDocument(QJsonObject{{"_type", "playlist"}, {"id", "words"}, {"entries", entries}}).toJson();
+        const WebList l = WebBrowse::parseListing(search, QByteArray(), 0);
+        check("a search: its videos (not its lists, nor channels)", l.items.size() == 2 && l.error.isEmpty(), QString::number(l.items.size()));
+        if (l.items.size() == 2) {
+            const WebItem& c = l.items[0];
+            check("... with what yt-dlp knows of each", c.title == "Found" && c.seconds == 754 && c.channel == "Somebody" && c.channelId == "UCsomebodysomebodysomeb" &&
+                  c.views == 98765 && c.published == 1790000000, c.title);
+            check("... and the smallest 16:9 picture at least 300 wide (no webp)", c.thumb == "https://i.ytimg.com/vi/CCCCCCCCCCC/hq720.jpg?sqp=a", c.thumb);
+            check("... a live one and a short known as such; no picture named: YouTube's own", l.items[1].live && l.items[1].shorts &&
+                  l.items[1].thumb == "https://i.ytimg.com/vi/DDDDDDDDDDD/mqdefault.jpg", l.items[1].thumb);
+        }
+        // A channel's page: its name and picture.
+        const QByteArray chan = QJsonDocument(QJsonObject{{"_type", "playlist"}, {"channel", "Channel name"}, {"channel_id", "UCchannelchannelchannel"},
+                                                          {"title", "Channel name - Videos"}, {"thumbnails", QJsonArray{
+                                                              QJsonObject{{"id", "banner_uncropped"}, {"url", "https://yt3/banner"}},
+                                                              QJsonObject{{"id", "7"}, {"url", "https://yt3/square"}, {"width", 900}, {"height", 900}},
+                                                              QJsonObject{{"id", "avatar_uncropped"}, {"url", "https://yt3/avatar"}}}},
+                                                          {"entries", QJsonArray{QJsonObject{{"id", "EEEEEEEEEEE"}, {"url", "https://www.youtube.com/watch?v=EEEEEEEEEEE"}, {"title", "Theirs"}}}}}).toJson();
+        const WebList cl = WebBrowse::parseListing(chan, QByteArray(), 0);
+        check("a channel's page: its name and picture; its videos are its", cl.channel.title == "Channel name" && cl.channel.id == "UCchannelchannelchannel" &&
+              cl.channel.avatar == "https://yt3/avatar" && cl.items.size() == 1 && cl.items[0].channel == "Channel name" && cl.items[0].channelId == "UCchannelchannelchannel",
+              cl.channel.title + " " + cl.channel.avatar);
+        const WebList bad = WebBrowse::parseListing(QByteArray(), "WARNING: x\nERROR: [youtube] Sign in to confirm you\xe2\x80\x99re not a bot.\n", 1);
+        check("yt-dlp failed: its last error line", bad.items.isEmpty() && bad.error.startsWith("[youtube] Sign in to confirm"), bad.error);
+        check("... or that it took too long; or that it is not there", WebBrowse::parseListing("", "", -1).error.contains("in time") &&
+              WebBrowse::errorLine("no-program", -1).contains("not on this computer"), WebBrowse::parseListing("", "", -1).error);
+
+        // Google Takeout's subscriptions.csv (a byte-order mark, quotes, a header in another language).
+        const QByteArray csv = "\xef\xbb\xbfID de la cha\xc3\xaene,URL de la cha\xc3\xaene,Titre de la cha\xc3\xaene\r\n"
+                               "UCaaaaaaaaaaaaaaaaaaaaaa,http://www.youtube.com/channel/UCaaaaaaaaaaaaaaaaaaaaaa,Plain\r\n"
+                               "UCbbbbbbbbbbbbbbbbbbbbbb,http://www.youtube.com/channel/UCbbbbbbbbbbbbbbbbbbbbbb,\"Quoted, with a comma \"\"and quotes\"\"\"\r\n"
+                               "\r\nnot a channel,http://x,y\n";
+        const QList<WebChannel> chs = WebBrowse::parseTakeout(csv);
+        check("Google Takeout's list: the channels, by the ids in it", chs.size() == 2 && chs[0].id == "UCaaaaaaaaaaaaaaaaaaaaaa" && chs[0].title == "Plain" &&
+              chs[1].title == "Quoted, with a comma \"and quotes\"", chs.isEmpty() ? QString() : chs.last().title);
+        check("... and nothing from something else", WebBrowse::parseTakeout("a,b,c\n1,2,3\n").isEmpty(), "none");
+
+        // What the viewer keeps survives being written out and read back.
+        WebItem k;
+        k.id = "X"; k.url = "u"; k.title = "T"; k.channel = "C"; k.channelId = "UCx"; k.thumb = "t"; k.seconds = 61; k.published = 5; k.views = 0; k.live = true;
+        const WebItem r = WebItem::fromJson(k.toJson());
+        check("an item written and read back", r.id == "X" && r.url == "u" && r.title == "T" && r.channelId == "UCx" && r.seconds == 61 && r.published == 5 && r.views == 0 && r.live,
+              QString::fromUtf8(QJsonDocument(k.toJson()).toJson(QJsonDocument::Compact)));
     }
     std::printf("%s\n", g_fail ? "SOME CHECKS FAILED" : "all checks passed");
     return g_fail ? 1 : 0;

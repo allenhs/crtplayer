@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(CRTPlayer VERSION 2.17.0 LANGUAGES C CXX)
+project(CRTPlayer VERSION 2.18.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -62,8 +62,11 @@ add_executable(crtplayer
   src/playback/ShrinkFilter.cpp src/playback/ShrinkFilter.h src/playback/ShrinkKernel.h
   src/playback/FrameGovernor.cpp src/playback/FrameGovernor.h
   src/playback/WebSource.cpp src/playback/WebSource.h
+  src/playback/RangeSource.cpp src/playback/RangeSource.h
   src/online/OnlineVideo.cpp src/online/OnlineVideo.h
-  src/app/Online.cpp
+  src/online/WebBrowse.cpp src/online/WebBrowse.h
+  src/app/Online.cpp src/app/Browse.cpp
+  src/ui/BrowseScreen.cpp src/ui/BrowseScreen.h
   src/render/CrtRenderer.cpp
     src/render/Enhance.cpp  src/render/CrtRenderer.h
   src/render/NvEnhancer.cpp   src/render/NvEnhancer.h
@@ -158,9 +161,9 @@ if(CRTPLAYER_BUILD_TESTS)
   target_include_directories(test_shrink PRIVATE src)
   target_link_libraries(test_shrink PRIVATE Qt6::Core PkgConfig::GST)
   add_test(NAME shrink COMMAND test_shrink)
-  add_executable(test_online tests/test_online.cpp src/online/OnlineVideo.cpp src/online/OnlineVideo.h)
+  add_executable(test_online tests/test_online.cpp src/online/OnlineVideo.cpp src/online/OnlineVideo.h src/online/WebBrowse.cpp src/online/WebBrowse.h)
   target_include_directories(test_online PRIVATE src)
-  target_link_libraries(test_online PRIVATE Qt6::Core Qt6::Network PkgConfig::GST ZLIB::ZLIB)
+  target_link_libraries(test_online PRIVATE Qt6::Core Qt6::Gui Qt6::Network PkgConfig::GST ZLIB::ZLIB)
   add_test(NAME online COMMAND test_online)
   add_executable(test_tv tests/test_tv.cpp)
   target_link_libraries(test_tv PRIVATE crtcore)

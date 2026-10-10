@@ -11,14 +11,20 @@ It is asked the way the player asks the real one (--dump-single-json ... -- URL)
   .../yt/watch?v=expireN | expireNxM | dead                   as "big", its addresses working for N seconds (those of the first
                                                               M answers; later ones for an hour), or never
   .../yt/watch?v=outageN                                      as "big", over a slow line, and the network is away for a while
+  .../yt/watch?v=ytlikeN                                      as "big", from a server that sends large requests slowly, as
+                                                              YouTube's do (yt-dlp then says to ask in 10 MiB pieces)
   .../yt/watch?v=gone | nojs | slow | headers | live          an error; the "no JavaScript runtime" warning; three seconds
                                                               to answer; headers and cookies to send along; a live stream
   .../yt/s/ID                                                 a short address of .../yt/watch?v=ID
   .../yt/playlist?list=NAME                                   a playlist of three
+  ytsearchN:WORDS                                             (2.18) the site's search (FAKE_YTDLP_SITE: the site); "fail"
+                                                              among the words: an error, as when YouTube refuses; "slow": 3 s
+  .../channel/ID/videos | .../@handle[/videos]                (2.18) a channel's videos (--playlist-end N)
+  .../yt/watch?v=cat-...                                      a video of the site's channels (played as "pair-h264")
 
 FAKE_YTDLP_LOG: a file every call is written to. A copy in a folder named "old" does not know --js-runtimes
 (as yt-dlp before late 2025)."""
-import json, os, sys, time, urllib.parse
+import json, os, sys, time, urllib.parse, urllib.request
 
 argv = sys.argv[1:]
 if os.environ.get('FAKE_YTDLP_LOG'):
@@ -31,6 +37,48 @@ if old and '--js-runtimes' in argv:
 if '--' not in argv or '--dump-single-json' not in argv:
     sys.stderr.write('yt-dlp: error: the stand-in only answers --dump-single-json ... -- URL\n'); sys.exit(2)
 url = argv[argv.index('--') + 1]
+
+# ---- (2.18) the browser's questions: a search, a channel's videos
+def site_get(site, path):
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+    try:
+        with opener.open(site + path, timeout=10) as r: return json.loads(r.read())
+    except Exception:
+        return None
+def entry(site, v):
+    e = {'_type': 'url', 'ie_key': 'Youtube', 'id': v['id'], 'url': '%s/yt/watch?v=%s' % (site, v['id']), 'title': v['title'], 'description': None,
+         'duration': v['duration'], 'channel': v['channel'], 'channel_id': v['channel_id'], 'channel_url': '%s/channel/%s' % (site, v['channel_id']),
+         'uploader': v['channel'], 'view_count': v['views'],
+         'thumbnails': [{'url': '%s/thumbs/%s?w=168' % (site, v['thumb']), 'width': 168, 'height': 94},
+                        {'url': '%s/thumbs/%s' % (site, v['thumb']), 'width': 640, 'height': 360}]}
+    if 'youtubetab:approximate_date' in argv: e['timestamp'] = int(v['published'])
+    return e
+def playlist_end():
+    return int(argv[argv.index('--playlist-end') + 1]) if '--playlist-end' in argv else 10 ** 6
+if url.startswith('ytsearch'):
+    n, _, words = url[len('ytsearch'):].partition(':')
+    site = os.environ.get('FAKE_YTDLP_SITE', '')
+    if 'slow' in words.split(): time.sleep(3)
+    if 'fail' in words.split():
+        sys.stderr.write('ERROR: [youtube:search] Unable to download API page: HTTP Error 429: Too Many Requests\n'); sys.exit(1)
+    found = site_get(site, '/api/search?q=' + urllib.parse.quote(' '.join(w for w in words.split() if w != 'slow'))) or []
+    print(json.dumps({'_type': 'playlist', 'id': words, 'title': words, 'extractor_key': 'YoutubeSearch', 'webpage_url': url,
+                      'entries': [entry(site, v) for v in found[:int(n or 1)]]}))
+    sys.exit(0)
+_u = urllib.parse.urlsplit(url)
+_parts = [x for x in _u.path.split('/') if x]
+if _parts and (_parts[0] == 'channel' or _parts[0].startswith('@')):
+    site = '%s://%s' % (_u.scheme, _u.netloc)
+    key = _parts[1] if _parts[0] == 'channel' and len(_parts) > 1 else _parts[0]
+    c = site_get(site, '/api/channel/' + urllib.parse.quote(key))
+    if not c:
+        sys.stderr.write('ERROR: [youtube:tab] %s: This channel does not exist.\n' % key); sys.exit(1)
+    print(json.dumps({'_type': 'playlist', 'id': c['id'], 'title': '%s - Videos' % c['title'], 'channel': c['title'], 'channel_id': c['id'],
+                      'uploader': c['title'], 'uploader_id': '@' + c['handle'], 'extractor_key': 'YoutubeTab', 'webpage_url': url,
+                      'thumbnails': [{'id': 'banner_uncropped', 'url': '%s/thumbs/t00.jpg' % site, 'width': 640, 'height': 360},
+                                     {'id': 'avatar_uncropped', 'url': '%s/thumbs/%s' % (site, c['avatar'])}],
+                      'entries': [entry(site, v) for v in c['videos'][:playlist_end()]]}))
+    sys.exit(0)
 u = urllib.parse.urlsplit(url); q = urllib.parse.parse_qs(u.query)
 base = '%s://%s' % (u.scheme, u.netloc)
 media = base + '/media/'
@@ -78,7 +126,14 @@ info = {'id': vid, 'title': 'Stand-in video (%s)' % vid, 'uploader': 'The test c
                      {'start_time': 70.0, 'end_time': 120.0, 'title': 'The end'}]}
 
 pairs = {'pair-h264': (H264, AAC), 'pair-vp9': (VP9, OPUS), 'mixed-a': (H264, OPUS), 'mixed-b': (VP9, AAC), 'big': (BIG, AAC)}
-if vid in pairs:
+if vid.startswith('cat-'):   # (2.18) a video of the site's channels
+    v = site_get(base, '/api/video/' + vid)
+    if not v: fail('[youtube] %s: Video unavailable' % vid)
+    info.update(title=v['title'], uploader=v['channel'], channel=v['channel'], channel_id=v['channel_id'], duration=v['duration'],
+                thumbnail='%s/thumbs/%s' % (base, v['thumb']))
+    info['requested_formats'] = [H264(), AAC()]
+    info['subtitles'] = {}; info['automatic_captions'] = {}; info['chapters'] = []
+elif vid in pairs:
     info['requested_formats'] = [f() for f in pairs[vid]]
 elif vid.startswith('expire') or vid == 'dead':
     # "expire6": the addresses work for six seconds, "expire6x2": so do those of the second answer; the answers
@@ -95,6 +150,14 @@ elif vid.startswith('outage'):
     info['requested_formats'] = [BIG(), AAC()]
     info['requested_formats'][0]['url'] += '?kbps=7000&outage=8,6&n=' + vid[len('outage'):]
     info['requested_formats'][0]['tbr'] = 6000
+    info['subtitles'] = {}; info['automatic_captions'] = {}; info['chapters'] = []
+elif vid.startswith('ytlike'):
+    info['requested_formats'] = [BIG(), AAC()]
+    for f in info['requested_formats']:
+        f['url'] += '?yt=%d&n=%s' % (8000 if f['vcodec'] != 'none' else 160, vid[len('ytlike'):])
+        f['downloader_options'] = {'http_chunk_size': 10485760}
+    info['requested_formats'][0]['tbr'] = 6000
+    info['requested_formats'][1]['tbr'] = 96
     info['subtitles'] = {}; info['automatic_captions'] = {}; info['chapters'] = []
 elif vid == 'muxed':
     info.update(url=media + 'muxed.mp4', protocol='http', ext='mp4', vcodec='avc1.64001e', acodec='mp4a.40.2', width=640, height=360, fps=25,

@@ -364,6 +364,9 @@ QJsonObject Player::webReport() const
             o["aheadBytes"] = double(levels.first().ahead);
             o["receivedBytes"] = double(levels.first().received);
             o["ended"] = levels.first().ended;
+            int requests = 0;
+            for (const WebLevel& l : levels) requests += l.requests;
+            o["requests"] = requests;
         }
     }
     return o;

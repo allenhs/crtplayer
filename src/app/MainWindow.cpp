@@ -26,6 +26,7 @@
 #include "settings/ResumeStore.h"
 #include "ui/JellyfinPanel.h"
 #include "ui/ControlBar.h"
+#include "ui/BrowseScreen.h"
 #include "ui/CutDialog.h"
 #include "ui/TvPanel.h"
 #include "tv/TvController.h"
@@ -328,7 +329,7 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent)
         if (m_settingsDock->isVisible()) updateOnlineStatus();   // (which yt-dlp there is: asked when it is looked at)
     });
     connect(m_playbackPanel, &PlaybackPanel::onlineHeightChanged, this, &MainWindow::setOnlineMaxHeight);
-    connect(m_playbackPanel, &PlaybackPanel::ytDlpRequested, this, &MainWindow::fetchYtDlp);
+    connect(m_playbackPanel, &PlaybackPanel::ytDlpRequested, this, [this] { fetchYtDlp(); });
     connect(m_playlistDock, &QDockWidget::visibilityChanged, this, [this](bool) {
         QSignalBlocker b(m_controls->playlistButton);
         m_controls->playlistButton->setChecked(m_playlistDock->isVisible());
@@ -345,6 +346,7 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent)
                          : tr("Jellyfin quality: the original file, from the next video"));
     });
     connect(m_controls->jellyfinButton, &QToolButton::clicked, this, [this](bool on) { showJellyfin(on); });
+    connect(m_controls->browseButton, &QToolButton::clicked, this, [this] { showBrowse(true); });
     connect(m_jfDock, &QDockWidget::visibilityChanged, this, [this](bool) {
         QSignalBlocker b(m_controls->jellyfinButton);
         m_controls->jellyfinButton->setChecked(m_jfDock->isVisible());
@@ -643,6 +645,7 @@ void MainWindow::buildUi()
 
     m_jf = new JellyfinClient(this);
     m_online = new OnlineResolver(this);
+    setupBrowse();
     m_jfDock = new QDockWidget(tr("Jellyfin"), this);
     m_jfDock->setObjectName("jellyfinDock");
     m_jfDock->setFeatures(QDockWidget::DockWidgetClosable | QDockWidget::DockWidgetMovable);
@@ -733,6 +736,7 @@ void MainWindow::buildActions()
     add({Qt::Key_MediaPrevious, Qt::Key_P}, [this] { nextItem(-1); });
     add({QKeySequence::Open}, [this] { openDialog(); });
     add({QKeySequence(Qt::CTRL | Qt::Key_L)}, [this] { promptOpenLink(); });   // a video page, or a stream's address (2.17)
+    add({QKeySequence(Qt::CTRL | Qt::Key_B)}, [this] { showBrowse(!browseOpen()); });   // the browser of web videos (2.18)
     add({QKeySequence::Paste}, [this] { pasteLink(); });                      // the address on the clipboard
     add({Qt::Key_E}, [this] { m_settingsDock->setVisible(!m_settingsDock->isVisible()); });
     add({Qt::Key_L}, [this] { m_playlistDock->setVisible(!m_playlistDock->isVisible()); });
@@ -1957,6 +1961,7 @@ bool MainWindow::remoteAction(const QString& a, double v)
     else if (a == "subs") cycleSubtitle();
     else if (a == "audio") cycleAudio();
     else if (a == "desk") toggleDeskMode();
+    else if (a == "browse") showBrowse(!browseOpen());
     else if (a == "fly") { if (m_deskActive && m_desk) m_desk->view()->toggleFly(); else setFullscreen(!m_fullscreen); }
     else if (a == "chapter+") jumpChapter(+1);
     else if (a == "chapter-") jumpChapter(-1);
@@ -2337,6 +2342,7 @@ void MainWindow::layoutOverlays()
     m_osd->move((w - m_osd->width()) / 2, 28);
     if (m_info->isVisible()) { m_info->adjustSize(); m_info->move(16, 16); }
     m_emptyHint->setGeometry(0, 0, w, h - (m_fullscreen ? 0 : barH + 16));
+    if (m_browse && m_browse->isVisible()) { m_browse->setGeometry(m_video->geometry()); m_browse->raise(); }
     m_controls->raise();
     m_osd->raise();
 }
@@ -2537,6 +2543,7 @@ QJsonObject MainWindow::stateReport() const
     static const char* states[] = {"idle", "loading", "paused", "playing", "error"};
     o["file"] = m_mediaTitle.isEmpty() ? QFileInfo(m_player->currentPath()).fileName() : m_mediaTitle;
     o["online"] = onlineReport();
+    o["browse"] = browseReport();
     o["source"] = m_jfItemId.isEmpty() ? QStringLiteral("file") : QStringLiteral("jellyfin");
     o["jellyfinSignedIn"] = m_jf->isSignedIn();
     o["tv"] = m_tv->report();
@@ -2774,6 +2781,7 @@ void MainWindow::createDesk()
     b->playlistButton->hide();
     b->settingsButton->hide();
     b->jellyfinButton->hide();
+    b->browseButton->hide();
     b->aspectButton->setMenu(m_controls->aspectButton->menu());
     b->audioButton->setMenu(m_controls->audioButton->menu());
     b->subtitleButton->setMenu(m_controls->subtitleButton->menu());

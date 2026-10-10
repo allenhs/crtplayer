@@ -63,6 +63,7 @@ public:
     QToolButton* screenshotButton;
     QToolButton* playlistButton;
     QToolButton* jellyfinButton;
+    QToolButton* browseButton;
     QToolButton* settingsButton;
     QToolButton* fullscreenButton;
 
