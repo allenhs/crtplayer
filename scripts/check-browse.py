@@ -90,6 +90,15 @@ shown, glow = tiles_drawn(out / 'browse' / 'new.png', e, 12)
 check('on the screen: each of the twelve tiles shows its picture, and the chosen one glows', shown == 12 and glow > 0.6,
       f"{shown} of 12 with a picture; {glow * 100:.0f}% of the edge around the chosen one in amber")
 
+import os
+e = B.get('b:paint', {})
+timing = os.environ.get('BROWSE_NO_TIMING') != '1'   # (not under the sanitizers: everything is ten times slower there)
+ok = e.get('paints', 0) >= 20 and e.get('paintMsAvg', 99) < 20
+detail = f"{e.get('paints')} pictures painted, {e.get('paintMsAvg', 0):.1f} ms each on average, {e.get('paintMsMax', 0):.1f} ms at most (2.18.0: about 45 ms each)"
+if timing:
+    check('turning pages and moving from tile to tile: a picture of the menu takes little time to paint (1080p, this machine)', ok, detail)
+else:
+    print(f"INFO  painting (not judged here): {detail}")
 e1, e2, e3 = B.get('b:moved', {}), B.get('b:page2', {}), B.get('b:back-left', {})
 check('arrow keys: right, right, down', e1.get('selected') == 6, f"tile {e1.get('selected')}")
 check('Page Down: the next page (its first tile)', e2.get('page') == 1 and e2.get('selected') == 12 and e2.get('titles') == [v['title'] for v in want[12:24]],

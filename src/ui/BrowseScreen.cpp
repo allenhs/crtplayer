@@ -141,10 +141,27 @@ BrowseScreen::BrowseScreen(WebBrowse* data, QWidget* parent) : QWidget(parent), 
     m_input->installEventFilter(this);
     connect(m_input, &QLineEdit::returnPressed, this, &BrowseScreen::finishInput);
 
-    for (QVariantAnimation* a : {&m_lift, &m_slide, &m_detailAnim, &m_fade}) {
+    for (QVariantAnimation* a : {&m_slide, &m_detailAnim, &m_fade}) {
         a->setEasingCurve(QEasingCurve::OutCubic);
-        connect(a, &QVariantAnimation::valueChanged, this, [this] { update(); });
+        if (a != &m_slide) connect(a, &QVariantAnimation::valueChanged, this, [this] { update(); });
     }
+    // (a page sliding in: only the band of the grid is painted again)
+    connect(&m_slide, &QVariantAnimation::valueChanged, this, [this] {
+        const double m = tileMargin();
+        update(QRectF(0, m_l.grid.top() - m, width(), m_l.dots.bottom() - m_l.grid.top() + 2 * m).toAlignedRect());
+    });
+    // (the chosen tile rising, the one before settling: only their places are painted again)
+    m_lift.setEasingCurve(QEasingCurve::OutCubic);
+    connect(&m_lift, &QVariantAnimation::valueChanged, this, [this] {
+        const View& v = view();
+        QRegion dirty;
+        const double m = tileMargin();
+        for (int index : {v.selected, m_prevSelected}) {
+            const int i = index - v.page * kPerPage;
+            if (index >= 0 && i >= 0 && i < m_l.cells.size()) dirty += m_l.cells[i].adjusted(-m, -m, m, m).toAlignedRect();
+        }
+        if (dirty.isEmpty()) update(); else update(dirty);
+    });
     m_lift.setDuration(160);
     m_slide.setDuration(260);
     m_detailAnim.setDuration(240);
@@ -381,6 +398,7 @@ void BrowseScreen::setList(Section s, const WebList& l)
     v.page = v.selected / kPerPage;
     if (s == Section::New) rebuildLocal(Section::Channels);   // (the channels' counts of new videos)
     update();
+    warmTiles();
 }
 
 void BrowseScreen::rebuildLocal(Section s)
@@ -428,6 +446,7 @@ void BrowseScreen::rebuildLocal(Section s)
     if (v.selected / kPerPage != v.page) v.selected = std::min(int(v.tiles.size()) - 1, v.page * kPerPage);
     v.selected = std::max(0, v.selected);
     update();
+    warmTiles();
 }
 
 int BrowseScreen::pageCount(const View& v) const { return std::max(1, int((v.tiles.size() + kPerPage - 1) / kPerPage)); }
@@ -682,6 +701,7 @@ void BrowseScreen::goPage(int page, int direction)
     m_slide.start();
     m_prevSelected = -1;
     update();
+    warmTiles();
 }
 
 void BrowseScreen::moveGrid(int dx, int dy)
@@ -929,7 +949,12 @@ void BrowseScreen::mousePressEvent(QMouseEvent* e)
 void BrowseScreen::wheelEvent(QWheelEvent* e)
 {
     if (m_detailOpen) return;
-    const int d = e->angleDelta().y() != 0 ? e->angleDelta().y() : e->angleDelta().x();
+    // A page for each notch of a wheel; a touchpad's many small steps are added up to a notch first.
+    m_wheel += e->angleDelta().y() != 0 ? e->angleDelta().y() : e->angleDelta().x();
+    if (std::abs(m_wheel) < 120) return;
+    const int d = m_wheel;
+    m_wheel = 0;
+    if (m_slide.state() == QAbstractAnimation::Running && m_slide.currentValue().toDouble() > 0.5) return;   // (one page at a time)
     if (d < 0 && view().page + 1 < pages()) select((view().page + 1) * kPerPage);
     else if (d > 0 && view().page > 0) select((view().page - 1) * kPerPage);
 }
@@ -981,12 +1006,14 @@ void BrowseScreen::relayout()
     }
     l.banner = QRectF(mx, 124 * s, w - 2 * mx, 20 * s);
     // the tray
-    const double trayH = 118 * s;
+    const double trayH = 132 * s;
     l.tray = QRectF(0, h - trayH, w, trayH);
     l.clock = QRectF(w / 2 - 220 * s, l.tray.top() + 12 * s, 440 * s, trayH - 16 * s);
-    const double bd = 70 * s;
-    l.trayLeft = QRectF(mx + 30 * s, l.tray.center().y() - bd / 2 - 6 * s, bd, bd);
-    l.trayRight = QRectF(w - mx - 30 * s - bd, l.trayLeft.top(), bd, bd);
+    // (the round buttons and their names, in the middle of the band below its edge: clear of the edge above them)
+    const double bd = 64 * s, edge = l.tray.top() + 18 * s, below = 6 * s + 18 * s;
+    const double bTop = edge + ((l.tray.bottom() - edge) - (bd + below)) / 2;
+    l.trayLeft = QRectF(mx + 30 * s, bTop, bd, bd);
+    l.trayRight = QRectF(w - mx - 30 * s - bd, bTop, bd, bd);
     // the grid
     const double top = 150 * s, bottom = l.tray.top() - 46 * s;
     const double gx = 28 * s, gy = 26 * s;
@@ -1029,6 +1056,7 @@ void BrowseScreen::want(const QString& url)
         if (!self) return;
         self->m_images.insert(url, img);
         self->update();
+        self->warmTiles();
     });
 }
 
@@ -1069,6 +1097,68 @@ QPixmap BrowseScreen::avatar(const QString& url, int size)
     p.end();
     m_scaled.insert(key, pm);
     return pm;
+}
+
+// ---- pictures of tiles, made once
+
+double BrowseScreen::tileMargin() const { return 36 * m_l.s; }   // (room for the shadow and the glow)
+
+QString BrowseScreen::tileKey(const Tile& t, const QSizeF& cell, bool lifted) const
+{
+    // Everything that changes how the tile looks: what it shows, whether its pictures have come, its marks.
+    const auto loaded = [this](const QString& url) { return url.isEmpty() ? 0 : m_images.contains(url) ? (m_images.value(url).isNull() ? 2 : 1) : 0; };
+    int progress = 0;
+    if (t.kind == TileKind::Video && m_resume && t.item.seconds > 0) progress = int(std::clamp(m_resume(t.item.url) / 10.0 / t.item.seconds, 0.0, 100.0));
+    const bool later = t.kind == TileKind::Video && m_section != Section::Later && m_data->isWatchLater(t.item.url);
+    return QStringLiteral("%1|%2|%3|%4|%5x%6|%7|%8|%9|%10|%11|%12|%13")
+        .arg(int(t.kind)).arg(t.kind == TileKind::Channel ? t.channel.id + t.channel.title : t.item.url + t.item.title)
+        .arg(loaded(t.item.thumb)).arg(loaded(t.channel.avatar)).arg(cell.width(), 0, 'f', 1).arg(cell.height(), 0, 'f', 1)
+        .arg(t.fresh).arg(later).arg(progress).arg(lifted).arg(m_section == Section::Channel)
+        .arg(devicePixelRatioF()).arg(t.kind == TileKind::Channel ? t.item.thumb : QString());
+}
+
+const QPixmap& BrowseScreen::tilePicture(const Tile& t, const QSizeF& cell, bool lifted)
+{
+    const QString key = tileKey(t, cell, lifted);
+    auto it = m_tiles.find(key);
+    if (it != m_tiles.end()) return *it;
+    if (m_tiles.size() > 160) m_tiles.clear();
+    const double m = tileMargin(), dpr = devicePixelRatioF();
+    const QSizeF logical(cell.width() + 2 * m, cell.height() + 2 * m);
+    QPixmap pm((logical * dpr).toSize());
+    pm.setDevicePixelRatio(dpr);
+    pm.fill(Qt::transparent);
+    QPainter q(&pm);
+    q.setRenderHint(QPainter::Antialiasing);
+    q.setRenderHint(QPainter::TextAntialiasing);
+    q.setRenderHint(QPainter::SmoothPixmapTransform);
+    paintTile(q, t, QRectF(QPointF(m, m), cell), lifted ? 1.0 : 0.0, lifted, 0);
+    q.end();
+    return *m_tiles.insert(key, pm);
+}
+
+// The pictures of the page shown, and of the pages either side, are made while nothing else happens, a few at a
+// time: going to the next page then finds them ready.
+void BrowseScreen::warmTiles()
+{
+    if (!m_open || m_warmQueued || m_l.cells.isEmpty()) return;
+    const View& v = view();
+    const QSizeF cell = m_l.cells.first().size();
+    for (int page : {v.page, v.page + 1, v.page - 1}) {
+        if (page < 0) continue;
+        for (int i = page * kPerPage; i < std::min(int(v.tiles.size()), (page + 1) * kPerPage); ++i) {
+            const Tile& t = v.tiles[i];
+            if (t.kind == TileKind::Empty || m_tiles.contains(tileKey(t, cell, false))) continue;
+            m_warmQueued = true;
+            QTimer::singleShot(0, this, [this, t, cell] {
+                m_warmQueued = false;
+                if (!m_open) return;
+                tilePicture(t, cell, false);
+                warmTiles();
+            });
+            return;
+        }
+    }
 }
 
 // ---- painting
@@ -1256,7 +1346,7 @@ void BrowseScreen::paintTile(QPainter& p, const Tile& t, const QRectF& cell, dou
     p.save();
     p.setClipPath(screen);
     p.fillRect(sr, QColor(0x0b, 0x0c, 0x0f));
-    const QSize px = sr.size().toSize();
+    const QSize px = (sr.size() * devicePixelRatioF()).toSize();
     if (t.kind == TileKind::Video) {
         const QPixmap pm = thumb(t.item.thumb, px);
         if (!pm.isNull()) p.drawPixmap(sr, pm, QRectF(0, 0, pm.width(), pm.height()));
@@ -1491,7 +1581,31 @@ void BrowseScreen::paintGrid(QPainter& p)
                 p.drawPath(path);
                 continue;
             }
-            paintTile(p, t, m_l.cells[i], l, chosen && gridFocus, index);
+            if (t.kind == TileKind::Empty) { paintTile(p, t, m_l.cells[i], 0, false, index); continue; }
+            // (drawn from pictures made once: a tile at rest, and the chosen one lifted with its glow; while one
+            // rises or settles, the two blended. Painting it all anew each time took 40 ms a picture at 1080p.)
+            const QRectF cell = m_l.cells[i];
+            const QPixmap& rest = tilePicture(t, cell.size(), false);
+            const double m = tileMargin();
+            if (l <= 0.001) {
+                p.drawPixmap(QPointF(cell.left() - m, cell.top() - m), rest);
+            } else if (l >= 0.999) {
+                const QPixmap& up = tilePicture(t, cell.size(), true);
+                p.drawPixmap(QPointF(cell.left() - m, cell.top() - m), up);
+            } else {
+                const QPixmap& up = tilePicture(t, cell.size(), true);
+                const double f = 1.0 + 0.075 * l;
+                const QRectF whole(cell.left() - m, cell.top() - m, cell.width() + 2 * m, cell.height() + 2 * m);
+                p.save();
+                p.setRenderHint(QPainter::SmoothPixmapTransform);
+                const double o = p.opacity();
+                p.setOpacity(o * (1.0 - l));
+                p.drawPixmap(scaled(whole, f), rest, QRectF(QPointF(0, 0), rest.size()));
+                p.setOpacity(o * l);
+                // (the lifted picture was made at 1.075 times the tile, around the same centre)
+                p.drawPixmap(scaled(whole, f / 1.075), up, QRectF(QPointF(0, 0), up.size()));
+                p.restore();
+            }
         }
     Q_UNUSED(selInPage);
     p.restore();
@@ -1524,7 +1638,26 @@ void BrowseScreen::paintTray(QPainter& p)
 {
     const double s = m_l.s;
     const QRectF t = m_l.tray;
-    // a band across the bottom, its edge rising gently to hold the clock
+    // a band across the bottom, its edge rising gently to hold the clock (painted once, for each size)
+    const double hump = t.top();
+    const double dpr = devicePixelRatioF();
+    if (m_trayPicture.size() != (t.size() * dpr).toSize() + QSize(0, 2)) {
+        m_trayPicture = QPixmap((t.size() * dpr).toSize() + QSize(0, 2));
+        m_trayPicture.setDevicePixelRatio(dpr);
+        m_trayPicture.fill(Qt::transparent);
+        QPainter q(&m_trayPicture);
+        q.setRenderHint(QPainter::Antialiasing);
+        q.translate(0, 1 - t.top());
+        paintTrayBand(q);
+    }
+    p.drawPixmap(QPointF(0, t.top() - 1), m_trayPicture);
+    paintTrayFront(p, hump);
+}
+
+void BrowseScreen::paintTrayBand(QPainter& p)
+{
+    const double s = m_l.s;
+    const QRectF t = m_l.tray;
     QPainterPath band;
     const double edge = t.top() + 18 * s, hump = t.top();
     band.moveTo(0, edge);
@@ -1545,6 +1678,11 @@ void BrowseScreen::paintTray(QPainter& p)
     p.setPen(QPen(QColor(255, 255, 255, 22), 1.2));
     p.setBrush(Qt::NoBrush);
     p.drawPath(band);
+}
+
+void BrowseScreen::paintTrayFront(QPainter& p, double hump)
+{
+    const double s = m_l.s;
     // the clock
     const QDateTime now = QDateTime::currentDateTime();
     p.setFont(font(40 * s, 300));
@@ -1588,7 +1726,7 @@ void BrowseScreen::paintTray(QPainter& p)
         p.setFont(font(12.5 * s, 600));
         p.setPen(focused ? kText : kMuted);
         const QString label = i == 0 ? tr("Search") : (m_nowPlaying.isEmpty() ? tr("Back to the player") : tr("Back to the video"));
-        const QRectF lr(r.center().x() - 110 * s, r.bottom() + 4 * s, 220 * s, 18 * s);
+        const QRectF lr(r.center().x() - 110 * s, r.bottom() + 6 * s, 220 * s, 18 * s);
         p.drawText(lr, Qt::AlignCenter, label);
         if (i == 1 && !m_nowPlaying.isEmpty()) {
             p.setFont(font(11 * s, 400));
@@ -1729,6 +1867,12 @@ void BrowseScreen::paintDetail(QPainter& p)
 void BrowseScreen::paintEvent(QPaintEvent*)
 {
     ++m_paints;
+    QElapsedTimer took;
+    took.start();
+    struct Count {   // (how long a picture of the menu takes to paint: the report has it)
+        BrowseScreen* s; QElapsedTimer& t;
+        ~Count() { const double ms = t.nsecsElapsed() / 1e6; s->m_paintMsTotal += ms; s->m_paintMsMax = std::max(s->m_paintMsMax, ms); }
+    } count{this, took};
     QPainter p(this);
     p.setRenderHint(QPainter::Antialiasing);
     p.setRenderHint(QPainter::TextAntialiasing);
@@ -1742,7 +1886,8 @@ void BrowseScreen::paintEvent(QPaintEvent*)
         p.setOpacity(fade);
     }
     paintHeader(p);
-    paintGrid(p);
+    const bool covered = m_detailOpen && m_detailAnim.state() != QAbstractAnimation::Running;
+    if (!covered) paintGrid(p);
     paintDetail(p);
     paintTray(p);
 }
@@ -1774,6 +1919,7 @@ QJsonObject BrowseScreen::report() const
                        {"detailButtons", buttons}, {"detailButton", m_detailButton}, {"channel", m_channel.id}, {"channelTitle", m_channel.title},
                        {"input", m_input->isVisible() ? m_input->text() : QString()}, {"inputChannel", m_inputChannel},
                        {"message", m_ytMessage}, {"ytInstalled", m_ytInstalled}, {"ytNewest", m_ytNewest}, {"paints", m_paints},
-                       {"action", actionLabel()}, {"thumbsShown", int(m_scaled.size())}, {"updating", m_ytUpdating}, {"cells", cells},
+                       {"action", actionLabel()}, {"thumbsShown", int(m_scaled.size())},
+                       {"paintMsAvg", m_paints ? m_paintMsTotal / m_paints : 0.0}, {"paintMsMax", m_paintMsMax}, {"dpr", devicePixelRatioF()}, {"updating", m_ytUpdating}, {"cells", cells},
                        {"scale", m_l.s}, {"origin", QStringLiteral("%1,%2").arg(pos().x()).arg(pos().y())}};
 }
