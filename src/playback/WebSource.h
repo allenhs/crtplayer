@@ -11,18 +11,20 @@
 // picture at one, the sound at the other: how YouTube serves everything above 360p).
 //
 // playbin opens one address. So the player has a source element of its own, behind the address
-// "crtweb://N": inside it, each of the real addresses is read over HTTP into a ring buffer, and comes
-// out of a pad of its own. playbin's decoding bin then finds a demuxer and decoder for each, and
-// plays them as the picture and the sound of one video: started together, sought together.
+// "crtweb://N": inside it, each of the real addresses has a reader of its own (RangeSource.h, 2.18;
+// before, GStreamer's HTTP source and a ring buffer), and comes out of a pad of its own. playbin's
+// decoding bin then finds a demuxer and decoder for each, and plays them as the picture and the sound
+// of one video: started together, sought together.
 //
-// The ring buffers also give the demuxers random access (reading any part of the file, over HTTP by
-// byte ranges). GStreamer's MP4 demuxer needs that to seek in the fragmented MP4 files such sites
-// serve: read front to back only, it could not jump ahead at all (measured).
+// The readers give the demuxers random access (reading any part of the file, over HTTP by byte
+// ranges). GStreamer's MP4 demuxer needs that to seek in the fragmented MP4 files such sites serve:
+// read front to back only, it could not jump ahead at all (measured).
 struct WebStream {
     QString url;
     QList<QPair<QByteArray, QByteArray>> headers;   // as the site wants them (User-Agent, Referer, Cookie, ...)
     bool audioOnly = false;                         // (a smaller buffer)
     int kbps = 0;                                   // its bit rate, where the site says (how much to have at hand before playing on)
+    qint64 chunkBytes = 0;                          // the most to ask for at once (yt-dlp's "http_chunk_size"; 0: 10 MiB)
 };
 
 // Registers the element with GStreamer (once; safe to call again).
@@ -45,6 +47,7 @@ struct WebLevel {
     bool ended = false;
     qint64 quietMs = 0;
     int kbps = 0;
+    int requests = 0;         // HTTP requests made
 };
 bool crt_web_is_source(GstElement* element);
 QList<WebLevel> crt_web_levels(GstElement* source);

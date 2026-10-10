@@ -20,6 +20,7 @@
 #include <QStandardPaths>
 #include <QSysInfo>
 #include <QTimer>
+#include <memory>
 #include <QUrl>
 
 #include <zlib.h>
@@ -147,12 +148,16 @@ public:
 };
 } // namespace
 
+QNetworkAccessManager* OnlineResolver::makeNetwork(QObject* parent)
+{
+    auto* n = new QNetworkAccessManager(parent);
+    n->setProxyFactory(new SystemProxies);
+    return n;
+}
+
 QNetworkAccessManager* OnlineResolver::network()
 {
-    if (!m_net) {
-        m_net = new QNetworkAccessManager(this);
-        m_net->setProxyFactory(new SystemProxies);
-    }
+    if (!m_net) m_net = makeNetwork(this);
     return m_net;
 }
 
@@ -290,6 +295,8 @@ OnlineResult OnlineResolver::parse(const QByteArray& json, const QByteArray& err
     v.title = root.value(QStringLiteral("title")).toString();
     v.uploader = root.value(QStringLiteral("uploader")).toString();
     if (v.uploader.isEmpty()) v.uploader = root.value(QStringLiteral("channel")).toString();
+    v.channelId = root.value(QStringLiteral("channel_id")).toString();
+    v.thumbnail = root.value(QStringLiteral("thumbnail")).toString();
     v.site = root.value(QStringLiteral("extractor_key")).toString();
     v.seconds = root.value(QStringLiteral("duration")).toDouble();
     v.live = root.value(QStringLiteral("is_live")).toBool();
@@ -332,6 +339,8 @@ OnlineResult OnlineResolver::parse(const QByteArray& json, const QByteArray& err
             s.headers = headersOf(f);
             s.audioOnly = f.value(QStringLiteral("vcodec")).toString() == QLatin1String("none");
             s.kbps = qRound(f.value(QStringLiteral("tbr")).toDouble());
+            // (YouTube's servers send a large request slowly: yt-dlp says how much to ask for at once)
+            s.chunkBytes = qint64(f.value(QStringLiteral("downloader_options")).toObject().value(QStringLiteral("http_chunk_size")).toDouble());
             if (!s.url.isEmpty()) v.streams.append(s);
         }
     } else {
@@ -458,6 +467,51 @@ void OnlineResolver::resolve(const QString& url, const OnlineOptions& options, D
         p->kill();
         p->waitForFinished(1000);
         finish(-1, true);
+    });
+    p->start(QIODevice::ReadOnly);
+}
+
+void OnlineResolver::ask(const QStringList& args, const QString& target, int timeoutMs, std::function<void(const QByteArray&, const QByteArray&, int)> done)
+{
+    const QString prog = program();
+    if (prog.isEmpty()) {
+        QTimer::singleShot(0, this, [done] { done(QByteArray(), QByteArrayLiteral("no-program"), -1); });
+        return;
+    }
+    const QString which = prog + QLatin1Char('|') + QFileInfo(prog).lastModified().toString(Qt::ISODate);
+    const bool knowsRuntimes = m_noRuntimeOption != which;
+    QStringList a = args;
+    a << QStringLiteral("--encoding") << QStringLiteral("utf-8") << QStringLiteral("--socket-timeout") << QStringLiteral("15");
+    if (knowsRuntimes && !jsRuntime().isEmpty()) a << QStringLiteral("--js-runtimes") << jsRuntime();
+    a << QStringLiteral("--") << target;
+    auto* p = new QProcess(this);
+    p->setProcessEnvironment(systemEnvironment());
+    p->setProgram(prog);
+    p->setArguments(a);
+    ++m_runs;
+    m_lastCommand = QFileInfo(prog).fileName() + QLatin1Char(' ') + a.join(QLatin1Char(' '));
+    auto finished = std::make_shared<bool>(false);
+    auto finish = [this, p, args, target, timeoutMs, done, which, knowsRuntimes, finished](int code) {
+        if (*finished) return;
+        *finished = true;
+        const QByteArray out = p->readAllStandardOutput(), err = p->readAllStandardError();
+        p->deleteLater();
+        if (knowsRuntimes && err.contains("no such option") && err.contains("js-runtimes")) {
+            m_noRuntimeOption = which;   // an older yt-dlp: once more without it
+            ask(args, target, timeoutMs, done);
+            return;
+        }
+        done(out, err, code);
+    };
+    connect(p, qOverload<int, QProcess::ExitStatus>(&QProcess::finished), this, [finish](int code, QProcess::ExitStatus st) {
+        finish(st == QProcess::NormalExit ? code : -1);
+    });
+    connect(p, &QProcess::errorOccurred, this, [finish](QProcess::ProcessError e) { if (e == QProcess::FailedToStart) finish(-1); });
+    QTimer::singleShot(timeoutMs, p, [p, finish] {
+        if (p->state() == QProcess::NotRunning) return;
+        p->kill();
+        p->waitForFinished(1000);
+        finish(-1);
     });
     p->start(QIODevice::ReadOnly);
 }

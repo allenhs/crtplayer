@@ -1,0 +1,158 @@
+# 2.18: the browser of web videos. yt-dlp here is tests/fake_ytdlp.py, the site tests/web_mock.py with its channels
+# (tests/web_catalog.py); CRTPLAYER_YT_SITE points the player's feeds and channel pages at that site. Nothing kept from
+# before (no channels followed). Screenshots: @O@/@N@/<name>.png; scripts/check-browse.py judges it all.
+subs off
+fullscreen on
+wait 800
+report start
+# -- the first time: nothing followed
+browse open
+waitbrowse open true 5000
+waitbrowse loading false 20000
+wait 600
+grabwindow @O@/@N@/empty-new.png
+report b:empty-new
+# -- a channel by its link (the "Add a channel" tile: the first of Channels while there are none)
+browse key BracketRight
+wait 300
+report b:empty-channels
+browse key Return
+wait 300
+report b:link-asked
+browse type @W@/@retrotubelab
+waitbrowse loading false 20000
+waitbrowse channel UCretrotubelabxxxxxxxxxx 5000
+wait 800
+grabwindow @O@/@N@/channel-page.png
+report b:channel-added
+# back: the channel is among the followed
+browse key Escape
+wait 300
+report b:channels-one
+# -- Google Takeout's list: three more (one of them already followed, one line that is no channel)
+browse import @O@/@N@/subscriptions.csv
+wait 300
+report b:imported
+# -- New: their newest videos, newest first (shorts left out; the channel without a feed asked of yt-dlp)
+browse section new
+waitbrowse loading false 30000
+wait 1500
+grabwindow @O@/@N@/new.png
+report b:new
+# moving about: right, right, down; to the next page and back
+browse key Right Right Down
+wait 300
+report b:moved
+browse key PageDown
+wait 400
+report b:page2
+browse key Left
+wait 400
+report b:back-left
+browse key Home
+wait 300
+# -- a video's page: what it is, and its buttons
+browse key Return
+wait 700
+grabwindow @O@/@N@/detail.png
+report b:detail
+browse key Down Return
+wait 300
+report b:detail-later
+browse key Escape
+wait 400
+# W on another video puts it aside too
+browse key Right W
+wait 300
+report b:w-pressed
+browse section later
+wait 400
+report b:later
+# -- search
+browse key Slash
+wait 300
+report b:search-asked
+browse type tube tv
+waitbrowse loading false 20000
+wait 1200
+grabwindow @O@/@N@/search.png
+report b:search
+# a slow answer: the places wait (and shimmer)
+browse search slow everything
+waitbrowse loading true 3000
+wait 800
+grabwindow @O@/@N@/search-wait.png
+report b:search-waiting
+waitbrowse loading false 20000
+wait 1000
+report b:search-all
+browse key PageDown PageDown
+wait 500
+report b:search-page3
+# YouTube refuses: what yt-dlp said, and what to do
+browse search fail
+waitbrowse loading false 20000
+wait 800
+grabwindow @O@/@N@/search-fail.png
+report b:search-fail
+# a newer yt-dlp is out (the site says so, as GitHub would): U fetches it, and the list is asked for again
+browse key U
+waitbrowse updating false 60000
+wait 800
+report b:updated
+# -- the controller: right shoulder to the next section (History), left back; X puts aside
+gamepad attach
+wait 1500
+gamepad tap rb
+wait 400
+report b:pad-rb
+gamepad tap lb
+wait 400
+report b:pad-lb
+browse section new
+waitbrowse loading false 20000
+wait 400
+gamepad tap right
+wait 300
+gamepad tap x
+wait 400
+report b:pad-x
+browse key Home
+wait 200
+# -- playing a video from its page: the menu goes, the video plays, it goes into the history
+browse key Return
+wait 600
+report b:play-page
+browse key Return
+waitstate playing 30000
+waitshown 2 15000
+report b:playing
+seek 41
+waitshown 42 15000
+# -- opened again while it plays: the video waits, and its page says how far it was watched
+browse open
+wait 1200
+report b:reopened
+browse section history
+wait 600
+grabwindow @O@/@N@/history.png
+report b:history
+browse key Return
+wait 700
+report b:history-page
+browse key Escape
+wait 300
+browse key Escape
+wait 600
+report b:closed
+waitstate playing 10000
+report b:plays-on
+# -- the Guide button opens it, B closes it
+gamepad tap guide
+wait 800
+report b:guide
+gamepad tap b
+wait 800
+report b:guide-b
+report end
+quit

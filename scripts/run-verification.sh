@@ -178,6 +178,30 @@ online_suite() {
   echo "== videos from web sites"
   checker "$O/online-checks.txt" python3 "$HERE/scripts/check-online.py" "$O" "$site"
 }
+# 2.18: the browser of web videos, against the stand-in site's channels (tests/web_catalog.py)
+browse_suite() {
+  if [[ ! -d "$M/web/thumbs" ]]; then echo "== browse checks skipped: no pictures in $M/web/thumbs (scripts/make-test-media.sh)"; return; fi
+  local T="$O/browse-tools" port=$((18900 + RANDOM % 300)) site mock
+  rm -rf "$T" "$O"/browse*; mkdir -p "$T/fake" "$O/browse"
+  cp "$HERE/tests/fake_ytdlp.py" "$T/fake/yt-dlp"; printf '#!/bin/sh\necho v22.0.0\n' > "$T/fake/node"; chmod +x "$T"/fake/*
+  site="http://127.0.0.1:$port"
+  python3 "$HERE/tests/web_mock.py" --media "$M" --port $port --log "$O/browse-requests.jsonl" --ytdlp "$HERE/tests/fake_ytdlp.py" > "$O/browse-mock.log" 2>&1 &
+  mock=$!; sleep 1
+  # Google Takeout's list of subscriptions, as it writes it (one of them followed already, a line that is no channel)
+  printf 'Channel Id,Channel Url,Channel Title\nUCretrotubelabxxxxxxxxxx,http://www.youtube.com/channel/UCretrotubelabxxxxxxxxxx,Retro Tube Lab\nUCnightdrivefmxxxxxxxxxx,http://www.youtube.com/channel/UCnightdrivefmxxxxxxxxxx,Night Drive FM\nUCpixelkitchenxxxxxxxxxx,http://www.youtube.com/channel/UCpixelkitchenxxxxxxxxxx,"Pixel Kitchen"\nUClighthousecinemaxxxxxx,http://www.youtube.com/channel/UClighthousecinemaxxxxxx,Lighthouse Cinema\nnot a channel,http://example.com,Nothing\n' > "$O/browse/subscriptions.csv"
+  sed -e "s#@W@#$site#g" -e "s#@N@#browse#g" -e "s#@M@#$M#g" -e "s#@O@#$O#g" "$HERE/tests/automation/browse.txt" > "$O/browse.txt"
+  export XDG_CACHE_HOME=$TMPCFG/cache
+  rm -rf "$XDG_CONFIG_HOME" "$XDG_DATA_HOME" "$XDG_CACHE_HOME"
+  echo "== browse"
+  env CRTPLAYER_TOOLS_PATH="$T/fake" FAKE_YTDLP_LOG="$O/browse-ytdlp.jsonl" FAKE_YTDLP_SITE="$site" CRTPLAYER_YT_SITE="$site" \
+      CRTPLAYER_YTDLP_LATEST="$site/api/latest?tag=2026.10.09" CRTPLAYER_YTDLP_RELEASE="$site/release/yt-dlp" CRTPLAYER_DENO_RELEASE="$site/release/deno" \
+      timeout 600 "$BIN" --automation "$O/browse.txt" --automation-log "$O/browse.json" > "$O/browse.log" 2>&1
+  echo "   exit code $?"
+  kill $mock 2>/dev/null
+  rm -rf "$XDG_CONFIG_HOME" "$XDG_DATA_HOME"
+  echo "== the browser of web videos"
+  checker "$O/browse-checks.txt" python3 "$HERE/scripts/check-browse.py" "$O" "$site" "$HERE/tests"
+}
 # 1.8 features; three launches share settings and data so resume can be tested across restarts
 polish_suite() {
   rm -rf "$XDG_CONFIG_HOME" "$XDG_DATA_HOME"
@@ -341,6 +365,7 @@ else
   if python3 -c "import PIL" 2>/dev/null; then subtitles_suite; fi
   if python3 -c "import PIL" 2>/dev/null; then onscreen_suite; fi
   if python3 -c "import PIL" 2>/dev/null; then online_suite; fi
+  if python3 -c "import PIL" 2>/dev/null; then browse_suite; fi
   rm -rf "$XDG_CONFIG_HOME"
   run sound sound.txt
   echo "== sound checks"

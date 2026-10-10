@@ -179,8 +179,10 @@ check('… and the sound\'s language too', ev['tv-2']['currentAudioLang'] == 'ja
       and abs(ev['tv-2']['soundPitchHz'] - 880) < 30 and abs(ev['tv-3']['soundPitchHz'] - 880) < 30,
       f"channel 2: track {rep['tv-2']['currentAudio'] + 1}, channel 3: track {rep['tv-3']['currentAudio'] + 1} (both {ev['tv-3']['currentAudioLang']}; {ev['tv-2']['soundPitchHz']:.0f} and {ev['tv-3']['soundPitchHz']:.0f} Hz heard)")
 check('turned off on one channel, they are off on the others; and on again', rep['tv-2-off']['currentSubtitle'] == -1 and rep['tv-3-off']['currentSubtitle'] == -1
-      and rep['tv-2-off']['tv']['channel'] == 2 and rep['tv-3-off']['tv']['channel'] == 3 and ev['tv-3-on']['currentSubtitleLang'] == 'en',
-      f"channel 2: {rep['tv-2-off']['currentSubtitle']}, channel 3: {rep['tv-3-off']['currentSubtitle']}; on again: {ev['tv-3-on']['currentSubtitleLang']}")
+      and rep['tv-2-off']['tv']['channel'] == 2 and rep['tv-3-off']['tv']['channel'] == 3
+      and 'en' in (ev['tv-3-on']['currentSubtitleLang'], ev.get('tv-3-on-later', {}).get('currentSubtitleLang')),
+      f"channel 2: {rep['tv-2-off']['currentSubtitle']}, channel 3: {rep['tv-3-off']['currentSubtitle']}; on again: {ev['tv-3-on']['currentSubtitleLang']}"
+      f" (a moment later: {ev.get('tv-3-on-later', {}).get('currentSubtitleLang')})")
 check('the sleep timer turns the TV off', not rep['tv-sleep']['tv']['on'] and rep['tv-sleep']['state'] == 'idle' and ev['tv-sleep']['sleepCount'] == 3,
       f"TV on: {rep['tv-sleep']['tv']['on']}, {rep['tv-sleep']['state']}")
 

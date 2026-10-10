@@ -8,7 +8,10 @@
                                "?kbps=N": sent no faster than that; "?stall=BYTE,SECONDS": the connection hangs
                                for that long, once, when it reaches that byte of the file (a network hiccup);
                                "?outage=AFTER,SECONDS": nothing of this file is sent for that long, beginning
-                               AFTER seconds after it was first asked for (the network is away)
+                               AFTER seconds after it was first asked for (the network is away);
+                               "?yt=KBPS": as YouTube's video servers seem to: every answer begins 80 ms late (the way
+                               to the server and back), and one that asks for more than 10 MiB, or for everything from
+                               a place on, comes no faster than KBPS (what yt-dlp's "http_chunk_size" is there for)
   /watch/muxed | dash | hls    pages with a video on them, for the real yt-dlp (its generic extractor):
                                an HTML5 video, a DASH manifest naming two files, an HLS stream
   /watch/none                  a page without a video
@@ -19,9 +22,15 @@
   /release/yt-dlp/...          what the player's "Get yt-dlp" fetches: SHA2-256SUMS and yt-dlp_linux (FILE)
   /release/deno/...            a zip archive with a stand-in "deno", and its checksum file
   /release/bad/...             the same, with checksums that do not match
+  /feeds/videos.xml?channel_id=ID   a channel's feed of new videos (as YouTube's), for the browser (2.18);
+                               the channel "Lighthouse Cinema" has none (404: the player asks yt-dlp instead)
+  /thumbs/<file>               the pictures of the videos and channels (DIR/web/thumbs)
+  /api/search?q=, /api/channel/ID, /api/video/ID   the site's videos (tests/web_catalog.py), for tests/fake_ytdlp.py
+  /api/latest                  what GitHub says of yt-dlp's newest release ("?tag=" sets it)
 
 Every request is written to the log (one JSON object a line)."""
 import argparse, hashlib, http.server, io, json, os, re, socketserver, time, urllib.parse, zipfile
+import web_catalog as cat
 
 ap = argparse.ArgumentParser()
 ap.add_argument('--media', required=True); ap.add_argument('--port', type=int, required=True)
@@ -69,6 +78,7 @@ for asset, inner in (('deno-x86_64-unknown-linux-gnu.zip', 'deno'), ('deno-aarch
 
 STALLED = set()
 FIRST = {}
+LATEST = {'tag': '2026.09.30'}
 
 class H(http.server.BaseHTTPRequestHandler):
     protocol_version = 'HTTP/1.1'
@@ -83,7 +93,7 @@ class H(http.server.BaseHTTPRequestHandler):
         self.note(status)
         self.send_response(status); self.send_header('Content-Type', ctype); self.send_header('Content-Length', str(len(body))); self.end_headers()
         if self.command != 'HEAD': self.wfile.write(body)
-    def file(self, path, ctype=None, kbps=0, stall=None, outage=None):
+    def file(self, path, ctype=None, kbps=0, stall=None, outage=None, yt=0):
         if not os.path.isfile(path): return self.plain(404)
         first = FIRST.setdefault(self.path, time.time())   # (by the whole address: each test's own)
         def wait_out():   # the network is away from `outage[0]` seconds after the file was first asked for, for outage[1] seconds
@@ -98,6 +108,9 @@ class H(http.server.BaseHTTPRequestHandler):
             if m.group(2): end = min(int(m.group(2)), size - 1)
             status = 206
             if start >= size: return self.plain(416)
+        if yt:
+            time.sleep(0.08)
+            if not (m and m.group(2)) or end - start + 1 > 10 << 20: kbps = yt
         self.note(status)
         self.send_response(status)
         self.send_header('Content-Type', ctype or TYPES.get(path.rsplit('.', 1)[-1], 'application/octet-stream'))
@@ -126,7 +139,7 @@ class H(http.server.BaseHTTPRequestHandler):
             if rel.startswith('..'): return self.plain(404)
             stall = [float(x) for x in q['stall'][0].split(',')] if 'stall' in q else None
             outage = [float(x) for x in q['outage'][0].split(',')] if 'outage' in q else None
-            return self.file(os.path.join(WEB, rel), kbps=float(q.get('kbps', ['0'])[0]), stall=stall, outage=outage)
+            return self.file(os.path.join(WEB, rel), kbps=float(q.get('kbps', ['0'])[0]), stall=stall, outage=outage, yt=float(q.get('yt', ['0'])[0]))
         if p.startswith('/watch/') and p[7:] in PAGES:
             name = p[7:]
             return self.plain(200, ('<!doctype html><html><head><title>Mock video: %s</title></head><body>%s</body></html>' % (name, PAGES[name])).encode(),
@@ -137,6 +150,24 @@ class H(http.server.BaseHTTPRequestHandler):
         if p == '/untyped': return self.file(os.path.join(WEB, 'muxed.mp4'), 'application/x-something')
         if p == '/untyped-nothing': return self.plain(200, b'not a video at all, and no page either\n' * 200, 'application/x-something')
         if p.startswith('/release/') and p[9:] in RELEASE: return self.plain(200, RELEASE[p[9:]], 'application/octet-stream')
+        base = 'http://%s' % self.headers.get('Host')
+        if p == '/feeds/videos.xml':
+            c = cat.CATALOG.get(q.get('channel_id', [''])[0])
+            if not c or c['handle'] in cat.NO_FEED: return self.plain(404, b'not found')
+            return self.plain(200, cat.feed_xml(base, c), 'application/atom+xml; charset=UTF-8')
+        if p.startswith('/thumbs/'):
+            f = os.path.join(WEB, 'thumbs', os.path.basename(p))
+            return self.file(f, 'image/jpeg') if os.path.isfile(f) else self.plain(404)
+        if p == '/api/search': return self.plain(200, json.dumps(cat.search(q.get('q', [''])[0])).encode(), 'application/json')
+        if p.startswith('/api/channel/'):
+            c = cat.channel(urllib.parse.unquote(p[len('/api/channel/'):]))
+            return self.plain(200, json.dumps(c).encode(), 'application/json') if c else self.plain(404)
+        if p.startswith('/api/video/'):
+            v = cat.VIDEOS.get(p[len('/api/video/'):])
+            return self.plain(200, json.dumps(v).encode(), 'application/json') if v else self.plain(404)
+        if p == '/api/latest':
+            if 'tag' in q: LATEST['tag'] = q['tag'][0]
+            return self.plain(200, json.dumps({'tag_name': LATEST['tag'], 'name': 'yt-dlp ' + LATEST['tag']}).encode(), 'application/json')
         return self.plain(404)
 
 class S(socketserver.ThreadingMixIn, http.server.HTTPServer):

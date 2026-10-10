@@ -138,7 +138,20 @@ buttons and shortcuts use.
 | `waitonline KEY VALUE [TIMEOUT_MS]` | Wait until the `online` part of the report has KEY = VALUE (`*`: anything but empty; a number: at least that) |
 | `closedialogs` | Close whatever message boxes are up |
 | `openpair VIDEO_URL [AUDIO_URL]` | Two addresses played as the picture and the sound of one video, without yt-dlp (2.17) |
+| `browse open\|close` | The browser of web videos (2.18), as Ctrl+B |
+| `browse key NAME [NAME...]` | Keys to the browser, in turn: `Left Right Up Down Return Escape Backspace PageUp PageDown Tab Home W F R U Slash BracketLeft BracketRight` |
+| `browse section new\|channels\|later\|history\|search` | Go to a section |
+| `browse search WORDS` | Search for WORDS |
+| `browse type TEXT` | TEXT into the line the browser shows (a search, a channel's link), then Enter |
+| `browse import FILE` | Google Takeout's `subscriptions.csv`: its channels followed |
+| `waitbrowse KEY VALUE [TIMEOUT_MS]` | Wait until the `browse` part of the report has KEY = VALUE (as `waitonline`) |
 | `quit` | Exit |
+
+`report` carries `browse` (2.18): `open`, `section`, `focus` (tabs, grid, tray, detail, input), `page`, `pages`,
+`selected`, `count`, `titles` (of the page shown), `loading`, `error`, `detail`, `detailTitle`, `detailButtons`,
+`channel`, `input`, `message`, `ytInstalled`, `ytNewest`, `updating`, `cells` (the tiles' places, in the window),
+`laterTitles`, `historyItems`, and `data` (the channels followed; how many searches, channel pages, feeds, feeds read
+through yt-dlp instead, and pictures were fetched).
 
 **Sync measurement.** For every new frame painted while playing, the player computes:
 

@@ -1,0 +1,19 @@
+# Windows smoke test, the browser of web videos (2.18): three channels from Google Takeout's list, their new videos
+# from the feeds of the mock site (tests/web_mock.py), with their pictures. No yt-dlp involved. These results count.
+fullscreen on
+wait 800
+browse open
+waitbrowse open true 5000
+browse import @O@/subscriptions.csv
+browse section new
+waitbrowse loading false 60000
+wait 2500
+grabwindow @O@/browse-new.png
+report new
+browse key Right Return
+wait 800
+report detail
+browse key Escape Escape
+wait 600
+report closed
+quit

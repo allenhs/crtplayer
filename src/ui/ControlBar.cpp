@@ -187,6 +187,7 @@ ControlBar::ControlBar(QWidget* parent) : QWidget(parent)
     m_volume->setFocusPolicy(Qt::NoFocus);
     m_volume->setToolTip(tr("Volume (Up/Down)"));
     playlistButton = makeButton(this, "playlist", tr("Playlist (L)"), true);
+    browseButton = makeButton(this, "browse", tr("Browse YouTube: your channels, search, watch later (Ctrl+B)"));
     jellyfinButton = makeButton(this, "server", tr("Jellyfin library (Ctrl+J)"), true);
     settingsButton = makeButton(this, "tune", tr("CRT and picture settings (E)"), true);
     fullscreenButton = makeButton(this, "fullscreen", tr("Fullscreen (F)"));
@@ -214,6 +215,7 @@ ControlBar::ControlBar(QWidget* parent) : QWidget(parent)
     h->addWidget(m_volume);
     h->addSpacing(8);
     h->addWidget(playlistButton);
+    h->addWidget(browseButton);
     h->addWidget(jellyfinButton);
     h->addWidget(settingsButton);
     h->addWidget(fullscreenButton);
@@ -268,7 +270,7 @@ void ControlBar::adaptToWidth(int w)
     // a place in the side panels.
     const QList<QList<QWidget*>> dropOrder = {
         {m_preset}, {stepBackButton, stepFwdButton}, {m_volume}, {prevButton, nextButton},
-        {compareButton}, {jellyfinButton}, {playlistButton}, {aspectButton}, {openButton}};
+        {compareButton}, {jellyfinButton}, {browseButton}, {playlistButton}, {aspectButton}, {openButton}};
     for (const auto& group : dropOrder)
         for (QWidget* x : group) x->setVisible(true);
     const QMargins m = layout()->contentsMargins();

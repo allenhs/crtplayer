@@ -152,13 +152,16 @@ jumps = []
 for i in range(4):
     rq = [r for r in requests(on(f'big-{i}')['wallClock'], on(f'big-{i + 1}')['wallClock']) if r['path'].startswith('/media/v_big.mp4')]
     jumps.append((len(rq), all(r['status'] == 206 and r['range'] for r in rq)))
-check('a 90 MB file: each jump (far ahead, back, ahead) takes a few requests by byte range', all(1 <= n <= 8 and ranged for n, ranged in jumps), f"requests for each jump: {[n for n, _ in jumps]}")
+# (2.18: what was read stays in memory, 64 MB of it: a jump to a part read before, and still kept, asks for nothing)
+check('a 90 MB file: each jump (far ahead, back, ahead) takes a few requests by byte range, a jump into what is kept none',
+      jumps[0][0] >= 1 and all(n <= 8 and ranged for n, ranged in jumps), f"requests for each jump: {[n for n, _ in jumps]}")
 
 series = [R[f'o:{i:02d}'][0] for i in range(44)]
 waited = [e for e in series if e['online']['player'].get('waiting')]
 steps = [b['framePtsMs'] - a['framePtsMs'] for a, b in zip(series, series[1:])]
 after = [e for e in series[-10:] if not e['online']['player'].get('waiting')]
-sound_ok = all((e['positionMs'] % 20000 < 9300) == (e['everyday']['soundLevelDb'] > -40) for e in after if 700 < e['positionMs'] % 10000 < 9300)
+# (not within a second of where the tone starts or stops: what is heard is measured over the last moment, behind the clock)
+sound_ok = all((e['positionMs'] % 20000 < 9300) == (e['everyday']['soundLevelDb'] > -40) for e in after if 1000 < e['positionMs'] % 10000 < 9000)
 check('the network away for six seconds: the video waits (it does not run on without a picture), then goes on where the picture stopped',
       len(waited) >= 3 and max(steps) < 1500 and min(steps) > -1200 and series[-1]['state'] == 'playing' and not series[-1]['lastError']
       and series[-1]['online']['player']['waits'] >= 1 and series[-1]['framePtsMs'] > waited[-1]['framePtsMs'] + 2000 and sound_ok and all(e['state'] == 'playing' for e in series),

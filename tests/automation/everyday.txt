@@ -312,14 +312,17 @@ waitstate playing 20000
 wait 1800
 report tv-3-off
 subs on
-wait 800
-# (the channel's programme may just be starting over: its tracks are known once it plays)
+# (the channel's programme ends about two seconds later, by the TV's clock, and the next one starts: past that,
+# its tracks are known once it plays)
+wait 2800
 waitstate playing 20000
-wait 600
-# (and again, should it have started over in those 0.6 s)
-waitstate playing 20000
+waitpos 500 20000
 wait 300
 report tv-3-on
+# (and a moment later: two looks 1.5 s apart cannot both fall on a programme's start)
+wait 1500
+waitstate playing 20000
+report tv-3-on-later
 sleep seconds 9
 wait 11500
 report tv-sleep

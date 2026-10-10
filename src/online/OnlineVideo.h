@@ -41,6 +41,7 @@ struct OnlineChapter {
 struct OnlineVideo {
     QString page;                                   // the video's own page (what a playlist entry or a resume point is kept under)
     QString id, title, uploader, site;
+    QString channelId, thumbnail;                   // (2.18: for the history of the browser)
     double seconds = 0;
     bool live = false;
     QList<WebStream> streams;                       // one address, or the picture's and the sound's...
@@ -92,6 +93,10 @@ public:
     void cancel();
     bool busy() const { return m_process != nullptr; }
 
+    // Asks yt-dlp for a listing as JSON (2.18: search results, a channel's videos), alongside any other
+    // question: `args` come before "-- target". done(out, errors, exit code; -1: not run or too slow).
+    void ask(const QStringList& args, const QString& target, int timeoutMs, std::function<void(const QByteArray&, const QByteArray&, int)> done);
+
     // "2025.11.12", or empty when there is no yt-dlp (or it does not run).
     void version(std::function<void(const QString&)> done);
 
@@ -131,6 +136,8 @@ public:
     static int versionAgeDays(const QString& version, const class QDate& today);
 
     QJsonObject report() const;
+    // A network access manager that uses the system's proxy settings.
+    static QNetworkAccessManager* makeNetwork(QObject* parent);
 
 private:
     QString m_configured;

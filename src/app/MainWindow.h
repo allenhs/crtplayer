@@ -193,10 +193,18 @@ public:
     void openLink(const QString& address, bool playNow = true);   // a page with a video on it, or a media address
     void promptOpenLink();                                        // asks for the address (Ctrl+L)
     bool pasteLink();                                             // the address on the clipboard (Ctrl+V)
-    void fetchYtDlp();                                            // what the settings' button does
+    void fetchYtDlp(bool ownCopy = false);                                            // what the settings' button does
     void setOnlineMaxHeight(int height);
     void setYtDlpPath(const QString& path);
     class OnlineResolver* online() const { return m_online; }
+    // The browser of web videos (2.18).
+    bool browseOpen() const;
+    void setupBrowse();
+    void browseYtDlpDone(bool ok, const QString& message);
+    QJsonObject browseReport() const;
+    void showBrowse(bool on);
+    class BrowseScreen* browseScreen() const { return m_browse; }
+    class WebBrowse* webBrowse() const { return m_webBrowse; }
     QJsonObject onlineReport() const;
     static QStringList addressesIn(const QString& text);          // the http(s) addresses in pasted or dropped text
 private:
@@ -210,6 +218,10 @@ private:
     QString resumeKey() const;            // what the playing video's place is kept under
     void setHint(const QString& text);    // the words in the empty picture; empty: the usual ones
     class OnlineResolver* m_online = nullptr;
+    class WebBrowse* m_webBrowse = nullptr;
+    class BrowseScreen* m_browse = nullptr;
+    bool m_browseResume = false;     // the video played before the browser was opened (it plays on when it closes)
+    QJsonObject m_browsePicked;      // the video chosen in the browser (what it knows goes to the history)
     QString m_webPage;                    // the page of the web video that is open
     QString m_webAsking;                  // the page yt-dlp is being asked about
     QString m_webSite, m_webWhat;         // "Youtube", "1080p · VP9 + Opus"

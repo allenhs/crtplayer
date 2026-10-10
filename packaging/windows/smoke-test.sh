@@ -82,23 +82,34 @@ if [ -n "${ONSCREEN_OLD_WAY:-}" ]; then   # for comparison: as before 2.16.1 (re
   python "$HERE/scripts/check-onscreen.py" "$WORK/out" oldway 2>&1 | sed -e 's/^FAIL/WAS-NO/' -e 's/^PASS/WAS-OK/' -e 's/^/ON-SCREEN /'
 fi
 
+# (a minute long: the first picture drawn with the look waits for software OpenGL to build its shader, many seconds on
+# a slow build machine, while the video plays on)
 # Videos from web sites (2.17): the picture and the sound of one video from two addresses of a small site on
 # this machine (tests/web_mock.py, run with MSYS2's Python). Then, reported but not counted: "Get yt-dlp" from
 # the internet, a page through the real yt-dlp.exe, and a video on YouTube.
 mkdir -p "$WORK/webmedia/web"
-gst-launch-1.0 -q -e videotestsrc num-buffers=600 pattern=ball ! video/x-raw,width=640,height=360,framerate=30/1 \
+gst-launch-1.0 -q -e videotestsrc num-buffers=1800 pattern=ball ! video/x-raw,width=640,height=360,framerate=30/1 \
   ! x264enc key-int-max=60 ! h264parse ! mp4mux faststart=true ! filesink location="$WORK/webmedia/web/v_h264.mp4"
-gst-launch-1.0 -q -e audiotestsrc num-buffers=862 samplesperbuffer=1024 ! audio/x-raw,rate=44100,channels=2 ! audioconvert \
+gst-launch-1.0 -q -e audiotestsrc num-buffers=2584 samplesperbuffer=1024 ! audio/x-raw,rate=44100,channels=2 ! audioconvert \
   ! avenc_aac ! aacparse ! mp4mux faststart=true ! filesink location="$WORK/webmedia/web/a_aac.m4a"
 cat > "$WORK/webmedia/web/dash.mpd" <<'MPD'
 <?xml version="1.0" encoding="UTF-8"?>
-<MPD xmlns="urn:mpeg:dash:schema:mpd:2011" type="static" mediaPresentationDuration="PT20S" minBufferTime="PT2S" profiles="urn:mpeg:dash:profile:isoff-on-demand:2011">
+<MPD xmlns="urn:mpeg:dash:schema:mpd:2011" type="static" mediaPresentationDuration="PT60S" minBufferTime="PT2S" profiles="urn:mpeg:dash:profile:isoff-on-demand:2011">
  <Period>
   <AdaptationSet mimeType="video/mp4"><Representation id="v" codecs="avc1.64001e" width="640" height="360" frameRate="30" bandwidth="800000"><BaseURL>v_h264.mp4</BaseURL></Representation></AdaptationSet>
   <AdaptationSet mimeType="audio/mp4" lang="en"><Representation id="a" codecs="mp4a.40.2" audioSamplingRate="44100" bandwidth="128000"><BaseURL>a_aac.m4a</BaseURL></Representation></AdaptationSet>
  </Period>
 </MPD>
 MPD
+# (2.18) pictures for the browser's tiles: GStreamer's test patterns
+mkdir -p "$WORK/webmedia/web/thumbs"
+for i in $(seq 0 47); do
+  gst-launch-1.0 -q videotestsrc num-buffers=1 pattern=$((i % 25)) ! video/x-raw,width=640,height=360 ! jpegenc ! filesink location="$(printf "$WORK/webmedia/web/thumbs/t%02d.jpg" $i)"
+done
+for i in $(seq 0 11); do
+  gst-launch-1.0 -q videotestsrc num-buffers=1 pattern=$((i + 3)) ! video/x-raw,width=176,height=176 ! jpegenc ! filesink location="$(printf "$WORK/webmedia/web/thumbs/a%02d.jpg" $i)"
+done
+printf 'Channel Id,Channel Url,Channel Title\r\nUCretrotubelabxxxxxxxxxx,http://www.youtube.com/channel/UCretrotubelabxxxxxxxxxx,Retro Tube Lab\r\nUCnightdrivefmxxxxxxxxxx,http://www.youtube.com/channel/UCnightdrivefmxxxxxxxxxx,Night Drive FM\r\nUCpixelkitchenxxxxxxxxxx,http://www.youtube.com/channel/UCpixelkitchenxxxxxxxxxx,Pixel Kitchen\r\n' > "$O/subscriptions.csv"
 ls -la "$WORK/webmedia/web"
 PORT=18650; SITE="http://127.0.0.1:$PORT"
 python "$HERE/tests/web_mock.py" --media "$WORK/webmedia" --port $PORT --log "$WORK/out/web-requests.jsonl" > "$WORK/out/web-mock.log" 2>&1 &
@@ -110,7 +121,15 @@ online() { # name script timeout
     --automation-log "$O/$1.json" > "$WORK/out/$1.log" 2>&1
   echo "web-video run $1 rc=$?"
 }
+export CRTPLAYER_WEB_TRACE=1
 online online smoke-online.txt 300
+unset CRTPLAYER_WEB_TRACE
+# (2.18) the browser: channels from Google Takeout's list, their new videos from the site's feeds, their pictures
+rm -rf "$WORK/localappdata" "$WORK/appdata"; mkdir -p "$WORK/localappdata" "$WORK/appdata"
+sed -e "s#@W@#$SITE#g" -e "s#@O@#$(cygpath -m "$O")#g" "$(dirname "$0")/smoke-browse.txt" > "$WORK/browse.txt"
+APPDATA="$(cygpath -w "$WORK/appdata")" LOCALAPPDATA="$(cygpath -w "$WORK/localappdata")" CRTPLAYER_YT_SITE="$SITE" /usr/bin/timeout 300 env PATH="$CLEAN_PATH" QT_OPENGL=software \
+  "$APP" --automation "$(cygpath -m "$WORK/browse.txt")" --automation-log "$O/browse.json" > "$WORK/out/browse.log" 2>&1
+echo "web-video run browse rc=$?"
 online online-net smoke-online-net.txt 900
 kill $MOCK 2>/dev/null
 echo "---- web videos, the player's output:"
@@ -118,6 +137,9 @@ grep -v "custom-downstream-sticky" "$WORK/out/online.log" | tail -40
 echo "---- web videos:"
 python "$(dirname "$0")/check-smoke-online.py" "$WORK/out" 2>&1 | sed 's/^/WEB /'
 online_rc=${PIPESTATUS[0]}
+if [ $online_rc -ne 0 ]; then   # what the web readers did, and what GStreamer said
+  grep -E "web-reader|WARN|rror|auto\] (wait|seek|open|report)" "$WORK/out/online.log" | grep -v "custom-downstream-sticky" | head -110 | sed 's/^/WEB log: /'
+fi
 ls -la "$WORK/appdata/CRTPlayer/CRTPlayer/tools" 2>/dev/null | sed 's/^/WEB tools: /'
 grep -i "yt-dlp\|deno\|error\|warn" "$WORK/out/online-net.log" | grep -v "custom-downstream-sticky" | tail -25 | sed 's/^/WEB net log: /'
 [ $smoke_rc -eq 0 ] && [ $onscreen_rc -eq 0 ] && [ $online_rc -eq 0 ]

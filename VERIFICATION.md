@@ -1,6 +1,6 @@
 # Verification report
 
-This report covers the build delivered alongside it (CRT Player 2.16.1).
+This report covers the build delivered alongside it (CRT Player 2.18.0).
 
 The final X11 and Wayland suites were run against the exact stripped `crtplayer` binary
 that is delivered, and **again against the AppImage with the system's Qt libraries
@@ -289,6 +289,139 @@ was **not measured**, because there is no GPU in this environment.
 - GPU performance;
 - the interlaced style's look at real refresh rates (only its field alternation was
   measured).
+
+## 2.18.0: browsing YouTube, and quicker jumps in web videos
+
+### What could not be tested here
+
+- **YouTube itself, from this machine.** It cannot reach video sites. The browser was tested against a stand-in
+  site on the same machine (`tests/web_mock.py`, with made-up channels and videos in `tests/web_catalog.py`, and
+  feeds written the way YouTube writes them), with the stand-in for yt-dlp (`tests/fake_ytdlp.py`). From GitHub's
+  Windows build machine, which is on the internet, **the real yt-dlp.exe searched YouTube through the browser and
+  found 36 videos** (*"big buck bunny"*: the first was the Blender Foundation's film). Playing one there still
+  ended in YouTube's *"Sign in to confirm you're not a bot"*, which YouTube says to data centres.
+- **YouTube's channel feeds** were read only as the stand-in writes them (the format was copied from YouTube's own;
+  the unit test reads a feed in that format too). Whether YouTube still publishes them for every channel is not
+  known from here; if a feed does not answer, the channel is asked of yt-dlp instead (tested).
+- **How fast a jump is on YouTube.** That YouTube's servers send a large request slowly is what yt-dlp's code
+  says and works around (it asks for 10 MiB at a time, "to avoid throttling"); the stand-in server behaves that
+  way on purpose. The times below are against it, on this machine.
+- **A graphics card**, as before.
+
+### Jumps in a web video
+
+The player read each stream of a web video with GStreamer's HTTP source and a ring buffer, which asked the server
+for "everything from this byte on", once per jump. YouTube's video servers send such a request about as fast as
+the video plays: yt-dlp asks in pieces of 10 MiB for that reason (its YouTube extractor sets
+`http_chunk_size` to 10 MiB for every such format), and every jump of the player waited for the slow request.
+
+The stand-in server now does what YouTube's do (`?yt=KBPS`): every answer begins 80 ms late, and a request for more
+than 10 MiB, or for everything from a place on, comes at KBPS (here 8 Mbit/s for a 6 Mbit/s video). The time from a
+jump to the picture of the new place (`seek`, then `waitshown`), on a two-minute 720p video with its sound apart:
+
+| | jumps to 60, 30, 95, 97, 41 and 110 s |
+|---|---|
+| 2.17.0, twice | 1.0 to 1.5 s each (1.3, 1.4, 1.3, 1.3, 1.0, 1.4; 1.3, 1.4, 1.3, 1.4, 1.1, 1.5) |
+| **2.18.0**, twice | **0.1 to 0.2 s** each |
+| both, from a server that sends at full speed | 0.1 to 0.2 s |
+
+The player has its own reader now (`RangeSource.cpp`): it asks in pieces of the size yt-dlp names (10 MiB when it
+names none), keeps what it read (64 MB of the picture's stream, 8 MB of the sound's) and reads up to 24 MB ahead;
+the demuxer reads from it where it likes. A jump back to a place read before needs no request at all (the 90 MB test
+file: 4, 1, 5 and 0 requests for its four jumps). The network work is done by Qt, in one thread for all readers,
+which also reuses the connection (HTTP/2 where the server speaks it).
+
+Everything the 2.17 web-video suite checks still holds with the new reader (86 checks, the picture and the sound of
+the place asked for after every jump, the network away for six seconds, addresses that run out, headers and
+cookies, ...); one check was changed: a jump into what is kept now needs no request, where 2.17 needed at least one.
+Also run: the 2.17 case of decoders connected 150 ms late (in 2.17 that hung every opening without its fix): with a
+reader that is only ever read from, nothing is pushed into a pad before it is connected at all.
+
+### Browsing YouTube
+
+`tests/automation/browse.txt`, judged by `scripts/check-browse.py` (40 checks) against what the stand-in site
+holds, with no channels followed at the start:
+
+- **Following:** a channel by its link (`…/@retrotubelab`: its page, its eight videos, its name and picture, and
+  it is followed); Google Takeout's `subscriptions.csv` (three new channels; the one followed already and a line that
+  is no channel are not added; the unit test reads a list with a byte-order mark, quotes and a header in French).
+- **New:** the 23 videos of the four channels followed, newest first, twelve to a page, in the order the site's
+  dates give; the "shorts" in the feeds left out; the channel without a feed read through yt-dlp instead (15
+  videos asked for); on the screen, all twelve tiles with their pictures, and the chosen one glowing (measured just
+  outside the enlarged tile).
+- **Moving about:** arrow keys, past the edge to the next and the previous page, Page Down.
+- **A video's page:** its title and buttons; *Watch later* there and with **W**; *Watch later* lists them, the last
+  first.
+- **Search:** what the site found, in its order, with pictures; a slow answer (three seconds) shows empty,
+  shimmering places rather than the last search's videos; 36 at most, three pages; a refusal (HTTP 429) shows
+  yt-dlp's words.
+- **yt-dlp:** a newer release is known (asked once a day; here of the stand-in, as GitHub's API answers), the tray
+  says so, and **U** fetches the player's own copy, and the list is asked for again.
+- **Controller** (SDL's virtual controller): RB / LB change sections, X puts the chosen video aside, the Guide
+  button opens the menu and B closes it.
+- **Playing:** *Play* closes the menu and the video plays; it is in the history with the channel, its id and the
+  picture the menu showed; opened again, the video waits, and its page offers *Resume from 0:42* and *Start over*;
+  closed, it plays on.
+- **What was asked:** searches ask yt-dlp for 36 as a flat list with dates; channel pages for 48; the feeds of the
+  channels followed, and no others; each picture once (33 requests for 33 pictures); nothing else of the site.
+
+Unit tests (`ctest -R online`, 17 new checks): a feed as YouTube writes it (the 16:9 picture instead of the
+480×360 one, a short known by its link, entities, views); a search's answer (videos only, not lists or channels;
+the smallest 16:9 picture at least 300 wide, never WebP; a live one; YouTube's own picture when none is named); a
+channel's page (its name and picture); yt-dlp's errors; Google Takeout's list; an item written and read back.
+
+**Windows** (GitHub's build machine, software OpenGL): three channels from a Takeout list, their 20 videos from the
+stand-in's feeds, newest first, with 12 pictures fetched and drawn; a video's page and back out
+(`packaging/windows/smoke-browse.txt`). From the internet, YouTube's search through the real yt-dlp.exe: 36 found.
+
+### Full suites for 2.18.0
+
+| Run | Result |
+|---|---|
+| Native X11 | 820 passed, none failed (2 reported only: the governor on software OpenGL) |
+| Native X11, the path a graphics card takes (`CRTPLAYER_VIDEO_SURFACE=gl CRTPLAYER_FAST_PATH=never`) | 819 passed, **1 failed** (below) |
+| Native Wayland | 18 passed, none failed |
+| AppImage, X11, the system's Qt removed | 820 passed, none failed |
+| AppImage, Wayland, the system's Qt removed | 18 passed, none failed |
+| Unit tests | 11 of 11 passed (Linux), 10 of 10 (Windows) |
+| Web videos, the browser and the on-screen checks under the address and undefined-behaviour sanitizers | all passed; no findings |
+| Windows (GitHub's build machine) | everything passed: the smoke test, the on-screen checks, web videos, the browser |
+
+(820 = the 780 checks of 2.17.0 and the browser's 40.)
+
+**The one failed check** was a frame rate of the no-GPU suite in that run: the light 4K HEVC 10-bit clip on the plain
+surface at 21.8 frames a second, where 22 is asked for (30.0 in the other runs of that suite on this machine: the
+native run, the AppImage run and two more). The player is the same binary as in the runs without failures.
+
+**Earlier full runs of 2.18.0** found the faults and test problems below; those runs were stopped and run again from
+the start, with the fixes. A run of the subtitle suite in the first of them did not end (the side-loaded `.srt`
+video: no line was drawn, and the player did not quit when the script ended); seven more runs of it, alone and beside
+other work, and the two full runs after it passed. Nothing of 2.18 touches subtitles; it is noted, and not explained.
+
+**Found on the way:**
+
+- **A jump that met an address which had run out went on at the wrong place.** With the video paused half a minute
+  and then sent to 40 s, the jump's own request was the one refused; the jump failed with it, and the player asked
+  yt-dlp for new addresses and went on where the picture had stood (at 90 s) instead of at 40 s. (Seen once, on the
+  graphics card's path; with GStreamer's reader before 2.18 the refusal came at another moment.) Then, in the full run
+  after the first fix, the same case at 90 s went on from the start (0 s): the jump had "landed" just before the
+  refusal arrived, and the player asked where it was only after stopping the pipeline, which forgets it. Reproduced
+  in two of three runs of that case alone. The player now remembers where a jump was going until it lands, and takes
+  the place before stopping the pipeline: four runs of the case, each on at 90 s. (Jellyfin's retry after a failure
+  uses the same now.)
+
+- The controller did nothing in the menu when the window was not the active one (as in Game Mode, and in the tests):
+  its keys went to the window's focus, which there is none of. The menu now takes them whenever it is open.
+- Three tests' timing (no change to the player): the Cable TV step that turns subtitles back on looked while the
+  channel's programme was starting over (it now looks twice, 1.5 s apart); a check of the sound heard looked within a
+  second of where the tone starts (it now keeps a second away, as the sound is measured over the last moment); and
+  the hard 4K clip was measured with the governor in the first seconds after opening and without it later, from a
+  running start (the first run after opening measured 7.5 to 24 frames a second, with either version, from run to
+  run): it is measured with the governor from the same footing too now.
+- On Windows, one run of the web-video smoke test failed: the 20-second clip had ended before the player reported it
+  playing. A sample of the main thread showed why: the first picture drawn with a look waits for software OpenGL to
+  build the look's shader (seconds on llvmpipe; the same in 2.17), and the video plays on meanwhile. The clip is a
+  minute long now. Not a fault of the player, but of a test on a slow machine without a graphics card.
 
 ## 2.17.0: videos from web sites (yt-dlp), and 4K HEVC 10-bit without a graphics card
 

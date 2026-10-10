@@ -11,6 +11,12 @@ waitonline idle true 180000
 wait 2500
 report page
 closedialogs
+browse open
+browse search big buck bunny
+waitbrowse loading false 120000
+wait 3000
+report search
+browse close
 openlink https://www.youtube.com/watch?v=aqz-KE-bpKQ
 waitonline idle true 180000
 wait 4000
