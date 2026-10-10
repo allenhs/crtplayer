@@ -46,7 +46,8 @@ public:
     // For the tests: the same as pressing a key (by name: "Left", "Return", "Escape", "W", ...).
     bool pressKey(const QString& name);
     bool chooseSection(const QString& name);
-    QWidget* keyTarget();                        // where a key goes (the line being typed into, or the menu)
+    QWidget* keyTarget();
+    void resetPaintStats() { m_paints = 0; m_paintMsTotal = m_paintMsMax = 0; }                        // where a key goes (the line being typed into, or the menu)
     void searchFor(const QString& text);
     bool typeText(const QString& text);          // into the line shown (a search, a channel's link), and Enter
     int importFrom(const QString& path);         // Google Takeout's subscriptions.csv: how many were new (-1: none found)
@@ -102,6 +103,8 @@ private:
     void closeDetail();
     void activate();
     void openChannel(const WebChannel& c);
+    void leaveChannel();
+    QString backLabel() const;
     void startInput(bool channelLink);
     void finishInput();
     void importTakeout();
@@ -117,6 +120,7 @@ private:
     // ---- layout (all in pixels of this widget)
     struct Layout {
         double s = 1;
+        QRectF back;   // a channel's page: back to where it was opened from
         QRectF header, title, tabsRow, grid, tray, clock, trayLeft, trayRight, arrowLeft, arrowRight, dots, banner, action, input;
         QList<QRectF> tabs;
         QList<QRectF> cells;   // the twelve places of a page
@@ -133,9 +137,18 @@ private:
     void paintTile(QPainter& p, const Tile& t, const QRectF& r, double lift, bool focused, int index);
     void paintScreenGlass(QPainter& p, const QPainterPath& screen, const QRectF& r);
     void paintTray(QPainter& p);
+    void paintTrayBand(QPainter& p);
+    void paintTrayFront(QPainter& p, double hump);
+    QPixmap m_trayPicture;
     void paintDetail(QPainter& p);
     void paintMessage(QPainter& p);
     QPixmap thumb(const QString& url, const QSize& size);
+    double tileMargin() const;
+    QString tileKey(const Tile& t, const QSizeF& cell, bool lifted) const;
+    const QPixmap& tilePicture(const Tile& t, const QSizeF& cell, bool lifted);
+    void warmTiles();
+    QHash<QString, QPixmap> m_tiles;
+    bool m_warmQueued = false;
     QPixmap avatar(const QString& url, int size);
     void want(const QString& url);
     QFont font(double px, int weight = 400) const;
@@ -172,5 +185,7 @@ private:
     QTimer m_clock, m_shimmer, m_noteTimer;
     QElapsedTimer m_shimmerClock;
     int m_hover = -1;
+    int m_wheel = 0;
     int m_paints = 0;
+    double m_paintMsTotal = 0, m_paintMsMax = 0;
 };

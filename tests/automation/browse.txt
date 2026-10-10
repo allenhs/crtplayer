@@ -25,8 +25,12 @@ waitbrowse channel UCretrotubelabxxxxxxxxxx 5000
 wait 800
 grabwindow @O@/@N@/channel-page.png
 report b:channel-added
-# back: the channel is among the followed
-browse key Escape
+# back (2.18.1: its "‹ Channels" button, up from its first row of videos): the channel is among the followed
+browse key Up
+wait 300
+grabwindow @O@/@N@/channel-back.png
+report b:channel-back
+browse key Return
 wait 300
 report b:channels-one
 # -- Google Takeout's list: three more (one of them already followed, one line that is no channel)
@@ -51,6 +55,19 @@ wait 400
 report b:back-left
 browse key Home
 wait 300
+# (2.18.1) how long a picture of the menu takes to paint, through pages and from tile to tile
+browse resetpaint
+browse key PageDown
+wait 450
+browse key PageUp
+wait 450
+browse key PageDown
+wait 450
+browse key PageUp
+wait 450
+browse key Right Right Right Down Left Up Left Left
+wait 400
+report b:paint
 # -- a video's page: what it is, and its buttons
 browse key Return
 wait 700

@@ -1949,6 +1949,9 @@ description, and the buttons **Play** (or **Resume from …** and **Start over**
 | R | | Read the section again |
 | U | | Fetch the newest yt-dlp |
 
+A channel's page has a **‹ Channels** button left of its name (up from its first row of videos, or click it), as
+well as **Esc** / **B**.
+
 The mouse works too: point at a tile to choose it, click to open, right-click to go back.
 
 **Your YouTube subscriptions** (without signing in): in Google Takeout

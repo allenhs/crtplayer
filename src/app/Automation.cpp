@@ -739,6 +739,7 @@ void Automation::next()
         else if (what == "search") m_w->browseScreen()->searchFor(QStringList(a.mid(2)).join(QLatin1Char(' ')));
         else if (what == "type") ok = m_w->browseScreen()->typeText(QStringList(a.mid(2)).join(QLatin1Char(' ')));   // into the line, then Enter
         else if (what == "import") ok = m_w->browseScreen()->importFrom(a.value(2)) >= 0;                          // Google Takeout's list
+        else if (what == "resetpaint") m_w->browseScreen()->resetPaintStats();                                   // (measuring)
         else ok = false;
         if (!ok) ++m_failures;
         log(line, {{"ok", ok}});
